@@ -24,7 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           # The pioarduino ESP32 platform requires Python 3.10-3.13; '3.x' resolves
           # to 3.14 on current runners and the platform hard-rejects it.
