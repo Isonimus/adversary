@@ -31,7 +31,8 @@
 ├── lib/                   # External libraries
 ├── data/                  # SPIFFS data files
 ├── platformio.ini         # Build configuration
-├── EPIC.md               # Project epic and roadmap
+├── adr/                   # Architecture decision records
+├── slices/                # Feature slice specs
 └── CLAUDE.md             # This file
 ```
 
@@ -559,7 +560,7 @@ constexpr const char* SD_BASE_PATH = "/adversary";
 
 ## 🔄 Development Workflow
 
-1. **Pick a task** from EPIC.md sprint backlog
+1. **Pick a task** from the issue tracker or the `slices/` backlog
 2. **Create branch**: `feature/<name>` or `fix/<name>`
 3. **Write tests first** (TDD encouraged)
 4. **Implement feature** following code standards
