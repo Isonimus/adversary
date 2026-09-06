@@ -1,0 +1,32 @@
+name: Feature request
+description: Suggest an idea or capability
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / motivation
+      description: What are you trying to do that is hard or impossible today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: dropdown
+    id: hardware
+    attributes:
+      label: Hardware scope
+      multiple: true
+      options:
+        - Cardputer (ESP32-S3)
+        - M5StickC Plus2
+        - Expansion cap (CC1101 / NRF24 / LoRa-GNSS)
+        - Grove module
+        - Not hardware-specific

@@ -1,0 +1,54 @@
+name: Bug report
+description: Report a defect in the firmware
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        For a security-sensitive issue in the firmware, use SECURITY.md
+        (private reporting) instead of a public bug report.
+  - type: input
+    id: version
+    attributes:
+      label: Firmware version / commit
+      placeholder: "0.1.0-alpha, or the commit SHA you built"
+    validations:
+      required: true
+  - type: dropdown
+    id: device
+    attributes:
+      label: Device
+      options:
+        - M5Stack Cardputer ADV (ESP32-S3)
+        - M5Stack Cardputer original / StampS3 (ESP32-S3)
+        - M5StickC Plus2 (ESP32-PICO)
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: serial
+    attributes:
+      label: Serial log (optional)
+      description: "Output of `pio device monitor -b 115200` around the failure."
+      render: shell
+  - type: input
+    id: sd
+    attributes:
+      label: SD card (size / format), if relevant
+      placeholder: "e.g. 16GB FAT32"

@@ -1,0 +1,10 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability (in the firmware)
+    url: https://github.com/Isonimus/adversary/security/advisories/new
+    about: >-
+      Report privately via GitHub Security Advisories. See SECURITY.md. Do not
+      open a public issue for a firmware vulnerability.
+  - name: Legal / acceptable use
+    url: https://github.com/Isonimus/adversary/blob/main/DISCLAIMER.md
+    about: This is red-team tooling — authorized testing and research only.

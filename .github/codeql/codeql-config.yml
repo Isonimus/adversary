@@ -1,0 +1,10 @@
+name: "CodeQL config"
+
+# Analyse our own firmware sources only. lib/ holds the vendored bruce libraries
+# (precompiled, not ours to patch) and test/ holds host mocks — neither is code we
+# would fix in response to an alert, so scanning them is only noise.
+paths:
+  - src
+paths-ignore:
+  - lib
+  - test

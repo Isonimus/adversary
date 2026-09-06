@@ -1,0 +1,11 @@
+version: 2
+updates:
+  # GitHub Actions is the only ecosystem Dependabot can track here. The PlatformIO
+  # platform and libraries are pinned in platformio.ini, which Dependabot does not
+  # parse, and there is no pip manifest (PlatformIO is installed ad hoc in CI). A pip
+  # or platformio block would have nothing to update, so it is deliberately omitted
+  # rather than shipped as dead config.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

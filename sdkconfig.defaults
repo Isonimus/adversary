@@ -1,0 +1,14 @@
+# Enable LWIP IP forwarding and NAT for traffic routing
+# Required for Evil Twin and Karma AP traffic routing modes
+
+# Enable IP forwarding between interfaces (STA <-> AP)
+CONFIG_LWIP_IP_FORWARD=y
+
+# Enable NAT (Network Address Translation)
+CONFIG_LWIP_IPV4_NAPT=y
+
+# Enable L2/L3 packet copy (required for forwarding)
+CONFIG_LWIP_L2_TO_L3_COPY=y
+
+# Increase NAPT table size for better performance
+CONFIG_LWIP_NAPT_MAX_TABLE_SIZE=512

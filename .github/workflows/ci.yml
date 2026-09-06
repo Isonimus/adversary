@@ -1,0 +1,74 @@
+name: CI
+
+# Build every target and run the native unit suite on each change, so a broken
+# compile or a failing test is caught automatically. See slices/0010.
+on:
+  push:
+  pull_request:
+
+# Only the latest push to a given ref is worth building; cancel superseded runs.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: ${{ matrix.env }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - env: native
+            cmd: pio test -e native
+          - env: cardputer
+            cmd: pio run -e cardputer
+          - env: m5stick
+            cmd: pio run -e m5stick
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      # The pioarduino platform, the bruce Arduino-libs bundle and the Xtensa
+      # toolchain are large release-zip downloads; cache them per leg. Keyed on
+      # platformio.ini so the cache invalidates when platform/lib/env defs change.
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: pio-${{ runner.os }}-${{ matrix.env }}-${{ hashFiles('platformio.ini') }}
+          restore-keys: |
+            pio-${{ runner.os }}-${{ matrix.env }}-
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: ${{ matrix.cmd }}
+        run: ${{ matrix.cmd }}
+
+  # cppcheck is a separate job, not a matrix leg: it needs an apt install and
+  # different steps, which would contort the env->cmd matrix above. It gates on
+  # cppcheck's default `error` severity — genuine bugs (null deref, buffer
+  # overrun, use-after-free), the low-false-positive class — over our own src/
+  # only (lib/ is vendored). Broader warning/style triage is tracked in the
+  # ledger. False positives are handled with in-source `cppcheck-suppress`
+  # comments, not by loosening the gate. See slices/0011.
+  cppcheck:
+    name: cppcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cppcheck
+        run: sudo apt-get update && sudo apt-get install -y cppcheck
+
+      - name: Run cppcheck
+        run: >
+          cppcheck --std=c++17 --language=c++ --error-exitcode=1
+          --inline-suppr --suppress=missingIncludeSystem
+          -I src src/

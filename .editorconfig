@@ -1,0 +1,30 @@
+# EditorConfig — consistent whitespace across editors. https://editorconfig.org
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+# C/C++ firmware sources — 4-space indent (matches the code standards in CLAUDE.md).
+[*.{c,cpp,h,hpp,ino}]
+indent_size = 4
+
+# Python build scripts.
+[*.py]
+indent_size = 4
+
+# YAML and JSON — 2-space is the ecosystem norm.
+[*.{yml,yaml,json}]
+indent_size = 2
+
+# Markdown — trailing whitespace is significant (two-space hard line breaks).
+[*.md]
+trim_trailing_whitespace = false
+
+# Makefiles require real tabs.
+[Makefile]
+indent_style = tab

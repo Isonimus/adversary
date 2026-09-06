@@ -1,0 +1,59 @@
+name: CodeQL
+
+# Semantic security analysis of our C/C++ firmware sources. Findings surface as
+# Code Scanning alerts in the Security tab. See slices/0011.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '27 4 * * 1'  # weekly, Monday 04:27 UTC
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze C/C++
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      # CodeQL for c-cpp traces a real compilation, so build the primary firmware
+      # between init and analyze — autobuild cannot drive PlatformIO. Cache the
+      # platform/toolchain the same way ci.yml does.
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: pio-${{ runner.os }}-codeql-${{ hashFiles('platformio.ini') }}
+          restore-keys: |
+            pio-${{ runner.os }}-codeql-
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: c-cpp
+          config-file: ./.github/codeql/codeql-config.yml
+
+      - name: Build firmware (cardputer)
+        run: pio run -e cardputer
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:c-cpp"

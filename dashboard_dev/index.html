@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Adversary | Dashboard</title>
+    <!-- Favicon placeholder -->
+    <link rel="icon"
+        href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📡</text></svg>">
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="index.css">
+</head>
+
+<body>
+
+    <header>
+        <div class="logo-area">
+            <button id="menu-toggle" aria-label="Toggle Menu">☰</button>
+            <div class="logo">Adversary</div>
+        </div>
+        <div id="connection-status" class="stat-desc" style="color: var(--accent-green)">Connected</div>
+    </header>
+
+    <div class="app-container">
+        <aside>
+            <nav>
+                <ul id="main-nav">
+                    <li data-view="dashboard" class="active">
+                        <span>📊 Dashboard</span>
+                    </li>
+                    <li data-view="handshakes">
+                        <span>🛰️ Handshakes</span>
+                    </li>
+                    <li data-view="captures">
+                        <span>📂 Captures</span>
+                    </li>
+                    <li data-view="wardriving">
+                        <span>🛣️ Wardriving</span>
+                    </li>
+                    <li data-view="settings">
+                        <span>⚙️ Settings</span>
+                    </li>
+                </ul>
+            </nav>
+        </aside>
+
+        <main>
+            <!-- Dashboard View -->
+            <section id="dashboard" class="view active">
+                <div class="grid">
+                    <div class="card">
+                        <h3>Uptime</h3>
+                        <div id="uptime-val" class="stat-value">0s</div>
+                        <div class="stat-desc">System heartbeat active</div>
+                    </div>
+                    <div class="card">
+                        <h3>Memory (Heap)</h3>
+                        <div id="heap-val" class="stat-value">--</div>
+                        <div class="stat-desc">Internal SRAM usage</div>
+                    </div>
+                    <div class="card">
+                        <h3>WiFi Clients</h3>
+                        <div id="clients-val" class="stat-value">0</div>
+                        <div class="stat-desc">Connected to Access Point</div>
+                    </div>
+                    <div class="card">
+                        <h3>SD Card Storage</h3>
+                        <div id="sd-usage-text" class="stat-value">0%</div>
+                        <div class="progress-container">
+                            <div id="sd-progress" class="progress-bar"></div>
+                        </div>
+                        <div id="sd-info-text" class="stat-desc">-- MB Free</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Handshakes View -->
+            <section id="handshakes" class="view">
+                <div class="card">
+                    <h3>Captured Handshakes</h3>
+                    <p class="stat-desc">Select a handshake to view location and metadata.</p>
+                    <table class="file-list">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Size</th>
+                                <th>Status</th>
+                                <th>GPS</th>
+                            </tr>
+                        </thead>
+                        <tbody id="handshake-list">
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Captures View -->
+            <section id="captures" class="view">
+                <div class="card">
+                    <h3>Session Captures</h3>
+                    <table class="file-list">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Size</th>
+                                <th>Type</th>
+                            </tr>
+                        </thead>
+                        <tbody id="capture-list">
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Wardriving View -->
+            <section id="wardriving" class="view">
+                <div class="card">
+                    <h3>Wardriving Sessions</h3>
+                    <p class="stat-desc">Select a session to view captured networks.</p>
+                    <table class="file-list">
+                        <thead>
+                            <tr>
+                                <th>Session</th>
+                                <th>Size</th>
+                            </tr>
+                        </thead>
+                        <tbody id="wardriving-list">
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Settings View -->
+            <section id="settings" class="view">
+                <div class="card" style="max-width: 600px;">
+                    <h3>System Configuration</h3>
+                    <form id="settings-form">
+                        <div class="form-group">
+                            <label>Device Name</label>
+                            <input type="text" name="deviceName" placeholder="ADV-DEVICE">
+                        </div>
+                        <div class="form-group">
+                            <label>Dashboard Username</label>
+                            <input type="text" name="dashboardUsername">
+                        </div>
+                        <div class="form-group">
+                            <label>New Password (Optional)</label>
+                            <input type="password" name="dashboardPassword" placeholder="Leave blank to keep current">
+                        </div>
+                        <div class="form-group" style="display: flex; align-items: center; gap: 10px;">
+                            <input type="checkbox" name="dashboardAuthEnabled" id="auth-enabled">
+                            <label for="auth-enabled" style="margin: 0;">Enable HTTP Basic Auth</label>
+                        </div>
+                        <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 2rem 0;">
+                        <div class="form-group">
+                            <label>Theme</label>
+                            <select name="theme"
+                                style="width: 100%; padding: 0.8rem; background: #222; border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary);">
+                                <option value="0">🔴 Red Team</option>
+                                <option value="1">🟢 Matrix</option>
+                                <option value="2">🔴 T-800</option>
+                                <option value="3">🟢 Fallout</option>
+                                <option value="4">💜 Cyberpunk</option>
+                                <option value="5">🟠 M5Stick</option>
+                            </select>
+                        </div>
+                        <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 2rem 0;">
+                        <div class="form-group">
+                            <label>WPA-SEC API Key</label>
+                            <input type="text" name="wpasecKey" placeholder="32-char hex (optional)">
+                        </div>
+                        <div class="form-group">
+                            <label>WiGLE API Key</label>
+                            <input type="text" name="wigleKey" placeholder="pre-encoded Base64 (optional)">
+                        </div>
+                        <div class="form-group">
+                            <label>pwncrack API Key</label>
+                            <input type="text" name="pwncrackKey" placeholder="pwncrack.org key (optional)">
+                        </div>
+                        <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 2rem 0;">
+                        <button type="submit" class="btn-primary">Save Configuration</button>
+                    </form>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Handshake Detail Modal -->
+    <div id="handshake-modal" class="modal-overlay">
+        <div class="modal-content">
+            <button class="btn-close">&times;</button>
+            <h2 id="modal-title">Handshake Details</h2>
+            <div id="modal-info" style="margin-top: 1rem; color: var(--text-secondary); line-height: 1.8;">
+                <!-- Populated by JS -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Wardriving Detail Modal -->
+    <div id="wardriving-modal" class="modal-overlay">
+        <div class="modal-content" style="max-width: 95%; width: 1000px;">
+            <button class="btn-close" id="wd-modal-close">&times;</button>
+            <h2 id="wd-modal-title">Wardriving Session</h2>
+            <div id="wd-modal-info" style="margin-top: 1rem; overflow-x: auto;">
+                <!-- Populated by JS -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Dashboard JS -->
+    <script src="dashboard.js"></script>
+</body>
+
+</html>
