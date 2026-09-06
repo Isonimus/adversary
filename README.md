@@ -34,8 +34,9 @@ Adversary is for **educational and research purposes only.** Unauthorized access
 
 ## 🔍 Features
 
-The main menu is a carousel with six sections: **Wireless**, **BLE**, **Infrared**,
-**RFID**, **HID**, plus **Server** (dashboard), **Settings**, and **About**.
+The main menu is a carousel: **Wireless**, **BLE**, **Infrared**, **RFID**, **HID**,
+and **Radio** (Sub-GHz / 2.4 GHz, shown when the multi-radio cap is attached), plus
+**Server** (dashboard), **Settings**, and **About**.
 
 ### 📡 Wireless (WiFi)
 - **Scanner** - Discover networks with security type, signal strength, and channel info; context action menu per network.
@@ -61,8 +62,16 @@ The main menu is a carousel with six sections: **Wireless**, **BLE**, **Infrared
 - **Mouse Jiggler** - Periodic small mouse movements to defeat idle-lock/screensaver timers.
 - Not available on M5StickC Plus2 (no native USB-OTG).
 
-### 📟 Infrared & RFID
+### 📻 Radio — Sub-GHz & 2.4 GHz (multi-radio cap)
+Requires the CC1101/NRF24 expansion cap; the **Radio** entry is greyed out when no cap is detected.
+- **Sub-GHz OOK Capture & Replay** - CC1101-based raw OOK capture and replay across 315 / 433.92 / 868.35 / 915 MHz (e.g. simple remotes and sensors), with a pulse-train preview of the captured signal.
+- **2.4 GHz Spectrum Analyzer** - NRF24-based channel sweep (received-power detection) across the 2.4 GHz band for activity/interference mapping.
+
+### 📟 Infrared
 - **IR TV-B-Gone** - High-power universal IR blast to turn off TVs (NA/EU code databases, arrow-key region toggle).
+- **IR Record & Replay** - Learn a remote's IR frame (NEC/RC5/raw — decoded or raw timing train) via the cap's IR receiver, persist it to SD, and replay it, with a pulse preview of the capture.
+
+### 🔖 RFID
 - **RFID Audit** - PN532-based NFC/RFID tag reading and dumping.
 
 ### ☁️ Cloud Cracking & Sync
@@ -176,12 +185,14 @@ Main Carousel
 │   ├── Identity Spoof     - BLE address/identity spoofing
 │   └── BLE Spam           - Pairing notification flooding
 ├── Infrared
-│   └── TV-B-Gone          - Universal IR power-off blast
+│   ├── TV-B-Gone          - Universal IR power-off blast
+│   └── Record / Replay    - Learn & replay an IR remote (requires cap IR RX)
 ├── RFID
 │   └── RFID Dashboard     - NFC/RFID tag reading (requires PN532 module)
 ├── HID
 │   ├── BadUSB (HID)       - USB keystroke injection (Cardputer only)
 │   └── Mouse Jiggler      - Anti-idle-lock mouse movement (Cardputer only)
+├── Radio                  - Sub-GHz OOK capture/replay + 2.4 GHz analyzer (requires multi-radio cap)
 ├── Server                 - Web dashboard (served from SD card)
 ├── Settings               - Configuration options
 └── About
