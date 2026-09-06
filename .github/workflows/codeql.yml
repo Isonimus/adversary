@@ -26,7 +26,9 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.x'
+          # The pioarduino ESP32 platform requires Python 3.10-3.13; '3.x' resolves
+          # to 3.14 on current runners and the platform hard-rejects it.
+          python-version: '3.13'
 
       # CodeQL for c-cpp traces a real compilation, so build the primary firmware
       # between init and analyze — autobuild cannot drive PlatformIO. Cache the
