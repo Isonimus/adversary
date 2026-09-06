@@ -38,7 +38,7 @@ jobs:
       # toolchain are large release-zip downloads; cache them per leg. Keyed on
       # platformio.ini so the cache invalidates when platform/lib/env defs change.
       - name: Cache PlatformIO
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.platformio
