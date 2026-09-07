@@ -186,7 +186,7 @@ bool TimeManager::loadFromSD() {
         return false;
     }
 
-    StaticJsonDocument<256> doc;
+    JsonDocument doc;
     DeserializationError error = deserializeJson(doc, file);
     file.close();
 
@@ -235,7 +235,7 @@ bool TimeManager::saveToSD() {
         return false;
     }
 
-    StaticJsonDocument<256> doc;
+    JsonDocument doc;
     doc["epoch"] = now();
     doc["source"] = getSourceName();
     doc["savedAt"] = time(nullptr);

@@ -16,7 +16,6 @@
 #ifdef ESP32
 #include <WiFiClientSecure.h>
 #include <SD.h>
-#include <ArduinoJson.h>
 #endif
 
 namespace adversary {

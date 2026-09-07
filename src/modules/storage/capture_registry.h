@@ -29,7 +29,6 @@ enum class WpaSecStatus : uint8_t;
 #ifdef ESP32
 #include <Arduino.h>
 #include <SD.h>
-#include <ArduinoJson.h>
 #include "config/config.h"
 #include "manifest_store.h"
 #include "modules/system/time_manager.h"

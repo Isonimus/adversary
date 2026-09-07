@@ -4,7 +4,6 @@
  */
 
 #include "rfid_audit.h"
-#include <ArduinoJson.h>
 #include <SD.h>
 
 namespace adversary {

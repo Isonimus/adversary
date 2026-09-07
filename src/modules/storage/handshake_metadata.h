@@ -98,7 +98,7 @@ inline bool saveHandshakeMetadata(const char* pcapPath, const HandshakeMetadata&
     strcpy(ext, ".json");
     
     // Create JSON document
-    StaticJsonDocument<512> doc;
+    JsonDocument doc;
     doc["version"] = metadata.version;
     doc["ssid"] = metadata.ssid;
     
@@ -126,7 +126,7 @@ inline bool saveHandshakeMetadata(const char* pcapPath, const HandshakeMetadata&
     
     // GPS geolocation (only if available)
     if (metadata.hasGPS) {
-        JsonObject gps = doc.createNestedObject("gps");
+        JsonObject gps = doc["gps"].to<JsonObject>();
         gps["latitude"] = metadata.latitude;
         gps["longitude"] = metadata.longitude;
         gps["altitude"] = metadata.altitude;
@@ -175,18 +175,18 @@ inline bool loadHandshakeMetadata(const char* pcapPath, HandshakeMetadata& metad
         return false;  // No metadata file
     }
     
-    // Check heap before parsing - skip if too low to prevent NoMemory errors
+    // Check heap before parsing - the elastic document grows onto the heap as it
+    // ingests the file, so refuse the parse when there is no headroom to grow into.
     size_t freeHeap = ESP.getFreeHeap();
-    if (freeHeap < 10000) {  // StaticJsonDocument<512> needs ~2-3KB overhead
+    if (freeHeap < 10000) {  // metadata parse needs a few KB of heap to grow into
         file.close();
         Serial.printf("[Metadata] Skipping parse - low heap: %u bytes (file: %s)\n", freeHeap, pcapPath);
         return false;  // Skip metadata loading when heap is critically low
     }
-    
+
     Serial.printf("[Metadata] Loading %s (heap: %u)\n", jsonPath, freeHeap);
-    
-    // Parse JSON (1024 bytes for metadata with GPS data)
-    StaticJsonDocument<1024> doc;
+
+    JsonDocument doc;
     DeserializationError error = deserializeJson(doc, file);
     file.close();
     

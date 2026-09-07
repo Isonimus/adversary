@@ -387,11 +387,11 @@ inline bool SettingsManager::load() {
         return createDefaultConfig();
     }
     
-    // Parse JSON. The config grew (saved creds + dashboard auth + 3 API keys), so
-    // a fixed 2048 doc could silently overflow on save (dropping the last-added
-    // members, e.g. the pwncrack key) and fail to parse on load. A generous heap
-    // doc keeps the whole config intact.
-    DynamicJsonDocument doc(8192);
+    // Parse JSON. The config grew (saved creds + dashboard auth + 3 API keys); a
+    // fixed doc once silently overflowed on save (dropping the last-added members,
+    // e.g. the pwncrack key) and failed to parse on load. The elastic document
+    // sizes itself to the whole config, so that truncation can no longer happen.
+    JsonDocument doc;
     DeserializationError error = deserializeJson(doc, file);
     file.close();
 
@@ -544,14 +544,14 @@ inline bool SettingsManager::save() {
         return false;
     }
     
-    // Build JSON. Use a generous heap doc: a fixed 2048 stack doc silently
-    // dropped later sections (system/display/api) once the config grew, which
-    // then loaded as defaults (lost device name / theme).
-    DynamicJsonDocument doc(8192);
+    // Build JSON. A fixed 2048 stack doc once silently dropped later sections
+    // (system/display/api) once the config grew, which then loaded as defaults
+    // (lost device name / theme). The elastic document grows to fit every section.
+    JsonDocument doc;
     doc["version"] = settings_.version;
-    
+
     // Wireless
-    JsonObject wireless = doc.createNestedObject("wireless");
+    JsonObject wireless = doc["wireless"].to<JsonObject>();
     wireless["karmaChannel"] = settings_.wireless.karmaChannel;
     wireless["karmaAutoRotate"] = settings_.wireless.karmaAutoRotate;
     wireless["karmaRotationSpeed"] = settings_.wireless.karmaRotationSpeed;
@@ -576,23 +576,23 @@ inline bool SettingsManager::save() {
 
     // Save WiFi credentials
     if (!settings_.wireless.savedCredentials.empty()) {
-        JsonArray credentials = wireless.createNestedArray("savedWiFiCredentials");
+        JsonArray credentials = wireless["savedWiFiCredentials"].to<JsonArray>();
         for (const auto& cred : settings_.wireless.savedCredentials) {
-            JsonObject credObj = credentials.createNestedObject();
+            JsonObject credObj = credentials.add<JsonObject>();
             credObj["ssid"] = cred.ssid;
             credObj["password"] = cred.password;
         }
     }
     
     // Display
-    JsonObject display = doc.createNestedObject("display");
+    JsonObject display = doc["display"].to<JsonObject>();
     display["brightness"] = settings_.display.brightness;
     display["screenTimeoutSec"] = settings_.display.screenTimeoutSec;
     display["toastPosition"] = settings_.display.toastPosition;
     display["themePreset"] = settings_.display.themePreset;
     
     // System
-    JsonObject system = doc.createNestedObject("system");
+    JsonObject system = doc["system"].to<JsonObject>();
     system["deviceName"] = settings_.system.deviceName;
     system["serialDebug"] = settings_.system.serialDebug;
     system["notifySounds"] = settings_.system.notifySounds;
@@ -609,7 +609,7 @@ inline bool SettingsManager::save() {
     // API keys
     if (settings_.apiKeys.hasWpaSec() || settings_.apiKeys.hasWigle() ||
         settings_.apiKeys.hasPwncrack()) {
-        JsonObject apiKeys = doc.createNestedObject("apiKeys");
+        JsonObject apiKeys = doc["apiKeys"].to<JsonObject>();
         if (settings_.apiKeys.hasWpaSec()) {
             apiKeys["wpasec"] = settings_.apiKeys.wpasec;
         }
@@ -664,7 +664,7 @@ inline bool SettingsManager::loadWhitelist() {
         return createDefaultWhitelist();
     }
     
-    StaticJsonDocument<2048> doc;
+    JsonDocument doc;
     DeserializationError error = deserializeJson(doc, file);
     file.close();
     
@@ -723,12 +723,12 @@ inline bool SettingsManager::saveWhitelist() {
         return false;
     }
     
-    StaticJsonDocument<2048> doc;
+    JsonDocument doc;
     doc["version"] = 1;
-    JsonArray networks = doc.createNestedArray("networks");
-    
+    JsonArray networks = doc["networks"].to<JsonArray>();
+
     for (const auto& entry : whitelist_) {
-        JsonObject net = networks.createNestedObject();
+        JsonObject net = networks.add<JsonObject>();
         if (entry.hasBssid) {
             char bssidStr[18];
             utils::formatMacBytes(entry.bssid, bssidStr, sizeof(bssidStr));

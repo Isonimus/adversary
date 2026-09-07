@@ -8,7 +8,6 @@
 #include "../wifi/wifi_scanner.h"
 #include <SD.h>
 #include <Arduino.h>
-#include <ArduinoJson.h>
 #include <time.h>
 #include "../system/time_manager.h"
 

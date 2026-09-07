@@ -85,17 +85,17 @@ public:
             return 0;
         }
         
-        // Check heap before allocating DynamicJsonDocument
+        // Refuse the parse on a low-heap boot: the elastic document grows onto the
+        // heap as it ingests the file, so a ~60-entry cache still needs headroom.
         size_t freeHeap = ESP.getFreeHeap();
-        if (freeHeap < 25000) {  // Need ~25KB for safe 4KB JSON allocation
+        if (freeHeap < 25000) {  // ~25KB headroom for a ~60-entry cache parse
             file.close();
             Serial.printf("[WpaSecCache] Low heap at boot: %u bytes - skipping cache load\n", freeHeap);
             Serial.println("[WpaSecCache] Cache will be rebuilt from uploads/refreshes");
             return 0;
         }
-        
-        // Parse JSON (4KB for ~60 entries with passwords)
-        DynamicJsonDocument doc(4096);
+
+        JsonDocument doc;
         DeserializationError err = deserializeJson(doc, file);
         file.close();
         
@@ -134,7 +134,7 @@ public:
      */
     bool save() {
 #ifdef ESP32
-        DynamicJsonDocument doc(2048);
+        JsonDocument doc;
         
         for (const auto& kv : cache_) {
             JsonObject entry = doc[kv.first].to<JsonObject>();

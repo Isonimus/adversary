@@ -348,7 +348,7 @@ void ServerManager::handleApiInfo() {
     if (!checkAuth()) return;
 
 #ifdef ESP32
-    StaticJsonDocument<512> doc;
+    JsonDocument doc;
     doc["version"] = esp_ota_get_app_description()->version;
     doc["uptime"] = millis() / 1000;
     doc["heap"] = ESP.getFreeHeap();
@@ -356,13 +356,13 @@ void ServerManager::handleApiInfo() {
     doc["battery"] = -1; // Battery sense not supported on Cardputer
     
     SDCardInfo sd = SDManager::getInstance().getCardInfo();
-    JsonObject sdObj = doc.createNestedObject("sd");
+    JsonObject sdObj = doc["sd"].to<JsonObject>();
     sdObj["total"] = sd.totalBytes;
     sdObj["used"] = sd.usedBytes;
     sdObj["free"] = sd.freeBytes;
     sdObj["type"] = sd.type;
 
-    JsonObject wifi = doc.createNestedObject("wifi");
+    JsonObject wifi = doc["wifi"].to<JsonObject>();
     wifi["stations"] = WiFi.softAPgetStationNum();
     wifi["ip"] = WiFi.softAPIP().toString();
 
@@ -379,19 +379,19 @@ void ServerManager::handleApiSettings() {
 #ifdef ESP32
     if (server_->method() == HTTP_GET) {
         auto& settings = SettingsManager::getInstance().get();
-        StaticJsonDocument<1024> doc;
-        
-        JsonObject system = doc.createNestedObject("system");
+        JsonDocument doc;
+
+        JsonObject system = doc["system"].to<JsonObject>();
         system["deviceName"] = settings.system.deviceName;
         system["dashboardAuthEnabled"] = settings.system.dashboardAuthEnabled;
         system["dashboardUsername"] = settings.system.dashboardUsername;
         system["theme"] = settings.display.themePreset;
         
-        JsonObject wireless = doc.createNestedObject("wireless");
+        JsonObject wireless = doc["wireless"].to<JsonObject>();
         wireless["karmaChannel"] = settings.wireless.karmaChannel;
         wireless["bleName"] = settings.wireless.bleName;
 
-        JsonObject api = doc.createNestedObject("api");
+        JsonObject api = doc["api"].to<JsonObject>();
         api["wpasec"] = settings.apiKeys.wpasec;
         api["wigle"] = settings.apiKeys.wigle;
         api["pwncrack"] = settings.apiKeys.pwncrack;
@@ -404,7 +404,7 @@ void ServerManager::handleApiSettings() {
     else if (server_->method() == HTTP_POST) {
         if (server_->hasArg("plain")) {
             String body = server_->arg("plain");
-            StaticJsonDocument<1024> doc;
+            JsonDocument doc;
             DeserializationError error = deserializeJson(doc, body);
             
             if (error) {
@@ -483,13 +483,14 @@ void ServerManager::handleApiFilesHandshakes() {
     // (not the per-file JSON) keeps the dashboard list consistent with the device.
     const auto& summaries = CaptureRegistry::getInstance().getHandshakeSummaries();
 
-    // Size for the entry count (the old StaticJsonDocument<2048> silently
-    // truncated once there were more than ~40 handshakes).
-    DynamicJsonDocument doc(1024 + summaries.size() * 96);
+    // The list grows with every handshake; a fixed StaticJsonDocument<2048> once
+    // silently truncated it past ~40 entries. The elastic document sizes itself to
+    // the entry count, so it neither needs hand-computing nor can truncate.
+    JsonDocument doc;
     JsonArray files = doc.to<JsonArray>();
 
     for (const auto& summary : summaries) {
-        JsonObject fileObj = files.createNestedObject();
+        JsonObject fileObj = files.add<JsonObject>();
         fileObj["name"] = summary.ssid;  // SSID is our display name
         fileObj["size"] = summary.size;
         fileObj["wpaSecStatus"] = static_cast<uint8_t>(summary.wpaSecStatus);
@@ -526,7 +527,7 @@ void ServerManager::serveFiles(const char* path, const char* category, bool mini
         return;
     }
 
-    DynamicJsonDocument doc(4096);
+    JsonDocument doc;
     JsonArray files = doc.to<JsonArray>();
 
     File file = root.openNextFile();
@@ -548,7 +549,7 @@ void ServerManager::serveFiles(const char* path, const char* category, bool mini
             }
 
             if (match) {
-                JsonObject fileObj = files.createNestedObject();
+                JsonObject fileObj = files.add<JsonObject>();
                 fileObj["name"] = name;
                 fileObj["size"] = file.size();
                 
@@ -603,7 +604,7 @@ void ServerManager::handleApiHandshakeDetail() {
         return;
     }
 
-    DynamicJsonDocument doc(1024);
+    JsonDocument doc;
     doc["ssid"] = meta->ssid;
 
     char bssidStr[18];
@@ -625,7 +626,7 @@ void ServerManager::handleApiHandshakeDetail() {
     if (meta->pwncrackPassword[0]) doc["pwncrackPassword"] = meta->pwncrackPassword;
 
     if (meta->hasGPS) {
-        JsonObject gps = doc.createNestedObject("gps");
+        JsonObject gps = doc["gps"].to<JsonObject>();
         gps["latitude"] = meta->latitude;
         gps["longitude"] = meta->longitude;
         gps["altitude"] = meta->altitude;

@@ -22,7 +22,6 @@
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <SD.h>
-#include <ArduinoJson.h>
 #include "../wifi/wifi_connection.h"
 #include "../system/system_manager.h"
 #endif
