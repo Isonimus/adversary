@@ -308,7 +308,17 @@ bool EvilTwinScreen::handleInput(char key) {
                         showingSsidPopup_ = true;
                         break;
                     }
-                    case 3: configDeauth_ = true; break;
+                    case 3:
+                        // Warn on enable: deauth against the real AP is the known
+                        // stability risk in this attack (drops clients, can wedge
+                        // the softAP). Fire only on the off->on edge, not on repeat.
+                        if (!configDeauth_) {
+                            ToastManager::getInstance().show(
+                                "Deauth may destabilize the AP & drop clients",
+                                ToastType::WARNING, ToastPriority::PRIORITY_MEDIUM, 3000);
+                        }
+                        configDeauth_ = true;
+                        break;
                     case 4: if (configDeauthInterval_ < 2) configDeauthInterval_++; break;
                     case 5: configLogSD_ = true; break;
                 }
