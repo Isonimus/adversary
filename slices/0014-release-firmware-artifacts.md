@@ -143,3 +143,20 @@ command (below) and, ultimately, a real tagged run on GitHub.
 
 _To be completed once the first tag is cut and observed green; tracked as a LEDGER
 follow-up until then._
+
+## Amendment — 2026-09-07: first tagged run observed green
+
+`v0.1.0-alpha` was tagged and pushed on 2026-09-07. The Release workflow run completed
+`success` and published the three assets to the release:
+
+| Asset | Size |
+| --- | --- |
+| `adversary-cardputer-v0.1.0-alpha-app.bin` | 2,444,560 B |
+| `adversary-cardputer-v0.1.0-alpha-factory.bin` | 2,510,096 B |
+| `SHA256SUMS.txt` | 218 B |
+
+The clean-checkout CI build produced an app image ~36 KB larger than the local incremental
+build (2,444,560 vs 2,408,336 B) — expected from embedded build paths/timestamps, not a
+regression; the factory image is validated by `esptool merge-bin` inside the run. All three
+DoD scenarios hold: the assets published on the tag, the factory image is a valid flashable
+`0x0` image, and a non-tag push cuts no release.

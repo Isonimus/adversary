@@ -99,3 +99,13 @@ test asserting an unchanged screen loop bound would test nothing real.
 
 _To be completed once the post-merge CodeQL run is observed and the alert count confirmed;
 tracked as a LEDGER follow-up until then._
+
+## Amendment — 2026-09-07: first post-merge run observed green
+
+Merged to `main` as `a6e2444` and pushed on 2026-09-07. The CodeQL run on that commit
+completed `success`, and the open Code Scanning alert count dropped from **24 to 0** — the 23
+vendored-library alerts filtered out of the SARIF before upload, and the one genuine `src/`
+finding (`cpp/comparison-with-wider-type`) resolved by the `int16_t` bound. All three DoD
+scenarios hold: vendored results are dropped, the real finding is fixed and the firmware
+still builds, and the filter is by vendored path only — so a future `src/` alert would still
+surface.
