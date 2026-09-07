@@ -1684,8 +1684,10 @@ void CapturesScreen::drawCredentialView(Canvas& canvas) {
     canvas.setCursor(screenWidth - 60, HEADER_HEIGHT + 4);
     canvas.print(passwordsMasked_ ? "[MASKED]" : "[SHOWN]");
     
-    // Credential list
-    for (size_t i = 0; i < credentials_.size() && y < canvas.height() - FOOTER_HEIGHT - lineHeight; i++) {
+    // Credential list. Bottom bound as int16_t so the loop compares like-typed values
+    // (avoids the int16_t/int width mismatch) and names what was an inline expression.
+    const int16_t listBottom = canvas.height() - FOOTER_HEIGHT - lineHeight;
+    for (size_t i = 0; i < credentials_.size() && y < listBottom; i++) {
         const auto& cred = credentials_[i];
         
         // Index

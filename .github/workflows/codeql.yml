@@ -55,7 +55,34 @@ jobs:
       - name: Build firmware (cardputer)
         run: pio run -e cardputer
 
+      # Analyze, but do NOT upload yet. paths-ignore is inert for compiled languages, so
+      # CodeQL has also analyzed the vendored libraries compiled into .pio/libdeps. We
+      # strip those results by path before upload (see slices/0015).
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4
         with:
+          category: "/language:c-cpp"
+          upload: false
+          output: sarif-results
+
+      # Drop every result located under .pio/, lib/, or test/ — vendored dependencies and
+      # host mocks we don't own and won't patch. jq keeps this dependency-free (no
+      # third-party filtering action); it is null-safe, so a result without a location is
+      # kept rather than crashing the filter. Proven on synthetic SARIF in slices/0015.
+      - name: Filter vendored dependencies from results
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          for f in sarif-results/*.sarif; do
+            jq '(.runs[].results) |= map(select(
+              ((.locations[0].physicalLocation.artifactLocation.uri)? // "") as $u
+              | ($u|startswith(".pio/")) or ($u|startswith("lib/")) or ($u|startswith("test/"))
+              | not))' "$f" > "$f.tmp"
+            mv "$f.tmp" "$f"
+          done
+
+      - name: Upload filtered results
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: sarif-results
           category: "/language:c-cpp"

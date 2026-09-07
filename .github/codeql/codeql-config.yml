@@ -1,10 +1,11 @@
 name: "CodeQL config"
 
-# Analyse our own firmware sources only. lib/ holds the vendored bruce libraries
-# (precompiled, not ours to patch) and test/ holds host mocks — neither is code we
-# would fix in response to an alert, so scanning them is only noise.
-paths:
-  - src
-paths-ignore:
-  - lib
-  - test
+# NOTE: `paths` / `paths-ignore` are INERT for compiled languages (C/C++). CodeQL analyzes
+# everything compiled during the build, so the vendored libraries pulled into .pio/libdeps
+# by `pio run` are analyzed no matter what a paths filter says here — an earlier version of
+# this file set `paths: [src]` and 23 vendored alerts sailed through regardless.
+#
+# Scoping to our own sources is therefore done AFTER analysis: the "Filter vendored
+# dependencies" step in codeql.yml drops every result located under .pio/, lib/, or test/
+# from the SARIF before upload. See slices/0015. This file is kept as the pinned
+# config-file reference (and a home for future query-suite selection).
