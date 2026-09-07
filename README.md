@@ -117,14 +117,16 @@ Most features run on a bare Cardputer. These need extra hardware:
 |---------|----------|--------------|
 | Radio — Sub-GHz OOK capture/replay, 2.4 GHz analyzer | CC1101 + NRF24 multi-radio expansion cap | Top expansion header |
 | IR Record & Replay | multi-radio cap (IR receiver) — the built-in Cardputer IR emitter is transmit-only | Top expansion header |
-| Wardriving GPS coordinates | GPS module (AT6668-class) | Grove port (UART) |
+| Wardriving GPS coordinates | M5Stack GNSS/LoRa cap (onboard GPS), or a Grove-port GPS module (AT6668/ATGM336H-class NMEA) | Expansion header, or Grove port (UART) |
 | RFID Audit | MFRC522 NFC/RFID reader (13.56 MHz, I2C) | Grove port (I2C) |
 | BadUSB / Mouse Jiggler | none — native USB-OTG | Cardputer only (no external module) |
 
 > [!IMPORTANT]
-> **The Grove port is shared.** The GPS module (UART) and the RFID reader (I2C) both use
-> the Cardputer's Grove pins (G1/G2) and **cannot be used at the same time** — if a GPS fix
-> is active at boot, the RFID reader is skipped.
+> **GPS source, and the RFID conflict.** GPS works either from the M5Stack **GNSS/LoRa cap**
+> (its onboard GPS — the cap's LoRa radio itself is not supported) or from a **Grove-port GPS
+> module**; the cap path takes priority when both are present. Either way, if a GPS module is
+> detected at boot the **RFID reader is disabled** for that session — and a Grove-port GPS
+> additionally shares the reader's Grove pins (G1/G2).
 
 Everything else — WiFi, BLE, IR TV-B-Gone (built-in emitter), HID, Server — needs no
 external hardware.
