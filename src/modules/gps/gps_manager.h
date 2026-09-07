@@ -33,6 +33,26 @@ namespace adversary {
 
 namespace gps { struct GPSPinSet; }  // defined in gps_config.h; needed by the boot pre-check
 
+namespace gps {
+/**
+ * @brief Fix-state edge to emit on the EventBus.
+ */
+enum class FixTransition : uint8_t { None, Acquired, Lost };
+
+/**
+ * @brief Pure decision: which fix event (if any) a validity change should emit.
+ *
+ * The one host-testable seam of the GPS_FIX_ACQUIRED/LOST wiring (mirrors
+ * gpsProbePhase). Emits Acquired on false->true, Lost on true->false, and
+ * None when the state is unchanged — so no event fires per-sentence, only on
+ * the edge. Kept pure so the truth table is pinned without linking the manager.
+ */
+inline FixTransition fixTransition(bool wasValid, bool isValidNow) {
+    if (wasValid == isValidNow) return FixTransition::None;
+    return isValidNow ? FixTransition::Acquired : FixTransition::Lost;
+}
+}  // namespace gps
+
 
 /**
  * @brief GPS Manager - Singleton for AT6668 GPS module
@@ -162,6 +182,7 @@ private:
     HardwareSerial* gpsSerial_;      ///< UART serial interface
     bool detected_;                  ///< Module detection status
     bool initialized_;               ///< Initialization status
+    bool lastFixState_;              ///< Last published fix state (edge detection for GPS_FIX_* events)
     const char* detectedChip_;       ///< Profile chip name that responded
     const char* detectedPinSet_;     ///< Pin set name that worked
     

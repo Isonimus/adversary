@@ -13,9 +13,12 @@
 #include <unity.h>
 
 #include "modules/gps/gps_probe.h"
+#include "modules/gps/gps_manager.h"
 
 using adversary::gps::gpsProbePhase;
 using adversary::gps::ProbePhase;
+using adversary::gps::fixTransition;
+using adversary::gps::FixTransition;
 
 namespace {
 constexpr uint32_t WINDOW_MS = 1200;  // mirrors GPS_PRESENCE_WINDOW_MS
@@ -61,6 +64,28 @@ void test_silent_past_window_is_absent(void) {
     TEST_ASSERT_EQUAL(ProbePhase::Absent, gpsProbePhase(false, WINDOW_MS + 1000, WINDOW_MS));
 }
 
+// --- Fix-transition seam: only the edges emit an event ------------------------
+//
+// GPSManager::update() emits GPS_FIX_ACQUIRED/LOST off this pure decision. The
+// invariant that keeps the bus quiet is that an unchanged state yields None, so
+// a steady fix (or steady no-fix) never re-fires per NMEA sentence.
+
+void test_no_transition_when_still_no_fix(void) {
+    TEST_ASSERT_EQUAL(FixTransition::None, fixTransition(false, false));
+}
+
+void test_no_transition_when_fix_held(void) {
+    TEST_ASSERT_EQUAL(FixTransition::None, fixTransition(true, true));
+}
+
+void test_acquired_on_rising_edge(void) {
+    TEST_ASSERT_EQUAL(FixTransition::Acquired, fixTransition(false, true));
+}
+
+void test_lost_on_falling_edge(void) {
+    TEST_ASSERT_EQUAL(FixTransition::Lost, fixTransition(true, false));
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_byte_at_start_is_present);
@@ -69,5 +94,9 @@ int main(int, char**) {
     RUN_TEST(test_silent_before_window_keeps_waiting);
     RUN_TEST(test_silent_at_window_is_absent);
     RUN_TEST(test_silent_past_window_is_absent);
+    RUN_TEST(test_no_transition_when_still_no_fix);
+    RUN_TEST(test_no_transition_when_fix_held);
+    RUN_TEST(test_acquired_on_rising_edge);
+    RUN_TEST(test_lost_on_falling_edge);
     return UNITY_END();
 }

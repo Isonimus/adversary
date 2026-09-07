@@ -8,6 +8,8 @@
 #include "gps_probe.h"
 #include "nmea_parser.h"
 #include "modules/system/time_manager.h"
+#include "core/event_bus.h"
+#include "core/event_data.h"
 
 #ifdef ARDUINO
 #include <Arduino.h>
@@ -28,6 +30,7 @@ GPSManager::GPSManager()
     : gpsSerial_(nullptr)
     , detected_(false)
     , initialized_(false)
+    , lastFixState_(false)
     , detectedChip_(nullptr)
     , detectedPinSet_(nullptr)
     , bufferPos_(0)
@@ -252,6 +255,25 @@ void GPSManager::update() {
         }
     }
 #endif
+
+    // Emit fix-state edges on the bus so any module can react without polling
+    // the singleton. The decision is the pure gps::fixTransition seam (pinned by
+    // the regression test); this glue just maps the edge to an event + payload.
+    const bool fixNow = hasValidFix();
+    const gps::FixTransition edge = gps::fixTransition(lastFixState_, fixNow);
+    if (edge != gps::FixTransition::None) {
+        EventData evt(edge == gps::FixTransition::Acquired
+                          ? EventType::GPS_FIX_ACQUIRED
+                          : EventType::GPS_FIX_LOST);
+        evt.payload.gps.latitude   = currentData_.coordinate.latitude;
+        evt.payload.gps.longitude  = currentData_.coordinate.longitude;
+        evt.payload.gps.altitude   = currentData_.coordinate.altitude;
+        evt.payload.gps.speed      = currentData_.velocity.speedKmh;
+        evt.payload.gps.satellites = currentData_.coordinate.satellites;
+        evt.payload.gps.hdop       = currentData_.coordinate.hdop;
+        EventBus::getInstance().publish(evt);
+    }
+    lastFixState_ = fixNow;
 }
 
 bool GPSManager::hasValidFix(uint32_t maxAgeMs) const {
