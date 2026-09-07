@@ -72,7 +72,7 @@ Requires the CC1101/NRF24 expansion cap; the **Radio** entry is greyed out when 
 - **IR Record & Replay** - Learn a remote's IR frame (NEC/RC5/raw — decoded or raw timing train) via the cap's IR receiver, persist it to SD, and replay it, with a pulse preview of the capture.
 
 ### 🔖 RFID
-- **RFID Audit** - PN532-based NFC/RFID tag reading and dumping.
+- **RFID Audit** - MFRC522-based (13.56 MHz, I2C) NFC/RFID tag reading and dumping.
 
 ### ☁️ Cloud Cracking & Sync
 - **WPA-SEC** - Upload `.pcap` handshakes for cloud cracking; status tracking (uploaded/cracked) per capture.
@@ -109,17 +109,69 @@ Requires the CC1101/NRF24 expansion cap; the **Radio** entry is greyed out when 
 - **Battery**: Fully charged for portable operation
 - **USB-C Cable**: For flashing and serial monitoring
 
+### Optional external modules
+
+Most features run on a bare Cardputer. These need extra hardware:
+
+| Feature | Requires | Attaches via |
+|---------|----------|--------------|
+| Radio — Sub-GHz OOK capture/replay, 2.4 GHz analyzer | CC1101 + NRF24 multi-radio expansion cap | Top expansion header |
+| IR Record & Replay | multi-radio cap (IR receiver) — the built-in Cardputer IR emitter is transmit-only | Top expansion header |
+| Wardriving GPS coordinates | GPS module (AT6668-class) | Grove port (UART) |
+| RFID Audit | MFRC522 NFC/RFID reader (13.56 MHz, I2C) | Grove port (I2C) |
+| BadUSB / Mouse Jiggler | none — native USB-OTG | Cardputer only (no external module) |
+
+> [!IMPORTANT]
+> **The Grove port is shared.** The GPS module (UART) and the RFID reader (I2C) both use
+> the Cardputer's Grove pins (G1/G2) and **cannot be used at the same time** — if a GPS fix
+> is active at boot, the RFID reader is skipped.
+
+Everything else — WiFi, BLE, IR TV-B-Gone (built-in emitter), HID, Server — needs no
+external hardware.
+
 ---
 
 ## Installation
 
-### Prerequisites
+The fastest path is to flash a **prebuilt release**; building from source (Option B) is
+only needed for development or an unreleased change.
+
+### Option A — Flash a prebuilt release (Cardputer)
+
+Every version tag publishes ready-to-flash binaries on the
+[Releases page](https://github.com/Isonimus/adversary/releases). Download the assets for
+the latest tag:
+
+| Asset | Use it for |
+|-------|-----------|
+| `adversary-cardputer-<tag>-factory.bin` | A **fresh flash** of a blank or bricked device — a complete image (bootloader + partitions + app) written to offset `0x0`. Use with an ESP web flasher, **M5Burner** ("User Custom"), or `esptool`. |
+| `adversary-cardputer-<tag>-app.bin` | An **over-the-air, app-only** install from **M5Launcher** (bmorcelli) via a direct URL — writes just the app to the OTA slot. |
+| `SHA256SUMS.txt` | Verify the download before flashing: `sha256sum -c SHA256SUMS.txt`. |
+
+**With `esptool`** (factory image, ESP32-S3):
+
+```bash
+esptool --chip esp32s3 write-flash 0x0 adversary-cardputer-<tag>-factory.bin
+```
+
+**With M5Burner**: add the `-factory.bin` as a *User Custom* firmware, then burn it to the
+device.
+
+**With M5Launcher**: point it at the `-app.bin` release URL to install over OTA.
+
+> [!NOTE]
+> Prebuilt binaries are published for the **Cardputer** only. For the M5StickC Plus2, build
+> from source (Option B).
+
+### Option B — Build from source
+
+#### Prerequisites
 
 - [PlatformIO](https://platformio.org/) (VS Code extension or CLI)
 - USB-C cable
 - SD Card (FAT32 formatted)
 
-### Build & Flash
+#### Build & Flash
 
 ```bash
 # Clone the repository
@@ -136,7 +188,7 @@ pio run -e cardputer -t upload
 pio device monitor -b 115200
 ```
 
-### For M5StickC Plus2
+#### For M5StickC Plus2
 
 ```bash
 pio run -e m5stick -t upload
@@ -188,7 +240,7 @@ Main Carousel
 │   ├── TV-B-Gone          - Universal IR power-off blast
 │   └── Record / Replay    - Learn & replay an IR remote (requires cap IR RX)
 ├── RFID
-│   └── RFID Dashboard     - NFC/RFID tag reading (requires PN532 module)
+│   └── RFID Dashboard     - NFC/RFID tag reading (requires MFRC522 I2C reader)
 ├── HID
 │   ├── BadUSB (HID)       - USB keystroke injection (Cardputer only)
 │   └── Mouse Jiggler      - Anti-idle-lock mouse movement (Cardputer only)
