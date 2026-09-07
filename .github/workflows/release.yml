@@ -1,0 +1,88 @@
+name: Release
+
+# Cut a GitHub Release with installable firmware when a version tag (v*) is pushed.
+# Produces the M5Launcher-installable app image, a full factory (merged) image for a
+# fresh esptool/web-flasher install, and SHA-256 checksums, for the cardputer target.
+# See slices/0014. The per-push build/test matrix lives in ci.yml (slice-0010).
+on:
+  push:
+    tags:
+      - 'v*'
+
+# gh release create writes to the repo's Releases using the built-in GITHUB_TOKEN.
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: cardputer firmware
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          # pioarduino rejects Python > 3.13 (mirrors ci.yml).
+          python-version: '3.13'
+
+      # Same key as ci.yml's cardputer leg, so the release build reuses CI's warmed
+      # platform/toolchain cache instead of re-downloading the release zips.
+      - name: Cache PlatformIO
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: pio-${{ runner.os }}-cardputer-${{ hashFiles('platformio.ini') }}
+          restore-keys: |
+            pio-${{ runner.os }}-cardputer-
+
+      # esptool is pinned so the merge-bin CLI is deterministic (5.x non-deprecated form).
+      - name: Install PlatformIO and esptool
+        run: pip install --upgrade platformio esptool==5.2.0
+
+      - name: Build cardputer firmware
+        run: pio run -e cardputer
+
+      - name: Package release artifacts
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME}"
+          build=.pio/build/cardputer
+          # boot_app0.bin lives inside a versioned framework package; locate it rather
+          # than hardcode the path.
+          boot_app0="$(find "$HOME/.platformio/packages" -name boot_app0.bin | head -1)"
+          test -n "$boot_app0"
+          mkdir -p dist
+
+          # OTA app image: the M5Launcher installs this into an app-partition slot from a
+          # direct URL. It is firmware.bin unmodified.
+          cp "$build/firmware.bin" "dist/adversary-cardputer-${version}-app.bin"
+
+          # Full factory image for a fresh esptool / web-flasher install at 0x0. Offsets
+          # are the default_8MB.csv layout (S3 bootloader at 0x0, otadata 0xe000, app0
+          # 0x10000); flash params match the board (qio/80m/8MB). Proven byte-for-byte
+          # locally in slice-0014.
+          esptool --chip esp32s3 merge-bin \
+            -o "dist/adversary-cardputer-${version}-factory.bin" \
+            --flash-mode qio --flash-freq 80m --flash-size 8MB \
+            0x0 "$build/bootloader.bin" \
+            0x8000 "$build/partitions.bin" \
+            0xe000 "$boot_app0" \
+            0x10000 "$build/firmware.bin"
+
+          ( cd dist && sha256sum adversary-cardputer-*.bin > SHA256SUMS.txt )
+          ls -la dist
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME}"
+          gh release create "$version" \
+            --title "The Adversary $version" \
+            --generate-notes \
+            "dist/adversary-cardputer-${version}-app.bin" \
+            "dist/adversary-cardputer-${version}-factory.bin" \
+            dist/SHA256SUMS.txt

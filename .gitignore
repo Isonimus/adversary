@@ -41,3 +41,6 @@ htmlcov/
 # root for inspection. Wardriving CSVs and captures hold real BSSIDs/GPS/creds —
 # never commit them. See SD_BASE_PATH in src/config/config.h.
 /adversary/
+
+# Build/release artifacts (not versioned; produced by scripts/CI)
+dist/
