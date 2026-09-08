@@ -12,6 +12,7 @@
 #include "../theme.h"
 #include "../../config/config.h"
 #include "../../hal/storage/sd_manager.h"
+#include "../../hal/expansion/expansion_cap.h"
 #include "../../modules/gps/gps_manager.h"
 #include "../../modules/rfid/rfid_manager.h"
 #include "../../modules/storage/settings_manager.h"
@@ -208,17 +209,43 @@ private:
     static int16_t renderRFIDStatus(Display& display, int16_t rightEdge) {
 #ifdef ESP32
         if (!g_rfidDetected) return rightEdge;
-        
-        const char* badge = "RF";
-        int16_t badgeWidth = 14;
+
+        const char* badge = "RFID";
+        int16_t badgeWidth = strlen(badge) * 6;
         int16_t x = rightEdge - badgeWidth;
-        
+
         display.fillRoundRect(x - 2, 3, badgeWidth + 4, 14, 2, theme::BG_PRIMARY());
         display.setTextColor(theme::SUCCESS());
         display.setTextSize(1);
         display.setCursor(x, 6);
         display.print(badge);
-        
+
+        return x - 2 - BADGE_GAP;
+#else
+        (void)display;
+        return rightEdge;
+#endif
+    }
+
+    /**
+     * @brief Render multi-radio cap badge (CC1101 / NRF24), when one is resolved.
+     * @return X position after rendering (left edge of badge)
+     */
+    template<typename Display>
+    static int16_t renderCapStatus(Display& display, int16_t rightEdge) {
+#ifdef ESP32
+        if (hal::resolvedExpansionCap() != hal::ExpansionCap::MultiRadio) return rightEdge;
+
+        const char* badge = "RF";
+        int16_t badgeWidth = strlen(badge) * 6;
+        int16_t x = rightEdge - badgeWidth;
+
+        display.fillRoundRect(x - 2, 3, badgeWidth + 4, 14, 2, theme::BG_PRIMARY());
+        display.setTextColor(theme::SUCCESS());
+        display.setTextSize(1);
+        display.setCursor(x, 6);
+        display.print(badge);
+
         return x - 2 - BADGE_GAP;
 #else
         (void)display;
@@ -319,6 +346,7 @@ public:
         xPos = renderSDStatus(display, xPos);
         xPos = renderGPSStatus(display, xPos);
         xPos = renderRFIDStatus(display, xPos);
+        xPos = renderCapStatus(display, xPos);
         xPos = renderHeapBadge(display, xPos);
         
         // Custom center content
