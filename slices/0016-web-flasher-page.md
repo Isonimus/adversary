@@ -208,3 +208,19 @@ bootloader header byte `0x02` (dio), sha256 identical to the release asset.
 
 _To be completed once Pages is enabled and a real browser flash is observed green;
 tracked in the LEDGER until then._
+
+### Amendment — 2026-09-08: as built — a real browser flash was observed green
+
+Pages is enabled (Settings → Pages → Source = GitHub Actions) and the live flasher at
+`https://isonimus.github.io/adversary/` flashed a real Cardputer end-to-end in desktop
+Chrome over Web Serial: chip handshake → same-origin fetch of
+`./adversary-cardputer-factory.bin` → write to `0x0` → the device rebooted into the
+firmware clean (no `TG0WDT` loop). This is the DoD's first scenario met on hardware, and
+it is also the field confirmation of the slice-0014 `dio` fix (the same image that bricked
+at `v0.1.1-alpha`, now `dio` at `v0.1.2-alpha`, boots).
+
+All three DoD scenarios now hold: (1) the hosted HTTPS page flashes a connected Cardputer
+with no local toolchain; (2) a new `v*` release refreshes the served binary automatically
+(via the `release.yml` → `pages.yml` dispatch of the previous amendment); (3) an
+unsupported browser / non-HTTPS origin gets the explanatory fallback, not a dead button.
+The LEDGER follow-up that tracked this slice is closed.
