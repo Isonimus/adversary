@@ -4,8 +4,12 @@ name: Pages
 # SAME-ORIGIN with the page: GitHub release assets send no CORS headers, so the
 # browser cannot fetch them cross-origin from Pages ("Failed to fetch"). Each
 # deploy pulls the latest release's factory image into the site and the manifest
-# points at a relative path. Hence the release trigger too — a new firmware
-# release must refresh the binary the page serves. See slices/0016.
+# points at a relative path — so a new firmware release must redeploy Pages to
+# refresh that binary. NOTE: the `release: published` trigger below only fires
+# for a human-published release; a release cut by release.yml uses the built-in
+# GITHUB_TOKEN, whose events GitHub does NOT cascade into workflows (recursion
+# guard). release.yml therefore dispatches this workflow explicitly (an exempt
+# event) after publishing — that is the path our CI releases take. See slices/0016.
 on:
   push:
     branches: [main]

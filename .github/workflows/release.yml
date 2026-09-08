@@ -9,9 +9,11 @@ on:
     tags:
       - 'v*'
 
-# gh release create writes to the repo's Releases using the built-in GITHUB_TOKEN.
+# gh release create writes to the repo's Releases using the built-in GITHUB_TOKEN;
+# actions: write lets the final step dispatch the Pages workflow (see its note).
 permissions:
   contents: write
+  actions: write
 
 jobs:
   release:
@@ -111,3 +113,15 @@ jobs:
             "dist/adversary-cardputer-${version}-factory.bin" \
             "dist/adversary-cardputer-factory.bin" \
             dist/SHA256SUMS.txt
+
+      # The web flasher serves the factory image same-origin, so a new release
+      # must redeploy Pages to refresh it. pages.yml has a `release: published`
+      # trigger, but GitHub SUPPRESSES workflow cascades from events emitted by
+      # the built-in GITHUB_TOKEN (recursion guard) — and the release above was
+      # created with that token, so that trigger never fires for our releases.
+      # workflow_dispatch is one of the two events exempt from the suppression,
+      # so kick Pages explicitly here (needs actions: write). See slices/0016.
+      - name: Redeploy the web flasher with the new firmware
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run pages.yml --ref main
