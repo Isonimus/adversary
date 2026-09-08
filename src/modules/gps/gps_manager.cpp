@@ -292,16 +292,16 @@ uint32_t GPSManager::getTimeSinceLastUpdate() const {
     return millis() - currentData_.lastUpdateMs;
 }
 
-bool GPSManager::tryRedetect() {
+bool GPSManager::tryRedetect(bool probeCapPort) {
     // Already detected - nothing to do
     if (detected_) {
         return true;
     }
-    
+
 #ifdef ARDUINO
     // If not initialized, try full init
     if (!initialized_) {
-        return init();
+        return init(probeCapPort);
     }
     
     // Already initialized but not detected - try again
@@ -314,8 +314,8 @@ bool GPSManager::tryRedetect() {
     
     // Reset state and try again
     initialized_ = false;
-    bool result = init();
-    
+    bool result = init(probeCapPort);
+
     if (result) {
         Serial.println("[GPS] Module re-detected!");
     }

@@ -11,6 +11,7 @@ using namespace adversary;
 
 void setUp() {
     RFIDManager::getInstance().resetForTest();
+    g_mockMfrcVersion = 0x92;  // default: reader present, unless a test says otherwise
 }
 
 void tearDown() {
@@ -76,6 +77,39 @@ void test_rfid_manager_clear_tag() {
     TEST_ASSERT_NULL(mgr.getLastTag());
 }
 
+// slice-0018: redetect() must re-probe in BOTH directions, unlike init() which
+// short-circuits on m_detected. These are the regression for the Modules
+// dashboard's Re-scan re-greying a removed reader / finding a hot-inserted one.
+
+void test_rfid_redetect_sees_removal() {
+    RFIDManager& mgr = RFIDManager::getInstance();
+
+    // Present at first probe.
+    TEST_ASSERT_TRUE(mgr.init());
+    TEST_ASSERT_TRUE(mgr.isDetected());
+
+    // Reader unplugged -> bus reads the absent 0xFF. init() alone would keep
+    // reporting detected (its `if (m_detected) return true` guard never re-probes);
+    // redetect() must clear the verdict.
+    g_mockMfrcVersion = 0xFF;
+    TEST_ASSERT_FALSE(mgr.redetect());
+    TEST_ASSERT_FALSE(mgr.isDetected());
+}
+
+void test_rfid_redetect_sees_insertion() {
+    RFIDManager& mgr = RFIDManager::getInstance();
+
+    // Absent at boot.
+    g_mockMfrcVersion = 0x00;
+    TEST_ASSERT_FALSE(mgr.init());
+    TEST_ASSERT_FALSE(mgr.isDetected());
+
+    // Reader hot-inserted -> a fresh probe finds it.
+    g_mockMfrcVersion = 0x92;
+    TEST_ASSERT_TRUE(mgr.redetect());
+    TEST_ASSERT_TRUE(mgr.isDetected());
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_rfid_manager_initial_state);
@@ -83,5 +117,7 @@ int main() {
     RUN_TEST(test_rfid_manager_activation_logic);
     RUN_TEST(test_rfid_manager_polling_respects_active_state);
     RUN_TEST(test_rfid_manager_clear_tag);
+    RUN_TEST(test_rfid_redetect_sees_removal);
+    RUN_TEST(test_rfid_redetect_sees_insertion);
     return UNITY_END();
 }

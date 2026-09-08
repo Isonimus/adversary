@@ -56,6 +56,7 @@
 #include "ui/components/toast_manager.h"
 #include "modules/gps/gps_manager.h"
 #include "modules/gps/gps_probe.h"
+#include "modules/rfid/rfid_manager.h"
 #include "modules/system/system_manager.h"
 #include "modules/system/time_manager.h"
 #include "modules/ble/ble_scanner.h"
@@ -65,6 +66,8 @@
 #include "hal/expansion/expansion_cap.h"
 #include "ui/components/carousel_menu.h"
 #include "ui/screens/radio_screen.h"
+#include "ui/screens/modules_screen.h"
+#include "core/module_detection.h"
 #include "assets/generated_icons.h"
 #include "utils/bitmap_remapper.h"
 
@@ -133,7 +136,10 @@ enum MenuActionId {
     ACTION_SERVER = 600,
 
     // Multi-radio cap (slice-0002)
-    ACTION_RADIO = 700
+    ACTION_RADIO = 700,
+
+    // Module inventory / hot-swap re-detection (slice-0018)
+    ACTION_MODULES = 701
 };
 
 // Forward declarations
@@ -261,6 +267,55 @@ void stopAllAttacks() {
  */
 // Arduino forward declarations (for setup/loop orchestration)
 void initHardware();
+
+namespace adversary {
+
+// One arbitration-correct detection pass over every hot-swappable peripheral
+// (slice-0018). Declared in core/module_detection.h and defined here — the native
+// build compiles core/ but excludes expansion_cap.cpp, so this cannot live in a
+// core TU; main.cpp already owns the detection globals and is native-excluded.
+// Called at boot and by the Modules dashboard's Re-scan so the two never drift.
+void redetectModules() {
+    using namespace adversary::hal;
+    SDManager& sd = SDManager::getInstance();
+    const CapOverride ov = SettingsManager::getInstance().get().wireless.capOverride;
+
+    // --- Expansion cap (SPI, shared with the SD bus) ---
+    // Claim the FSPI bus for an auto-probe if a launcher-chained boot left the card
+    // mounted by the launcher (we don't own the SPIClass). A no-op once we own it;
+    // a forced override needs no probe so it never pays this cost.
+    if (ov == CapOverride::Auto && sd.spiBus() == nullptr) {
+        Serial.printf("[Modules] Claiming SD bus for cap probe: %s\n",
+                      sd.remount() ? "OK" : "FAILED");
+    }
+    ui::g_expansionCap = detectExpansionCap(ov);
+    // The shared-bus cap probe desyncs the card's SPI state machine; re-mount to
+    // re-sync it whenever the probe could have run (any non-forced-None override).
+    if (ov != CapOverride::ForceNone) {
+        Serial.printf("[Modules] SD re-mount after cap probe: %s\n",
+                      sd.remount() ? "OK" : "FAILED");
+    }
+    Serial.printf("[Modules] Cap: %s\n",
+                  ui::g_expansionCap == ExpansionCap::MultiRadio ? "Multi-Radio" : "None");
+
+    // --- GPS (cap-aware: never drive the cap-GPS UART pins when the cap owns them) ---
+    const bool probeCapGps = ui::g_expansionCap != ExpansionCap::MultiRadio;
+    ui::g_gpsDetected = GPSManager::getInstance().tryRedetect(probeCapGps);
+
+    // --- RFID (skip only on the real Grove-port G1/G2 conflict with a Grove GPS) ---
+    const char* gpsSource = GPSManager::getInstance().getDetectedPinSet();
+    if (gps::gpsBlocksRfid(ui::g_gpsDetected, gpsSource)) {
+        Serial.println("[Modules] RFID skipped - Grove-port GPS owns GPIO 1/2");
+        ui::g_rfidDetected = false;
+    } else {
+        ui::g_rfidDetected = RFIDManager::getInstance().redetect();
+    }
+    Serial.printf("[Modules] GPS:%s RFID:%s\n",
+                  ui::g_gpsDetected ? "detected" : "none",
+                  ui::g_rfidDetected ? "detected" : "none");
+}
+
+} // namespace adversary
 
 /**
  * @brief Arduino setup function
@@ -390,38 +445,10 @@ void setup() {
         // Apply toast position setting
         adversary::ToastManager::getInstance().setPosition(static_cast<adversary::ToastPosition>(settings.display.toastPosition));
 
-        // Auto-detect can only probe if we own the FSPI bus. A launcher-chained
-        // boot leaves the card mounted by the launcher (SDManager Method 1), so
-        // spiBus() is null and the probe would be skipped — Auto then silently
-        // resolves None with a cap seated (the slice-0002 launcher-boot gap).
-        // Force a re-mount onto our own SPIClass first (Method 1 torn down ->
-        // init() re-runs via Method 2 and owns sdSPI), but only when it would
-        // change the outcome: Auto and not already owning the bus. A forced
-        // override needs no probe, so it never pays this cost.
-        if (settings.wireless.capOverride == adversary::hal::CapOverride::Auto &&
-            sdManager.spiBus() == nullptr) {
-            Serial.printf("[Cap] Claiming SD bus for auto-detect: %s\n",
-                sdManager.remount() ? "OK" : "FAILED");
-        }
-
-        // Detect the top-side expansion cap now the SD bus is mounted and the
-        // override is loaded. The probes run on the SD-shared SPI, leave every
-        // chip-select SD-safe, and drive the multi-radio cap's radios to idle
-        // so nothing emits at boot (slice-0002 / ADR-0001).
-        splashScreen.updateProgress(0.48f, "Detecting cap...");
-        adversary::ui::g_expansionCap =
-            adversary::hal::detectExpansionCap(settings.wireless.capOverride);
-        Serial.printf("[Cap] Resolved: %s\n",
-            adversary::ui::g_expansionCap == adversary::hal::ExpansionCap::MultiRadio
-                ? "Multi-Radio" : "None");
-        // Sharing the SD bus with the cap probe desyncs the card's SPI state
-        // machine (CRC errors on the next access), so re-mount to re-sync it
-        // whenever the probe could have run — any non-forced-None override,
-        // i.e. every Auto boot regardless of result (slice-0002).
-        if (settings.wireless.capOverride != adversary::hal::CapOverride::ForceNone) {
-            Serial.printf("[Cap] SD re-mount after probe: %s\n",
-                sdManager.remount() ? "OK" : "FAILED");
-        }
+        // Expansion cap + GPS + RFID are detected together by the unified
+        // redetectModules() pass below (slice-0018), which owns the SD-bus claim
+        // and re-mount the shared-bus cap probe needs. Kept out of this SD-mount
+        // block so GPS and RFID still probe when no SD card is present.
 
         // Initialize time management (load rough estimate from last sync)
         adversary::TimeManager::getInstance().loadFromSD();
@@ -441,41 +468,12 @@ void setup() {
     // Prepare BLE (Init deferred to usage to save early heap)
     splashScreen.updateProgress(0.72f, "Preparing BLE...");
 
-    // Initialize GPS module (if present)
-    splashScreen.updateProgress(0.75f, "Detecting GPS...");
-    Serial.println("[GPS] Detecting AT6668 GPS module...");
-    // Skip the cap-GPS pin set when the multi-radio cap owns G13/G15 (slice-0002).
-    const bool probeCapGps =
-        adversary::ui::g_expansionCap != adversary::hal::ExpansionCap::MultiRadio;
-    if (adversary::GPSManager::getInstance().init(probeCapGps)) {
-        Serial.println("[GPS] AT6668 GPS module detected");
-        adversary::ui::g_gpsDetected = true;
-    } else {
-        Serial.println("[GPS] No GPS module found (will retry on GPS-dependent screens)");
-        adversary::ui::g_gpsDetected = false;
-    }
-    delay(100);
-
-    // Initialize RFID module (if present).
-    // RFID (MFRC522) speaks I2C on the Grove pins (G1/G2). Only a *Grove-port*
-    // GPS contends for those pins; a cap GPS on G13/G15 shares nothing, so RFID
-    // and a cap GPS coexist. Skip RFID only on the real Grove-port conflict.
-    const char* gpsSource = adversary::GPSManager::getInstance().getDetectedPinSet();
-    if (adversary::gps::gpsBlocksRfid(adversary::ui::g_gpsDetected, gpsSource)) {
-        splashScreen.updateProgress(0.78f, "RFID skipped (Grove GPS)");
-        Serial.println("[RFID] Skipped - Grove-port GPS owns GPIO 1/2 (pin conflict)");
-        adversary::ui::g_rfidDetected = false;
-    } else {
-        splashScreen.updateProgress(0.78f, "Detecting RFID...");
-        Serial.println("[RFID] Detecting RFID module...");
-        if (adversary::RFIDManager::getInstance().init()) {
-            Serial.println("[RFID] RFID module detected");
-            adversary::ui::g_rfidDetected = true;
-        } else {
-            Serial.println("[RFID] No RFID module found");
-            adversary::ui::g_rfidDetected = false;
-        }
-    }
+    // Detect every hot-swappable peripheral in one arbitration-correct pass:
+    // cap -> GPS (cap-aware pin skip) -> RFID (Grove-conflict aware). The Modules
+    // dashboard's Re-scan calls the same redetectModules() so boot and re-scan
+    // never drift (slice-0018).
+    splashScreen.updateProgress(0.75f, "Detecting modules...");
+    adversary::redetectModules();
     delay(100);
 
     // Settings loaded above
@@ -522,6 +520,8 @@ void setup() {
         []() -> adversary::IScreen* { return new adversary::AboutScreen(); });
     screenMgr.registerFactory(adversary::ScreenId::RADIO,
         []() -> adversary::IScreen* { return new adversary::RadioScreen(); });
+    screenMgr.registerFactory(adversary::ScreenId::MODULES,
+        []() -> adversary::IScreen* { return new adversary::ModulesScreen(); });
     screenMgr.registerFactory(adversary::ScreenId::WHITELIST,
         []() -> adversary::IScreen* { return new adversary::WhitelistScreen(); });
     screenMgr.registerFactory(adversary::ScreenId::CAPTURES,
@@ -776,21 +776,29 @@ void initializeMenu() {
         handleMenuAction(actionId);
     });
 
-    // Initialize Carousel adversary::Menu for Root icons
+    // Initialize Carousel adversary::Menu for Root icons.
+    // Hardware-gated tiles (RFID, RADIO) carry a live enabledFn instead of a
+    // boot-frozen bool so the Modules dashboard's hot-swap Re-scan un-greys them
+    // without a reboot (slice-0018); always-on tiles keep the plain bool.
     std::vector<adversary::CarouselItem> carouselItems = {
         {"WIRELESS", adversary::assets::ICON_WIRELESS, -1, true, ""}, // -1 = navigate to submenu in mainMenu
         {"BLE", adversary::assets::ICON_BLE, -2, true, ""},
         {"INFRARED", adversary::assets::ICON_INFRARED, -3, true, ""},
-        {"RFID", adversary::assets::ICON_RFID, -4, adversary::ui::g_rfidDetected, "RFID module not found"},
+        {"RFID", adversary::assets::ICON_RFID, -4, false, "RFID module not found",
+         []{ return adversary::ui::g_rfidDetected; }},
         {"HID", adversary::assets::ICON_HID, -5, true, ""}
     };
-    
+
     // Radio entry — always present, greyed out when the multi-radio cap is not
     // detected, matching the RFID entry's optional-hardware convention (slice-0002).
-    const bool capPresent =
-        adversary::ui::g_expansionCap == adversary::hal::ExpansionCap::MultiRadio;
     carouselItems.push_back({"RADIO", adversary::assets::ICON_RADIO, ACTION_RADIO,
-                             capPresent, "Multi-radio cap not found"});
+                             false, "Multi-radio cap not found",
+                             []{ return adversary::hal::resolvedExpansionCap() ==
+                                        adversary::hal::ExpansionCap::MultiRadio; }});
+
+    // Modules entry — live peripheral inventory + hot-swap Re-scan (slice-0018).
+    carouselItems.push_back({"MODULES", adversary::assets::ICON_MODULES, ACTION_MODULES,
+                             true, ""});
 
     // Server entry - enabled if dashboard exists
     bool serverEnabled = sdManager.fileExists("/adversary/dashboard/index.html");
@@ -1212,6 +1220,11 @@ void handleMenuAction(int actionId) {
         case ACTION_RADIO:
             Serial.println("Opening Radio...");
             navigateToScreen(adversary::ScreenId::RADIO);  // factory creates + shows
+            break;
+
+        case ACTION_MODULES:
+            Serial.println("Opening Modules...");
+            navigateToScreen(adversary::ScreenId::MODULES);  // factory creates + shows
             break;
             
         case ACTION_WHITELIST:

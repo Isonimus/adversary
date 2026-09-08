@@ -36,7 +36,8 @@ Adversary is for **educational and research purposes only.** Unauthorized access
 
 The main menu is a carousel: **Wireless**, **BLE**, **Infrared**, **RFID**, **HID**,
 and **Radio** (Sub-GHz / 2.4 GHz, shown when the multi-radio cap is attached), plus
-**Server** (dashboard), **Settings**, and **About**.
+**Modules** (live peripheral inventory + hot-swap re-scan), **Server** (dashboard),
+**Settings**, and **About**.
 
 ### 📡 Wireless (WiFi)
 - **Scanner** - Discover networks with security type, signal strength, and channel info; context action menu per network.
@@ -65,6 +66,7 @@ and **Radio** (Sub-GHz / 2.4 GHz, shown when the multi-radio cap is attached), p
 ### 📻 Radio — Sub-GHz & 2.4 GHz (multi-radio cap)
 Requires the CC1101/NRF24 expansion cap; the **Radio** entry is greyed out when no cap is detected.
 - **Sub-GHz OOK Capture & Replay** - CC1101-based raw OOK capture and replay across 315 / 433.92 / 868.35 / 915 MHz (e.g. simple remotes and sensors), with a pulse-train preview of the captured signal.
+- **Sub-GHz Jamming** - CC1101 carrier-wave or modulated-noise transmission on the selected band preset to hold a channel busy against a fixed-code receiver. Hold-to-jam (emits only while the key is held) behind an interference-warning gate — authorized testing only.
 - **2.4 GHz Spectrum Analyzer** - NRF24-based channel sweep (received-power detection) across the 2.4 GHz band for activity/interference mapping.
 
 ### 📟 Infrared
@@ -73,6 +75,9 @@ Requires the CC1101/NRF24 expansion cap; the **Radio** entry is greyed out when 
 
 ### 🔖 RFID
 - **RFID Audit** - MFRC522-based (13.56 MHz, I2C) NFC/RFID tag reading and dumping.
+
+### 🧩 Modules
+- **Module inventory & hot-swap re-scan** - A live view of which peripherals are attached right now (Sub-GHz/2.4 GHz cap, RFID reader, GPS) with a **Re-scan** action, so a module seated after boot is detected without a reboot — its greyed-out menu tile un-greys as soon as the re-scan finds it. Also surfaces the cap-detection override. Seat the module while the radio bus is idle, then Re-scan.
 
 ### ☁️ Cloud Cracking & Sync
 - **WPA-SEC** - Upload `.pcap` handshakes for cloud cracking; status tracking (uploaded/cracked) per capture.
@@ -124,9 +129,10 @@ Most features run on a bare Cardputer. These need extra hardware:
 > [!IMPORTANT]
 > **GPS source, and the RFID conflict.** GPS works either from the M5Stack **GNSS/LoRa cap**
 > (its onboard GPS — the cap's LoRa radio itself is not supported) or from a **Grove-port GPS
-> module**; the cap path takes priority when both are present. Either way, if a GPS module is
-> detected at boot the **RFID reader is disabled** for that session — and a Grove-port GPS
-> additionally shares the reader's Grove pins (G1/G2).
+> module**; the cap path takes priority when both are present. Either way, when a GPS module is
+> detected the **RFID reader is disabled** for that detection pass — and a Grove-port GPS
+> additionally shares the reader's Grove pins (G1/G2). Modules attached after boot are picked up
+> by the **Modules → Re-scan** action (no reboot needed); seat them while the radio bus is idle.
 
 Everything else — WiFi, BLE, IR TV-B-Gone (built-in emitter), HID, Server — needs no
 external hardware.

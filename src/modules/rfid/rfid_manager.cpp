@@ -64,6 +64,19 @@ bool RFIDManager::init() {
     return true;
 }
 
+bool RFIDManager::redetect() {
+    // Drop the cached verdict and the reader so init() actually re-probes the bus
+    // (it short-circuits while m_detected is set). This makes detection
+    // bidirectional: a removed module flips m_detected back to false.
+    if (m_rfid) {
+        delete m_rfid;
+        m_rfid = nullptr;
+    }
+    m_detected = false;
+    m_active = false;
+    return init();
+}
+
 void RFIDManager::update() {
     if (!m_detected || !m_active || !m_rfid) return;
 
