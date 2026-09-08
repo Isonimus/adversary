@@ -26,6 +26,12 @@ struct CarouselItem {
     int actionId;
     bool enabled = true;
     std::string disabledReason;
+    // Optional live gate (slice-0018): when set, it is consulted every frame so a
+    // hardware tile (RADIO/RFID/MODULES) reflects the current detection state after
+    // a hot-swap Re-scan instead of the boot-frozen `enabled` bool. Unset tiles
+    // (the always-on ones) fall back to `enabled`.
+    std::function<bool()> enabledFn;
+    bool isEnabled() const { return enabledFn ? enabledFn() : enabled; }
 };
 
 /**
@@ -135,12 +141,13 @@ void CarouselMenu::render(Canvas& canvas) {
             int drawY = centerY - size/2;
             
             // Use disabled color if item is not enabled
-            uint16_t iconColor = item.enabled ? theme::ACCENT() : theme::TEXT_DISABLED();
+            const bool itemEnabled = item.isEnabled();
+            uint16_t iconColor = itemEnabled ? theme::ACCENT() : theme::TEXT_DISABLED();
             utils::BitmapRemapper::drawThemeIcon(canvas, item.iconData, drawX, drawY, 48, 48, scale, iconColor);
-            
+
             if (dist < 0.1f) {
                 // Focus item: Draw label
-                uint16_t textColor = item.enabled ? theme::TEXT_PRIMARY() : theme::TEXT_DISABLED();
+                uint16_t textColor = itemEnabled ? theme::TEXT_PRIMARY() : theme::TEXT_DISABLED();
                 canvas.setTextColor(textColor);
                 canvas.setTextDatum(top_center);
                 canvas.setTextSize(2);

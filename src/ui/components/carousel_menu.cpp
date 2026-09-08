@@ -108,7 +108,7 @@ void CarouselMenu::next() {
     int startIdx = selection_;
     
     // Find next enabled item
-    while (nextIdx != startIdx && !items_[nextIdx].enabled) {
+    while (nextIdx != startIdx && !items_[nextIdx].isEnabled()) {
         nextIdx = (nextIdx + 1) % items_.size();
     }
     
@@ -125,7 +125,7 @@ void CarouselMenu::prev() {
     int startIdx = selection_;
     
     // Find previous enabled item
-    while (prevIdx != startIdx && !items_[prevIdx].enabled) {
+    while (prevIdx != startIdx && !items_[prevIdx].isEnabled()) {
         prevIdx = (prevIdx - 1 + items_.size()) % items_.size();
     }
     
@@ -138,7 +138,7 @@ void CarouselMenu::prev() {
 void CarouselMenu::select() {
     if (items_.empty() || selection_ >= items_.size()) return;
     
-    if (!items_[selection_].enabled) {
+    if (!items_[selection_].isEnabled()) {
         // Show error toast if disabled and reason provided
         if (!items_[selection_].disabledReason.empty()) {
             showErrorToast(items_[selection_].disabledReason.c_str());

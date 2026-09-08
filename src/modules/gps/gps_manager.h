@@ -139,13 +139,17 @@ public:
     
     /**
      * @brief Attempt to re-detect GPS module if not already detected
-     * 
+     *
      * Safe to call multiple times. On success, updates detected_ flag
      * and enables GPS updates in main loop.
-     * 
+     *
+     * @param probeCapPort when false, the cap-GPS UART pins (G13/G15) are skipped —
+     *        pass false when the multi-radio cap owns those pins so a re-probe never
+     *        drives a UART onto the CC1101 control lines (slice-0002 / slice-0018).
+     *        Defaults to true to preserve existing callers.
      * @return true if GPS module detected (now or previously)
      */
-    bool tryRedetect();
+    bool tryRedetect(bool probeCapPort = true);
     
     /**
      * @brief Start background detection task

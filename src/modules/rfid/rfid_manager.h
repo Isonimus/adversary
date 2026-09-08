@@ -41,6 +41,18 @@ public:
     bool init();
 
     /**
+     * @brief Force a fresh presence probe, in either direction (slice-0018).
+     *
+     * init() self-guards with `if (m_detected) return true`, so it can see an
+     * absent->present hot-insert but never a present->absent removal. redetect()
+     * releases the reader and clears the cached verdict before re-probing, so the
+     * Modules dashboard's Re-scan reflects a unit that was unplugged as well as one
+     * just attached. Only safe when the I2C bus is idle (operator-driven).
+     * @return true if the module is present now.
+     */
+    bool redetect();
+
+    /**
      * @brief Periodic update (call from loop/task)
      * Polles for new tags.
      */

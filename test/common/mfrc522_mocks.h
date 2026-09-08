@@ -14,6 +14,11 @@
 
 typedef uint8_t byte;
 
+// Settable VERSION byte so tests can simulate a present (0x92) or an
+// absent (0x00 / 0xFF) reader — including across a redetect()'s fresh
+// `new MFRC522_I2C`, which a per-instance value could not survive (slice-0018).
+inline byte g_mockMfrcVersion = 0x92;
+
 class MFRC522_I2C {
 public:
     enum PCD_Register : byte {
@@ -69,7 +74,7 @@ public:
     }
     
     void PCD_Init() {}
-    byte PCD_ReadRegister(byte reg) { return 0x92; } // Version 2.0
+    byte PCD_ReadRegister(byte reg) { return g_mockMfrcVersion; } // default 0x92 (Version 2.0)
     void PCD_SetAntennaGain(byte gain) {}
     void PCD_AntennaOn() {}
     void PCD_AntennaOff() {}

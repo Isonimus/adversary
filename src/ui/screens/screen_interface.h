@@ -46,7 +46,8 @@ enum class ScreenId : uint8_t {
     SERVER_STATUS,
     USB_BADUSB,
     HID_MOUSE_JIGGLER,
-    RADIO
+    RADIO,
+    MODULES
 };
 
 /**
