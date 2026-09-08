@@ -133,6 +133,31 @@ flashing a real device.
   `v*` release publishes `adversary-cardputer-factory.bin` and that `/latest/download/`
   resolves it. Tracked as a LEDGER follow-up until observed.
 
+### Amendment — 2026-09-08: dogfood a one-shot wordmark reveal
+
+The page dogfoods our own MIT library `@isonimus/glitch-js` (v2.0.0) — but narrowly, on
+purpose. Of its effect set (rgb-split, scanlines, hologram, scramble, …) only
+`Effects.decrypt` is used, and only once: a ~1.3 s forward decrypt reveal of the wordmark
+on load, then static. The atmospheric effects are deliberately left unused — the page's
+restraint is the design; page-wide glitch texture would tip it into template kitsch, the
+exact thing the visual language avoids.
+
+Three properties held:
+
+- **Progressive enhancement.** The real text `Adversary` is in the HTML; the effect only
+  animates an inner `.wm-text` span. If the module fails to load or JS is off, the wordmark
+  renders static and legible — the effect is never a legibility dependency.
+- **`prefers-reduced-motion`** gates it off, matching the cursor blink.
+- **Self-contained.** The library is **vendored** into `web/lib/glitch.es.js` (unmodified,
+  under a provenance banner) rather than CDN-loaded, so the page keeps its "one unavoidable
+  external runtime dep" property — esp-web-tools is the flash engine and must be external; a
+  cosmetic effect lib is avoidable-external, so it is vendored. `glitch-js` is a *page*
+  asset, not a firmware build dependency, so it is not in `DEPENDENCIES.lock.md`.
+
+API confirmed against the vendored file: `new Glitch(el, { effects:[Effects.decrypt(...)],
+trigger:'always' })` auto-starts; the decrypt self-completes; the frame loop is stopped
+after the reveal settles. (The README's `trigger:'manual'` does not exist in v2.0.0.)
+
 ## As built
 
 _To be completed once Pages is enabled and a real browser flash is observed green;

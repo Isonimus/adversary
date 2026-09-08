@@ -402,7 +402,7 @@
 <body>
     <main>
         <header>
-            <h1 class="wordmark">Adversary<span class="cursor">█</span></h1>
+            <h1 class="wordmark"><span class="wm-text">Adversary</span><span class="cursor">█</span></h1>
             <span class="tag">Alpha · Cardputer</span>
         </header>
 
@@ -498,6 +498,29 @@ esptool <b>--chip esp32s3</b> --baud 921600 write-flash \
          Loads the <esp-web-install-button> custom element (Web Serial installer). -->
     <script type="module"
         src="https://unpkg.com/esp-web-tools@10.4.0/dist/web/install-button.js?module"></script>
+
+    <!-- Dogfooding our own MIT lib (vendored, self-contained): a single one-shot
+         decrypt reveal of the wordmark on load. Progressive enhancement — the real
+         text "Adversary" is already in the HTML, so if this module fails to load or
+         JS is off, the wordmark simply renders static. Motion is gated off under
+         prefers-reduced-motion, matching the cursor blink. Deliberately the ONLY
+         effect used: the page's restraint is the design, not glitch texture. -->
+    <script type="module">
+        import { Glitch, Effects } from './lib/glitch.es.js';
+
+        const wordmark = document.querySelector('.wm-text');
+        const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+        if (wordmark && !reduceMotion) {
+            const REVEAL_MS = 1300;
+            const glitch = new Glitch(wordmark, {
+                effects: [Effects.decrypt({ duration: REVEAL_MS, revealOrder: 'forward' })],
+                trigger: 'always',   // auto-starts; decrypt self-completes, then we stop the loop
+            });
+            // One-shot: end the animation frame loop once the reveal has settled.
+            setTimeout(() => glitch.stop(), REVEAL_MS + 300);
+        }
+    </script>
 </body>
 
 </html>
