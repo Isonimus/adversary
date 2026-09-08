@@ -142,6 +142,26 @@ public:
      * @brief Check if raw character is available
      */
     bool hasChar() const { return lastChar_ != '\0'; }
+
+    /**
+     * @brief Is printable @p key held down right now (hold-to-fire UIs, slice-0017).
+     *
+     * Reads the keyboard snapshot the main loop already polled this frame, WITHOUT
+     * consuming the isChange-gated event path — so a screen can poll a held key
+     * every frame (the sub-GHz jammer) while ESC/Back still flow through getAction()
+     * / handleInput(). Cardputer only; always false where there is no matrix keyboard.
+     */
+    bool isKeyDownNow(char key) const {
+#if defined(ESP32) && defined(TARGET_CARDPUTER)
+        for (char w : M5Cardputer.Keyboard.keysState().word) {
+            if (w == key) return true;
+        }
+        return false;
+#else
+        (void)key;
+        return false;
+#endif
+    }
     
     /**
      * @brief Set navigation context (affects M5Stick button behavior)

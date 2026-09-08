@@ -13,6 +13,7 @@
 #include "../../hal/expansion/cc1101.h"
 #include "../../hal/expansion/nrf24.h"
 #include "../../hal/storage/sd_manager.h"
+#include "../../hal/input/input_manager.h"
 #include "../../modules/rf/ook_rmt.h"
 #include "../components/toast_manager.h"
 #include "../components/pulse_strip.h"
@@ -76,6 +77,9 @@ RadioScreen::RadioScreen()
     , fileSelection_(0)
     , fileScroll_(0)
     , captureStage_(0)
+    , jamModeSel_(0)
+    , jamArmed_(false)
+    , jamEmitting_(false)
     , actionSignalValid_(false)
     , scanChannel_(0)
     , scanActive_(false)
@@ -140,6 +144,15 @@ void RadioScreen::updateFooterHints() {
         case MenuState::FREQ_SELECT:
             footerHints_.setHints({{' ', "Focus"}, {';', "Nav"}, {'\n', "OK"}, {'`', "Back"}});
             break;
+        case MenuState::JAM_SELECT:
+            footerHints_.setHints({{' ', "Focus"}, {';', "Nav"}, {'\n', "Select"}, {'`', "Back"}});
+            break;
+        case MenuState::JAM_CONFIRM:
+            footerHints_.setHints({{'Y', "Arm"}, {'N', "No"}, {'`', "Cancel"}});
+            break;
+        case MenuState::JAM_ACTIVE:
+            footerHints_.setHints({});  // hold-to-jam owns the input; SPACE = emit
+            break;
         case MenuState::CAPTURING:
         case MenuState::NAMING:
             footerHints_.setHints({});  // blocking / popup owns the input
@@ -148,8 +161,10 @@ void RadioScreen::updateFooterHints() {
 }
 
 void RadioScreen::hide() {
-    // Leaving the screen mid-sweep must power the radio down and release the bus.
+    // Leaving the screen mid-sweep or mid-jam must power the radio down and release
+    // the bus, or a stuck carrier / unowned SD bus outlives the screen.
     if (scanActive_) stopNrfScan();
+    if (jamArmed_) jamDisarm();
     visible_ = false;
 }
 
@@ -433,6 +448,47 @@ void RadioScreen::stepNrfScan() {
     needsRedraw_ = true;
 }
 
+// --- CC1101 jammer (slice-0017): borrowed bus; remount on exit ---------------
+
+bool RadioScreen::jamArm() {
+    jamEmitting_ = false;
+#ifdef ESP32
+    // Arm into TX on the selected preset; with GDO0 low the PA emits nothing until
+    // a burst drives it, so the hold gates emission, not the radio state.
+    if (hal::cc1101ConfigureOok(currentFreqMHz()) && hal::cc1101EnterTx()) {
+        jamArmed_ = true;
+        return true;
+    }
+    hal::cc1101Idle();
+    SDManager::getInstance().remount();
+#endif
+    return false;
+}
+
+void RadioScreen::jamDisarm() {
+    jamEmitting_ = false;
+    jamArmed_ = false;
+#ifdef ESP32
+    hal::cc1101Idle();
+    SDManager::getInstance().remount();
+#endif
+}
+
+void RadioScreen::stepJam() {
+#ifdef ESP32
+    const bool held = InputManager::getInstance().isKeyDownNow(JAM_HOLD_KEY);
+    if (held) {
+        const rf::JamMode mode = (jamModeSel_ == 0) ? rf::JamMode::CarrierWave
+                                                    : rf::JamMode::ModulatedNoise;
+        rf::ookJamBurst(mode, JAM_CHUNK_MS);  // one burst, then GDO0 is released
+    }
+    if (held != jamEmitting_) {
+        jamEmitting_ = held;
+        needsRedraw_ = true;  // flip the live indicator only on a change
+    }
+#endif
+}
+
 // --- Frame update ------------------------------------------------------------
 
 void RadioScreen::update() {
@@ -447,6 +503,8 @@ void RadioScreen::update() {
         }
     } else if (state_ == MenuState::NRF_SCAN && scanActive_) {
         stepNrfScan();
+    } else if (state_ == MenuState::JAM_ACTIVE && jamArmed_) {
+        stepJam();
     }
 }
 
@@ -492,7 +550,7 @@ bool RadioScreen::handleInput(char key) {
             return true;
 
         case MenuState::MAIN:
-            if (listNav(key, mainSelection_, 3, unusedScroll, 3)) return true;
+            if (listNav(key, mainSelection_, 4, unusedScroll, 4)) return true;
             if (key == '\n' || key == '\r') {
                 if (mainSelection_ == 0) {
                     startCapture();
@@ -501,8 +559,11 @@ bool RadioScreen::handleInput(char key) {
                     fileSelection_ = 0;
                     fileScroll_ = 0;
                     state_ = MenuState::SIGNAL_LIST;
-                } else {
+                } else if (mainSelection_ == 2) {
                     state_ = MenuState::FREQ_SELECT;
+                } else {
+                    jamModeSel_ = 0;
+                    state_ = MenuState::JAM_SELECT;
                 }
             } else if (key == '`') {
                 state_ = MenuState::RADIO_SELECT;  // back to the radio root
@@ -555,6 +616,34 @@ bool RadioScreen::handleInput(char key) {
                 return true;
             }
             if (key == '\n' || key == '\r' || key == '`') state_ = MenuState::MAIN;
+            return true;
+
+        case MenuState::JAM_SELECT:
+            if (listNav(key, jamModeSel_, 2, unusedScroll, 2)) return true;
+            if (key == '\n' || key == '\r') state_ = MenuState::JAM_CONFIRM;
+            else if (key == '`') state_ = MenuState::MAIN;
+            return true;
+
+        case MenuState::JAM_CONFIRM:
+            if (key == 'y' || key == 'Y') {
+                if (jamArm()) {
+                    state_ = MenuState::JAM_ACTIVE;
+                } else {
+                    showErrorToast("Radio arm failed");
+                    state_ = MenuState::MAIN;
+                }
+            } else if (key == 'n' || key == 'N' || key == '`') {
+                state_ = MenuState::JAM_SELECT;
+            }
+            return true;
+
+        case MenuState::JAM_ACTIVE:
+            // Hold-to-jam is polled in stepJam(); here we only catch the exit. Any
+            // other key (the SPACE hold included) is ignored.
+            if (key == '`') {
+                jamDisarm();
+                state_ = MenuState::MAIN;
+            }
             return true;
 
         case MenuState::CAPTURE_REVIEW:
@@ -613,6 +702,9 @@ void RadioScreen::render(Canvas& canvas) {
             drawConfirm(canvas, "Delete this signal?", theme::WARNING());
             break;
         case MenuState::FREQ_SELECT:  drawFreqSelect(canvas); break;
+        case MenuState::JAM_SELECT:
+        case MenuState::JAM_CONFIRM:
+        case MenuState::JAM_ACTIVE:   drawJam(canvas); break;
     }
 
     footerHints_.render(canvas);
@@ -727,8 +819,8 @@ void RadioScreen::drawMain(Canvas& canvas) {
     canvas.printf("CC1101  %s", PRESETS[presetIndex_].label);
     y += LINE_HEIGHT + 2;
 
-    const char* items[3] = {"Capture", "Saved signals", "Frequency"};
-    for (int i = 0; i < 3; ++i) {
+    const char* items[4] = {"Capture", "Saved signals", "Frequency", "Jam"};
+    for (int i = 0; i < 4; ++i) {
         if (i == mainSelection_) {
             canvas.fillRect(0, y - 2, canvas.width(), LINE_HEIGHT, theme::BG_SELECTED());
             canvas.setTextColor(theme::TEXT_PRIMARY());
@@ -859,6 +951,74 @@ void RadioScreen::drawConfirm(Canvas& canvas, const char* question, uint16_t acc
     canvas.setCursor(x, y);
     canvas.printf("%.26s", signals_[fileSelection_].name);
     // The Yes/No/Cancel actions live in the footer hints (updateFooterHints).
+}
+
+void RadioScreen::drawJam(Canvas& canvas) {
+    int16_t x = theme::PADDING_MD;
+    int16_t y = HEADER_HEIGHT + 6;
+    canvas.setTextSize(1);
+    canvas.setTextColor(theme::ACCENT());
+    canvas.setCursor(x, y);
+    canvas.printf("Jammer  %s", PRESETS[presetIndex_].label);
+    y += LINE_HEIGHT + 2;
+
+    if (state_ == MenuState::JAM_SELECT) {
+        const char* modes[2] = {"Carrier (CW)", "Noise (modulated)"};
+        for (int i = 0; i < 2; ++i) {
+            if (i == jamModeSel_) {
+                canvas.fillRect(0, y - 2, canvas.width(), LINE_HEIGHT, theme::BG_SELECTED());
+                canvas.setTextColor(theme::TEXT_PRIMARY());
+            } else {
+                canvas.setTextColor(theme::TEXT_SECONDARY());
+            }
+            canvas.setCursor(x, y);
+            canvas.print(modes[i]);
+            y += LINE_HEIGHT;
+        }
+        return;
+    }
+
+    const char* modeName = (jamModeSel_ == 0) ? "Carrier (CW)" : "Noise";
+
+    if (state_ == MenuState::JAM_CONFIRM) {
+        canvas.setTextColor(theme::WARNING());
+        canvas.setCursor(x, y);
+        canvas.print("Transmit a JAM signal?");
+        y += LINE_HEIGHT;
+        canvas.setTextColor(theme::TEXT_SECONDARY());
+        canvas.setCursor(x, y);
+        canvas.print("Illegal to operate on live");
+        y += LINE_HEIGHT;
+        canvas.setCursor(x, y);
+        canvas.print("bands. Authorized tests only.");
+        y += LINE_HEIGHT + 2;
+        canvas.setTextColor(theme::TEXT_PRIMARY());
+        canvas.setCursor(x, y);
+        canvas.printf("%s @ %s", modeName, PRESETS[presetIndex_].label);
+        return;
+    }
+
+    // JAM_ACTIVE
+    if (jamEmitting_) {
+        canvas.setTextColor(theme::ACCENT());
+        canvas.setCursor(x, y);
+        canvas.print(">> JAMMING <<");
+    } else {
+        canvas.setTextColor(theme::TEXT_SECONDARY());
+        canvas.setCursor(x, y);
+        canvas.print("Armed");
+    }
+    y += LINE_HEIGHT + 2;
+    canvas.setTextColor(theme::TEXT_PRIMARY());
+    canvas.setCursor(x, y);
+    canvas.printf("%s @ %s", modeName, PRESETS[presetIndex_].label);
+    y += LINE_HEIGHT;
+    canvas.setTextColor(theme::TEXT_DISABLED());
+    canvas.setCursor(x, y);
+    canvas.print("Hold SPACE = jam");
+    y += LINE_HEIGHT;
+    canvas.setCursor(x, y);
+    canvas.print("ESC = stop");
 }
 
 void RadioScreen::drawFreqSelect(Canvas& canvas) {
