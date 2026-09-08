@@ -160,3 +160,26 @@ build (2,444,560 vs 2,408,336 B) — expected from embedded build paths/timestam
 regression; the factory image is validated by `esptool merge-bin` inside the run. All three
 DoD scenarios hold: the assets published on the tag, the factory image is a valid flashable
 `0x0` image, and a non-tag push cuts no release.
+
+## Amendment — 2026-09-08: the factory image bricked a device — `--flash-mode` must be `dio`
+
+The first real hardware flash of the factory image (via the slice-0016 web flasher, at
+`v0.1.1-alpha`) **hard-bricked the device into a boot loop**: `rst:0x7 (TG0WDT_SYS_RST)`
+repeating in ROM, never reaching the 2nd-stage bootloader.
+
+Root cause: `merge-bin` used **`--flash-mode qio`**, which patches the bootloader header
+(byte 2) to QIO (`0x00`). The ESP32-S3 **ROM** reads the 2nd-stage bootloader using that
+header mode *before* anything enables quad mode, so a QIO header makes the ROM misread the
+bootloader → watchdog reset loop. The images are actually **built `dio`** (`0x02`), and
+PlatformIO's own flasher converts `qio`→`dio` for writing precisely for this reason
+(`_get_board_flash_mode` in the platform builder); QIO is enabled at *runtime*, never in the
+header. Recovery was a re-flash with `--flash-mode dio`, confirmed booting clean (heartbeat,
+zero TG0WDT).
+
+The Verification note above is the cautionary tale: `esptool image_info` reported "mode QIO,
+Validation hash valid" and that was taken as proof — but `image_info` validates image
+*structure*, **not** whether the flash mode is ROM-bootable on the target. Structural
+validity is necessary, not sufficient; only a real device boot is sufficient.
+
+Fix: `merge-bin --flash-mode dio` (freq/size unchanged — they were never the issue). A DIO
+bootloader header is now asserted in the pipeline's own check. Shipped at `v0.1.2-alpha`.

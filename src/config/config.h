@@ -19,7 +19,7 @@ namespace config {
 // Tracks the public release tag (v<VERSION>). Bump this in the same commit the
 // release tag points at; 0.7.0-alpha was a pre-squash private leftover, realigned
 // to the public v0.1.x line at the 0.1.1-alpha release. See slices/0014, 0016.
-constexpr const char* VERSION = "0.1.1-alpha";
+constexpr const char* VERSION = "0.1.2-alpha";
 constexpr const char* BUILD_DATE = __DATE__;
 constexpr const char* PROJECT_NAME = "The Adversary";
 

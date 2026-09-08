@@ -61,15 +61,30 @@ jobs:
 
           # Full factory image for a fresh esptool / web-flasher install at 0x0. Offsets
           # are the default_8MB.csv layout (S3 bootloader at 0x0, otadata 0xe000, app0
-          # 0x10000); flash params match the board (qio/80m/8MB). Proven byte-for-byte
-          # locally in slice-0014.
+          # 0x10000).
+          #
+          # flash-mode MUST be dio, not qio: the S3 ROM reads the 2nd-stage bootloader
+          # using the mode in the bootloader header BEFORE quad mode can be enabled, so a
+          # qio header makes the ROM misread it -> TG0WDT reset loop (a hard brick that
+          # esptool image_info does NOT catch). This is exactly why PlatformIO's flasher
+          # converts qio->dio for writing (_get_board_flash_mode); merge-bin bypassed that
+          # and shipped a qio image that bricked a device on the first real flash. The
+          # images are built dio anyway; qio is enabled at runtime, not in the header.
           esptool --chip esp32s3 merge-bin \
             -o "dist/adversary-cardputer-${version}-factory.bin" \
-            --flash-mode qio --flash-freq 80m --flash-size 8MB \
+            --flash-mode dio --flash-freq 80m --flash-size 8MB \
             0x0 "$build/bootloader.bin" \
             0x8000 "$build/partitions.bin" \
             0xe000 "$boot_app0" \
             0x10000 "$build/firmware.bin"
+
+          # Fail loud if the factory bootloader header is not dio. The S3 ROM reads the
+          # 2nd-stage bootloader in this mode; a qio header (0x00) hard-bricks the device
+          # (TG0WDT loop) and esptool image_info does NOT catch it. Refuse to publish a
+          # bricking image. See the slice-0014 amendment.
+          mode="$(od -An -tx1 -j2 -N1 "dist/adversary-cardputer-${version}-factory.bin" | tr -d ' ')"
+          echo "factory bootloader flash-mode byte: 0x${mode} (want 0x02 = dio)"
+          test "$mode" = "02" || { echo "ERROR: factory bootloader is not dio; refusing to publish a brick"; exit 1; }
 
           # Stable-named copy of the factory image so the web flasher's manifest
           # (web/manifest.json) can point at a fixed URL:
