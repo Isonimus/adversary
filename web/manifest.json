@@ -1,0 +1,16 @@
+{
+  "name": "The Adversary",
+  "version": "latest",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32-S3",
+      "parts": [
+        {
+          "path": "https://github.com/Isonimus/adversary/releases/latest/download/adversary-cardputer-factory.bin",
+          "offset": 0
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+name: Pages
+
+# Publish the web flasher (web/) to GitHub Pages. The page is static — it points
+# at the factory image on the latest GitHub Release via web/manifest.json — so it
+# only needs redeploying when web/ itself changes, not on every firmware release.
+# See slices/0016.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'web/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+# Least privilege for the Pages deployment: read the repo, write the Pages site,
+# and mint the OIDC token deploy-pages exchanges. No third-party actions.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never let two Pages deploys race; let an in-flight one finish (don't cancel a
+# publish midway).
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/configure-pages@v5
+
+      - name: Upload web/ as the Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

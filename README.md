@@ -135,10 +135,21 @@ external hardware.
 
 ## Installation
 
-The fastest path is to flash a **prebuilt release**; building from source (Option B) is
-only needed for development or an unreleased change.
+The fastest path is the **[web flasher](https://isonimus.github.io/adversary/)** — flash
+from the browser, no tools. Or download a **prebuilt release** and flash it yourself.
+Building from source (Option C) is only needed for development or an unreleased change.
 
-### Option A — Flash a prebuilt release (Cardputer)
+### Option A — One-click web flasher (Cardputer)
+
+Open the **[web flasher](https://isonimus.github.io/adversary/)** in desktop Chrome, Edge,
+or Opera, connect the Cardputer over USB-C, and click **Connect & Flash**. It writes the
+latest release's factory image over Web Serial — no PlatformIO, no `esptool`, no clone.
+
+> [!NOTE]
+> Web Serial is Chromium-only (Chrome/Edge/Opera on desktop). On Firefox, Safari, or
+> mobile, use Option B or C.
+
+### Option B — Flash a prebuilt release (Cardputer)
 
 Every version tag publishes ready-to-flash binaries on the
 [Releases page](https://github.com/Isonimus/adversary/releases). Download the assets for
@@ -163,9 +174,9 @@ device.
 
 > [!NOTE]
 > Prebuilt binaries are published for the **Cardputer** only. For the M5StickC Plus2, build
-> from source (Option B).
+> from source (Option C).
 
-### Option B — Build from source
+### Option C — Build from source
 
 #### Prerequisites
 

@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Adversary — Web Flasher</title>
+    <meta name="description"
+        content="Flash The Adversary red-team wireless firmware to an M5Stack Cardputer directly from your browser.">
+
+    <style>
+        /* ---- Palette: the on-device "red-team" theme, verbatim ----------------
+           Shared with dashboard_dev/index.css so the install page reads as the
+           same product. Typography deliberately diverges (mono instrument panel
+           vs. the dashboard's glass sans) — different register, same identity. */
+        :root {
+            --ground: #000000;
+            --panel: #0b0b0b;
+            --panel-2: #121212;
+            --rule: #2a2a2a;
+            --rule-bright: #3a3a3a;
+            --text: #f2f2f2;
+            --dim: #7b7b7b;
+            --dimmer: #4e4e4e;
+            --accent: #ff2020;
+            --accent-dim: #7a0f0f;
+
+            --mono: ui-monospace, "SF Mono", SFMono-Regular, "JetBrains Mono", "Fira Mono", Menlo, Consolas, monospace;
+            --grotesk: "Helvetica Neue", "Arial Narrow", system-ui, sans-serif;
+
+            --measure: 46rem;
+        }
+
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+        }
+
+        html {
+            -webkit-text-size-adjust: 100%;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            background: var(--ground);
+            color: var(--text);
+            font-family: var(--mono);
+            font-size: 15px;
+            line-height: 1.5;
+            /* A single faint scan texture — 3px hairlines, not a gradient wash. */
+            background-image: repeating-linear-gradient(0deg,
+                    rgba(255, 255, 255, 0.014) 0,
+                    rgba(255, 255, 255, 0.014) 1px,
+                    transparent 1px,
+                    transparent 3px);
+            padding: clamp(1.25rem, 4vw, 3.5rem);
+            display: flex;
+            justify-content: center;
+        }
+
+        main {
+            width: 100%;
+            max-width: var(--measure);
+        }
+
+        /* ---- Masthead --------------------------------------------------------- */
+        header {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 1rem;
+            padding-bottom: 0.75rem;
+            border-bottom: 1px solid var(--rule);
+        }
+
+        .wordmark {
+            font-weight: 700;
+            font-size: clamp(1.05rem, 3.4vw, 1.4rem);
+            letter-spacing: 0.42em;
+            margin: 0;
+            text-transform: uppercase;
+            /* letter-spacing pushes a phantom gap on the right; pull it back. */
+            margin-right: -0.42em;
+        }
+
+        .cursor {
+            color: var(--accent);
+            font-weight: 400;
+            animation: blink 1.05s steps(1) infinite;
+        }
+
+        @keyframes blink {
+            50% {
+                opacity: 0;
+            }
+        }
+
+        .tag {
+            font-size: 0.72rem;
+            letter-spacing: 0.24em;
+            text-transform: uppercase;
+            color: var(--accent);
+            border: 1px solid var(--accent-dim);
+            padding: 0.15rem 0.55rem;
+            white-space: nowrap;
+        }
+
+        /* ---- Lead ------------------------------------------------------------- */
+        .lead {
+            margin: 2.25rem 0 0;
+            font-family: var(--grotesk);
+            font-weight: 700;
+            font-size: clamp(1.5rem, 5.2vw, 2.35rem);
+            line-height: 1.14;
+            letter-spacing: -0.015em;
+            max-width: 22ch;
+        }
+
+        .lead b {
+            color: var(--accent);
+            font-weight: 700;
+        }
+
+        .sub {
+            margin: 1rem 0 0;
+            color: var(--dim);
+            max-width: 56ch;
+        }
+
+        .sub a {
+            color: var(--text);
+            text-decoration: none;
+            border-bottom: 1px solid var(--rule-bright);
+        }
+
+        .sub a:hover {
+            border-bottom-color: var(--accent);
+        }
+
+        /* ---- Install panel: framed like an instrument ------------------------- */
+        .panel {
+            position: relative;
+            margin: 2.5rem 0;
+            padding: clamp(1.5rem, 4vw, 2.25rem);
+            background: var(--panel);
+            border: 1px solid var(--rule);
+        }
+
+        /* corner ticks */
+        .panel::before,
+        .panel::after {
+            content: "";
+            position: absolute;
+            width: 9px;
+            height: 9px;
+            border: 1px solid var(--accent);
+        }
+
+        .panel::before {
+            top: -1px;
+            left: -1px;
+            border-right: 0;
+            border-bottom: 0;
+        }
+
+        .panel::after {
+            bottom: -1px;
+            right: -1px;
+            border-left: 0;
+            border-top: 0;
+        }
+
+        .panel-label {
+            font-size: 0.7rem;
+            letter-spacing: 0.28em;
+            text-transform: uppercase;
+            color: var(--dim);
+            margin: 0 0 1.1rem;
+        }
+
+        .panel-label::before {
+            content: "// ";
+            color: var(--accent);
+        }
+
+        /* The activate button handed to <esp-web-install-button> via slot. */
+        button.install {
+            font-family: var(--mono);
+            font-size: 0.95rem;
+            font-weight: 700;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+            color: var(--ground);
+            background: var(--accent);
+            border: 1px solid var(--accent);
+            padding: 0.85rem 1.9rem;
+            cursor: pointer;
+            transition: background 0.12s linear, color 0.12s linear;
+        }
+
+        button.install:hover,
+        button.install:focus-visible {
+            background: transparent;
+            color: var(--accent);
+            outline: none;
+        }
+
+        button.install::before {
+            content: "▸ ";
+        }
+
+        .panel-note {
+            margin: 1.1rem 0 0;
+            font-size: 0.82rem;
+            color: var(--dim);
+        }
+
+        .panel-note strong {
+            color: var(--text);
+            font-weight: 400;
+        }
+
+        /* Unsupported-browser fallback (slotted into the web component). */
+        .unsupported {
+            margin: 0;
+            color: var(--text);
+            border-left: 2px solid var(--accent);
+            padding-left: 0.9rem;
+        }
+
+        .unsupported span {
+            display: block;
+            color: var(--dim);
+            font-size: 0.82rem;
+            margin-top: 0.35rem;
+        }
+
+        /* ---- Spec readout: dotted-leader rows --------------------------------- */
+        .readout {
+            margin: 0;
+            display: grid;
+            gap: 0.55rem;
+        }
+
+        .spec {
+            display: flex;
+            align-items: baseline;
+            gap: 0.6ch;
+            margin: 0;
+            font-size: 0.9rem;
+        }
+
+        .spec dt {
+            white-space: nowrap;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            color: var(--dim);
+            font-size: 0.78rem;
+        }
+
+        .spec .fill {
+            flex: 1 1 auto;
+            border-bottom: 1px dotted var(--dimmer);
+            transform: translateY(-0.28em);
+            min-width: 1.5ch;
+        }
+
+        .spec dd {
+            margin: 0;
+            white-space: nowrap;
+            color: var(--text);
+        }
+
+        .spec dd em {
+            font-style: normal;
+            color: var(--accent);
+        }
+
+        /* ---- Manual / details ------------------------------------------------- */
+        details {
+            margin-top: 2.25rem;
+            border-top: 1px solid var(--rule);
+            padding-top: 1.25rem;
+        }
+
+        summary {
+            cursor: pointer;
+            list-style: none;
+            color: var(--dim);
+            font-size: 0.82rem;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            user-select: none;
+        }
+
+        summary::-webkit-details-marker {
+            display: none;
+        }
+
+        summary::before {
+            content: "[+] ";
+            color: var(--accent);
+        }
+
+        details[open] summary::before {
+            content: "[–] ";
+        }
+
+        details p {
+            color: var(--dim);
+            font-size: 0.86rem;
+        }
+
+        pre {
+            margin: 0.9rem 0 0;
+            padding: 1rem 1.1rem;
+            background: var(--panel-2);
+            border: 1px solid var(--rule);
+            overflow-x: auto;
+            font-size: 0.82rem;
+            line-height: 1.6;
+            color: var(--text);
+        }
+
+        pre .c {
+            color: var(--dim);
+        }
+
+        pre b {
+            color: var(--accent);
+            font-weight: 400;
+        }
+
+        /* ---- Footer ----------------------------------------------------------- */
+        footer {
+            margin-top: 3rem;
+            padding-top: 1.25rem;
+            border-top: 1px solid var(--rule);
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem 1.75rem;
+            align-items: baseline;
+            justify-content: space-between;
+        }
+
+        .legal {
+            margin: 0;
+            max-width: 52ch;
+            font-size: 0.78rem;
+            color: var(--dimmer);
+            line-height: 1.55;
+        }
+
+        .legal::before {
+            content: "! ";
+            color: var(--accent);
+            font-weight: 700;
+        }
+
+        .legal a {
+            color: var(--dim);
+        }
+
+        nav {
+            display: flex;
+            gap: 1.25rem;
+            font-size: 0.78rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        nav a {
+            color: var(--dim);
+            text-decoration: none;
+        }
+
+        nav a:hover {
+            color: var(--accent);
+        }
+
+        @media (max-width: 34rem) {
+            header {
+                flex-direction: column;
+                gap: 0.6rem;
+            }
+
+            .spec dd {
+                white-space: normal;
+            }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .cursor {
+                animation: none;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <main>
+        <header>
+            <h1 class="wordmark">Adversary<span class="cursor">█</span></h1>
+            <span class="tag">Alpha · Cardputer</span>
+        </header>
+
+        <p class="lead">Flash the firmware <b>from your browser.</b></p>
+        <p class="sub">
+            The Adversary is red-team wireless pentesting firmware for the M5Stack Cardputer.
+            Plug the device in over USB, click install — no toolchain, no <code>esptool</code>,
+            no clone. Flashes the latest tagged
+            <a href="https://github.com/Isonimus/adversary/releases/latest">release</a>.
+        </p>
+
+        <section class="panel" aria-labelledby="install-label">
+            <p class="panel-label" id="install-label">Install</p>
+
+            <esp-web-install-button manifest="./manifest.json">
+                <button class="install" slot="activate" type="button">Connect &amp; Flash</button>
+                <p class="unsupported" slot="unsupported">
+                    Your browser can't talk to serial devices.
+                    <span>Web Serial needs desktop Chrome, Edge, or Opera. On Firefox / Safari /
+                        mobile, use the manual install below.</span>
+                </p>
+                <p class="unsupported" slot="not-allowed">
+                    This page must be served over HTTPS to flash.
+                    <span>Open the hosted page rather than a local <code>file://</code> copy.</span>
+                </p>
+            </esp-web-install-button>
+
+            <p class="panel-note">
+                <strong>You'll need:</strong> an M5Stack Cardputer, a USB-C data cable, and desktop
+                Chrome or Edge. Install offers a full erase — flash settings and saved networks are
+                wiped; the SD card is untouched.
+            </p>
+        </section>
+
+        <dl class="readout">
+            <div class="spec">
+                <dt>Target</dt>
+                <span class="fill"></span>
+                <dd>M5Stack Cardputer / ADV · ESP32-S3</dd>
+            </div>
+            <div class="spec">
+                <dt>Image</dt>
+                <span class="fill"></span>
+                <dd>factory · merged @ <em>0x0</em></dd>
+            </div>
+            <div class="spec">
+                <dt>Source</dt>
+                <span class="fill"></span>
+                <dd>latest tagged GitHub release</dd>
+            </div>
+            <div class="spec">
+                <dt>Integrity</dt>
+                <span class="fill"></span>
+                <dd>SHA-256 · SHA256SUMS.txt</dd>
+            </div>
+            <div class="spec">
+                <dt>M5Stick</dt>
+                <span class="fill"></span>
+                <dd>not web-flashable yet</dd>
+            </div>
+        </dl>
+
+        <details>
+            <summary>Manual install (Firefox · Safari · CLI)</summary>
+            <p>
+                Download <code>-factory.bin</code> and <code>SHA256SUMS.txt</code> from the
+                <a href="https://github.com/Isonimus/adversary/releases/latest">latest release</a>,
+                verify, then flash to <code>0x0</code>:
+            </p>
+            <pre><span class="c"># verify the download first</span>
+sha256sum -c SHA256SUMS.txt
+
+<span class="c"># flash a blank / bricked device (QIO · 80 MHz · 8 MB)</span>
+esptool <b>--chip esp32s3</b> --baud 921600 write-flash \
+    <b>0x0</b> adversary-cardputer-<span class="c">&lt;ver&gt;</span>-factory.bin</pre>
+        </details>
+
+        <footer>
+            <p class="legal">
+                For authorized security testing and education only. Unauthorized access to networks
+                is illegal — you are responsible for how you use this.
+                <a href="https://github.com/Isonimus/adversary/blob/main/DISCLAIMER.md">Read the disclaimer.</a>
+            </p>
+            <nav>
+                <a href="https://github.com/Isonimus/adversary">Source</a>
+                <a href="https://github.com/Isonimus/adversary/releases">Releases</a>
+                <a href="https://github.com/Isonimus/adversary/blob/main/README.md">Docs</a>
+            </nav>
+        </footer>
+    </main>
+
+    <!-- ESP Web Tools: the one runtime CDN dependency. Pinned; bump deliberately.
+         Loads the <esp-web-install-button> custom element (Web Serial installer). -->
+    <script type="module"
+        src="https://unpkg.com/esp-web-tools@10.4.0/dist/web/install-button.js?module"></script>
+</body>
+
+</html>

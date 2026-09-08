@@ -71,6 +71,15 @@ jobs:
             0xe000 "$boot_app0" \
             0x10000 "$build/firmware.bin"
 
+          # Stable-named copy of the factory image so the web flasher's manifest
+          # (web/manifest.json) can point at a fixed URL:
+          #   releases/latest/download/adversary-cardputer-factory.bin
+          # GitHub's /latest/ redirect only resolves an asset whose name does not
+          # change between releases, and only for the release marked "Latest" — so
+          # do NOT cut releases with --prerelease or this download 404s. See slice-0016.
+          cp "dist/adversary-cardputer-${version}-factory.bin" \
+             "dist/adversary-cardputer-factory.bin"
+
           ( cd dist && sha256sum adversary-cardputer-*.bin > SHA256SUMS.txt )
           ls -la dist
 
@@ -85,4 +94,5 @@ jobs:
             --generate-notes \
             "dist/adversary-cardputer-${version}-app.bin" \
             "dist/adversary-cardputer-${version}-factory.bin" \
+            "dist/adversary-cardputer-factory.bin" \
             dist/SHA256SUMS.txt
