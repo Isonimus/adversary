@@ -1,15 +1,19 @@
 name: Pages
 
-# Publish the web flasher (web/) to GitHub Pages. The page is static — it points
-# at the factory image on the latest GitHub Release via web/manifest.json — so it
-# only needs redeploying when web/ itself changes, not on every firmware release.
-# See slices/0016.
+# Publish the web flasher (web/) to GitHub Pages. The firmware is served
+# SAME-ORIGIN with the page: GitHub release assets send no CORS headers, so the
+# browser cannot fetch them cross-origin from Pages ("Failed to fetch"). Each
+# deploy pulls the latest release's factory image into the site and the manifest
+# points at a relative path. Hence the release trigger too — a new firmware
+# release must refresh the binary the page serves. See slices/0016.
 on:
   push:
     branches: [main]
     paths:
       - 'web/**'
       - '.github/workflows/pages.yml'
+  release:
+    types: [published]
   workflow_dispatch:
 
 # Least privilege for the Pages deployment: read the repo, write the Pages site,
@@ -33,6 +37,20 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v7
+
+      # Pull the latest release's factory image into the site so the manifest can
+      # reference it same-origin (see the header note on CORS). Not committed to
+      # git — assembled at deploy time. Fails loud if the asset is missing, rather
+      # than shipping a flasher whose Install button 404s.
+      - name: Fetch latest factory image into the site
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release download --repo "$GITHUB_REPOSITORY" \
+            --pattern adversary-cardputer-factory.bin \
+            --dir web
+          ls -la web/adversary-cardputer-factory.bin
 
       - uses: actions/configure-pages@v5
 

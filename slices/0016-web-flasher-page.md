@@ -158,6 +158,30 @@ API confirmed against the vendored file: `new Glitch(el, { effects:[Effects.decr
 trigger:'always' })` auto-starts; the decrypt self-completes; the frame loop is stopped
 after the reveal settles. (The README's `trigger:'manual'` does not exist in v2.0.0.)
 
+### Amendment — 2026-09-08: CORS forced a same-origin binary (design correction)
+
+The "manifest points at `releases/latest/download/…`, page never changes" design above
+was **wrong**, and it failed on the first real device flash with "Failed to fetch" (after
+the chip handshake succeeded). GitHub release assets send **no `access-control-allow-origin`
+header** — verified across the whole redirect chain (`github.com` → 302 →
+`release-assets.githubusercontent.com` → 200, no CORS header with an `Origin` request) — so
+the browser blocks a cross-origin `fetch()` of the firmware from the Pages origin. (The
+claim that ESPHome/Tasmota point web installers at GitHub release assets was a
+misremembering; they host firmware same-origin.)
+
+Fix: **serve the firmware same-origin with the page.** `web/manifest.json` now uses a
+relative path (`./adversary-cardputer-factory.bin`), and `pages.yml` pulls the latest
+release's factory image into the site at deploy time (`gh release download`, not committed
+to git — `*.bin` is git-ignored). Consequences:
+
+- `pages.yml` gains a `release: [published]` trigger — a new firmware release must refresh
+  the binary the page serves, not just a `web/**` push. The stable-named release asset
+  (from `release.yml`) is still published and is what the deploy step downloads by name.
+- The page is no longer strictly "static across releases" — the served binary is
+  release-versioned, refreshed on each publish. The HTML/CSS is still static.
+- The `releases/latest/download/…` URL remains valid for CLI/M5Burner users; only the
+  in-browser flasher needed same-origin.
+
 ## As built
 
 _To be completed once Pages is enabled and a real browser flash is observed green;
