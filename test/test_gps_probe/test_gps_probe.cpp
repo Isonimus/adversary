@@ -19,6 +19,7 @@ using adversary::gps::gpsProbePhase;
 using adversary::gps::ProbePhase;
 using adversary::gps::fixTransition;
 using adversary::gps::FixTransition;
+using adversary::gps::gpsBlocksRfid;
 
 namespace {
 constexpr uint32_t WINDOW_MS = 1200;  // mirrors GPS_PRESENCE_WINDOW_MS
@@ -86,6 +87,34 @@ void test_lost_on_falling_edge(void) {
     TEST_ASSERT_EQUAL(FixTransition::Lost, fixTransition(true, false));
 }
 
+// --- RFID coexistence: only a Grove-port GPS blocks the reader ----------------
+//
+// RFID (MFRC522 I2C) and a Grove GPS both need G1/G2, so they cannot coexist and
+// RFID is skipped. A cap GPS on G13/G15 shares nothing with the reader, so it
+// must leave RFID enabled — this gate is what keeps RFID available while
+// wardriving off the GNSS/LoRa cap. The literal source strings mirror exactly
+// what GPSManager::getDetectedPinSet() reports at runtime.
+
+void test_grove_gps_blocks_rfid(void) {
+    TEST_ASSERT_TRUE(gpsBlocksRfid(true, "Grove"));
+}
+
+void test_cap_gps_does_not_block_rfid(void) {
+    // The fix: a cap GPS shares no pins with the reader, so RFID stays enabled.
+    // Under the old "skip on any GPS" behaviour this would (wrongly) be true.
+    TEST_ASSERT_FALSE(gpsBlocksRfid(true, "Cap"));
+}
+
+void test_no_gps_does_not_block_rfid(void) {
+    TEST_ASSERT_FALSE(gpsBlocksRfid(false, nullptr));
+}
+
+void test_unknown_source_blocks_rfid_failsafe(void) {
+    // Fail-safe: a GPS detected with no reported source (shouldn't happen) must
+    // skip RFID rather than risk stomping a possibly-active Grove GPS on G1/G2.
+    TEST_ASSERT_TRUE(gpsBlocksRfid(true, nullptr));
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_byte_at_start_is_present);
@@ -98,5 +127,9 @@ int main(int, char**) {
     RUN_TEST(test_no_transition_when_fix_held);
     RUN_TEST(test_acquired_on_rising_edge);
     RUN_TEST(test_lost_on_falling_edge);
+    RUN_TEST(test_grove_gps_blocks_rfid);
+    RUN_TEST(test_cap_gps_does_not_block_rfid);
+    RUN_TEST(test_no_gps_does_not_block_rfid);
+    RUN_TEST(test_unknown_source_blocks_rfid_failsafe);
     return UNITY_END();
 }

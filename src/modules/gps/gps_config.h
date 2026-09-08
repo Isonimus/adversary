@@ -49,10 +49,16 @@ struct GPSPinSet {
     int8_t      txPin;  ///< ESP32 TX pin (sends data to GPS RX)
 };
 
+// Canonical pin-set source names. Defined once here so the detection table and
+// any caller reasoning about which physical pins a detected GPS occupies agree
+// on the exact spelling GPSManager reports via getDetectedPinSet().
+constexpr const char* GPS_SOURCE_CAP   = "Cap";    ///< Cap on-board GPS (G13/G15)
+constexpr const char* GPS_SOURCE_GROVE = "Grove";  ///< Grove-port GPS (G1/G2)
+
 /// Pin sets probed in order; cap takes priority over Grove.
 constexpr GPSPinSet GPS_PIN_SETS[] = {
-    { "Cap",   pins::CAP_GPS_RX, pins::CAP_GPS_TX },  ///< Cap LoRa 1262 on-board GPS
-    { "Grove", pins::GPS_RX,     pins::GPS_TX     },  ///< Grove port GPS
+    { GPS_SOURCE_CAP,   pins::CAP_GPS_RX, pins::CAP_GPS_TX },  ///< Cap LoRa 1262 on-board GPS
+    { GPS_SOURCE_GROVE, pins::GPS_RX,     pins::GPS_TX     },  ///< Grove port GPS
 };
 
 constexpr size_t GPS_PIN_SET_COUNT = sizeof(GPS_PIN_SETS) / sizeof(GPS_PIN_SETS[0]);

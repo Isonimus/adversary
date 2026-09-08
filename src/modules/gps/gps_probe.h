@@ -15,6 +15,9 @@
  */
 
 #include <cstdint>
+#include <cstring>
+
+#include "modules/gps/gps_config.h"
 
 namespace adversary {
 namespace gps {
@@ -43,6 +46,30 @@ constexpr ProbePhase gpsProbePhase(bool anyByteSeen, uint32_t elapsedMs, uint32_
     if (anyByteSeen) return ProbePhase::Present;
     if (elapsedMs >= windowMs) return ProbePhase::Absent;
     return ProbePhase::Waiting;
+}
+
+/**
+ * @brief Whether a detected GPS forces the RFID reader offline.
+ *
+ * The MFRC522 reader speaks I2C on the Grove pins (G1/G2); a Grove-port GPS
+ * drives those same pins for UART, so the two cannot coexist and RFID must be
+ * skipped. A cap GPS lives on G13/G15 and shares nothing with the reader, so it
+ * must NOT block RFID — the two run together (this is what keeps RFID available
+ * while wardriving off the GNSS/LoRa cap). No GPS at all blocks nothing.
+ *
+ * Fail-safe on an unknown source: a GPS was detected but its pin set is not
+ * reported (shouldn't happen — GPSManager sets it whenever init() succeeds — so
+ * this is drift insurance). Rather than risk bringing up RFID onto G1/G2 and
+ * stomping a possibly-active Grove GPS, treat unknown as a conflict and skip.
+ *
+ * @param gpsDetected    whether boot detection found a GPS
+ * @param detectedSource GPSManager::getDetectedPinSet() — GPS_SOURCE_CAP,
+ *                       GPS_SOURCE_GROVE, or nullptr
+ */
+inline bool gpsBlocksRfid(bool gpsDetected, const char* detectedSource) {
+    if (!gpsDetected) return false;
+    if (detectedSource == nullptr) return true;  // unknown → fail safe, skip RFID
+    return std::strcmp(detectedSource, GPS_SOURCE_GROVE) == 0;
 }
 
 } // namespace gps

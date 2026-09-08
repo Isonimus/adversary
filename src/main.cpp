@@ -55,6 +55,7 @@
 #include "modules/wifi/wifi_connection.h"
 #include "ui/components/toast_manager.h"
 #include "modules/gps/gps_manager.h"
+#include "modules/gps/gps_probe.h"
 #include "modules/system/system_manager.h"
 #include "modules/system/time_manager.h"
 #include "modules/ble/ble_scanner.h"
@@ -455,13 +456,14 @@ void setup() {
     }
     delay(100);
 
-    // Initialize RFID module (if present)
-    // NOTE: RFID and GPS share GPIO 1/2 on Cardputer Grove port
-    // RFID uses I2C (Wire.begin(2,1)), GPS uses UART - they cannot coexist
-    // If GPS is detected, skip RFID to avoid reconfiguring pins and killing GPS UART
-    if (adversary::ui::g_gpsDetected) {
-        splashScreen.updateProgress(0.78f, "RFID skipped (GPS active)");
-        Serial.println("[RFID] Skipped - GPS detected (GPIO 1/2 pin conflict)");
+    // Initialize RFID module (if present).
+    // RFID (MFRC522) speaks I2C on the Grove pins (G1/G2). Only a *Grove-port*
+    // GPS contends for those pins; a cap GPS on G13/G15 shares nothing, so RFID
+    // and a cap GPS coexist. Skip RFID only on the real Grove-port conflict.
+    const char* gpsSource = adversary::GPSManager::getInstance().getDetectedPinSet();
+    if (adversary::gps::gpsBlocksRfid(adversary::ui::g_gpsDetected, gpsSource)) {
+        splashScreen.updateProgress(0.78f, "RFID skipped (Grove GPS)");
+        Serial.println("[RFID] Skipped - Grove-port GPS owns GPIO 1/2 (pin conflict)");
         adversary::ui::g_rfidDetected = false;
     } else {
         splashScreen.updateProgress(0.78f, "Detecting RFID...");
