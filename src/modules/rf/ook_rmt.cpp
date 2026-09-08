@@ -200,10 +200,40 @@ bool ookRmtReplay(const OokSignal& sig) {
     return ok;
 }
 
+bool ookJamBurst(JamMode mode, uint32_t chunkMs) {
+    const int pin = pins::CC1101_GDO0;
+    pinMode(pin, OUTPUT);
+
+    bool ok = true;
+    if (mode == JamMode::CarrierWave) {
+        digitalWrite(pin, HIGH);  // steady carrier for the whole chunk
+        delay(chunkMs);
+    } else {
+        const JamNoisePlan plan = planJamNoise(chunkMs, JAM_NOISE_HALF_PERIOD_US);
+        if (plan.valid) {
+            for (uint32_t i = 0; i < plan.cycles; ++i) {
+                digitalWrite(pin, HIGH);
+                delayMicroseconds(JAM_NOISE_HALF_PERIOD_US);
+                digitalWrite(pin, LOW);
+                delayMicroseconds(JAM_NOISE_HALF_PERIOD_US);
+            }
+        } else {
+            ok = false;
+        }
+    }
+
+    // Drop the carrier and hand the shared matrix-row pin back so the next
+    // keyboard poll between bursts is not corrupted (CLAUDE.md pin invariant).
+    digitalWrite(pin, LOW);
+    pinMode(pin, INPUT_PULLUP);
+    return ok;
+}
+
 #else  // !TARGET_CARDPUTER
 
 bool ookRmtCapture(uint32_t, OokSignal&) { return false; }
 bool ookRmtReplay(const OokSignal&) { return false; }
+bool ookJamBurst(JamMode, uint32_t) { return false; }
 
 #endif  // TARGET_CARDPUTER
 

@@ -64,6 +64,9 @@ private:
         REPLAY_CONFIRM,  // "transmit?" gate (replay emits RF)
         DELETE_CONFIRM,  // "delete?" gate
         FREQ_SELECT,     // pick a frequency preset
+        JAM_SELECT,      // CC1101 jammer: pick emission mode (slice-0017)
+        JAM_CONFIRM,     // jammer: interference warning gate before arming
+        JAM_ACTIVE,      // jammer: armed; emits while the hold key is held
         NRF_SCAN,        // NRF24: live 2.4 GHz occupancy sweep (slice-0006)
     };
 
@@ -83,6 +86,7 @@ private:
     void drawSignalAction(Canvas& canvas);
     void drawConfirm(Canvas& canvas, const char* question, uint16_t accent);
     void drawFreqSelect(Canvas& canvas);
+    void drawJam(Canvas& canvas);  // mode-select / confirm / active (slice-0017)
 
     // Draws an OOK signal's summary (RAW · N edges · freq) plus its static
     // pulse-strip preview. Shared by the capture-review and signal-detail screens.
@@ -111,6 +115,12 @@ private:
     void stopNrfScan();
     void stepNrfScan();
 
+    // CC1101 jammer (slice-0017): arm the radio into TX once, emit one bit-banged
+    // GDO0 burst per frame while the hold key is down, power down on exit.
+    bool jamArm();     // cc1101ConfigureOok + EnterTx on the current preset
+    void jamDisarm();  // cc1101Idle + remount; safe to call when not armed
+    void stepJam();    // per-frame: emit a burst if the hold key is held
+
     bool visible_;
     bool shouldExit_;
     bool needsRedraw_;
@@ -125,6 +135,9 @@ private:
     int fileSelection_;
     int fileScroll_;
     uint8_t captureStage_; // ramps so "Listening" paints before the blocking RX
+    int jamModeSel_;       // 0=Carrier (CW) 1=Noise (modulated)
+    bool jamArmed_;        // radio configured and held in TX
+    bool jamEmitting_;     // hold key was down on the last frame (live indicator)
 
     std::vector<SignalEntry> signals_;
     rf::OokSignal pendingSignal_;  // just-captured, awaiting review then a name
@@ -144,6 +157,12 @@ private:
     static constexpr int VISIBLE_ROWS = 5;
     static constexpr uint32_t CAPTURE_WINDOW_MS = 6000;
     static constexpr uint8_t NAME_MAX_LEN = 24;
+
+    // Jammer (slice-0017): one 80 ms bit-banged burst per frame, then the shared
+    // GDO0 matrix row is released so the keyboard poll between bursts is clean and
+    // key release is seen within a burst + a frame. Hold SPACE to emit.
+    static constexpr uint32_t JAM_CHUNK_MS = 80;
+    static constexpr char JAM_HOLD_KEY = ' ';
 
     // NRF24 sweep tuning. Per-channel RX dwell; channels sampled per update() so a
     // full 126-channel sweep spans a few frames, keeping the Back key responsive.
