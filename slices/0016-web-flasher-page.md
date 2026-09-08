@@ -182,6 +182,28 @@ to git — `*.bin` is git-ignored). Consequences:
 - The `releases/latest/download/…` URL remains valid for CLI/M5Burner users; only the
   in-browser flasher needed same-origin.
 
+### Amendment — 2026-09-08: the `release: published` trigger never fired for CI releases
+
+The previous amendment added a `release: [published]` trigger to `pages.yml` on the
+premise that publishing a new firmware release would refresh the same-origin binary. On
+the first CI release that mattered (`v0.1.2-alpha`, the DIO brick fix), **it did not
+fire**: the Pages deploy that pulled the fixed binary had to be dispatched by hand.
+
+Root cause: GitHub deliberately does **not** cascade events emitted by the built-in
+`GITHUB_TOKEN` into new workflow runs (a recursion guard). `release.yml` cuts the release
+with `gh release create`, which uses that token, so the `release: published` event it emits
+is invisible to `pages.yml`. Left as-is, every future release would silently keep serving
+the previous firmware until someone noticed.
+
+`workflow_dispatch` and `repository_dispatch` are the two events **exempt** from that
+suppression. Fix: `release.yml` now dispatches `pages.yml` explicitly as its final step
+(`gh workflow run pages.yml --ref main`, needing `actions: write`), which is the path CI
+releases take. The `release: [published]` trigger is kept as a fallback for a human-published
+release (e.g. one edited/published from the GitHub UI), and its comment now says so. Shipped
+alongside `v0.1.2-alpha`; verified that day by fetching the live-served binary
+(`https://isonimus.github.io/adversary/adversary-cardputer-factory.bin`) — 2,510,128 B,
+bootloader header byte `0x02` (dio), sha256 identical to the release asset.
+
 ## As built
 
 _To be completed once Pages is enabled and a real browser flash is observed green;
