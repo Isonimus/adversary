@@ -49,6 +49,24 @@ constexpr double CC1101_FREQ_43392_MHZ = 433.92;
 constexpr double CC1101_FREQ_86835_MHZ = 868.35;
 constexpr double CC1101_FREQ_915_MHZ = 915.0;
 
+/// Datasheet RSSI offset (dB) subtracted when converting the raw RSSI register to
+/// dBm (CC1101 §17.3, typical value). The band-sweep only ranks bands relatively,
+/// so the exact offset is uncritical; this keeps the readout close to true dBm.
+constexpr int CC1101_RSSI_OFFSET_DBM = 74;
+
+/**
+ * @brief Raw RSSI status-register byte -> dBm (CC1101 §17.3). Pure, native-tested.
+ *
+ * The byte is a two's-complement value in half-dB steps: >=128 reads as negative
+ * (weak), <128 as positive (strong). dBm = rssi_dec/2 - offset. A wrong sign or
+ * offset here silently mis-ranks the bands, so it is pinned by test_cc1101_rssi.
+ */
+inline int16_t cc1101RssiDbm(uint8_t raw) {
+    const int rssiDec = (raw >= 128) ? (static_cast<int>(raw) - 256)
+                                     : static_cast<int>(raw);
+    return static_cast<int16_t>(rssiDec / 2 - CC1101_RSSI_OFFSET_DBM);
+}
+
 // --- Firmware register-driving functions (defined in cc1101.cpp) -------------
 
 /**
@@ -65,6 +83,15 @@ bool cc1101ConfigureOok(double carrierMHz);
 
 /// Strobe into RX and wait for MARCSTATE=RX. @return true iff RX was reached.
 bool cc1101EnterRx();
+
+/**
+ * @brief Read the RSSI status register and convert to dBm (see cc1101RssiDbm).
+ *
+ * Must be called while the radio is in RX and has had time to settle; the band
+ * sweep enters RX, waits RSSI_SETTLE, then reads. @return the dBm estimate, or
+ * INT16_MIN if the SD/FSPI bus is not owned (nothing to read).
+ */
+int16_t cc1101ReadRssiDbm();
 
 /// Strobe into TX and wait for MARCSTATE=TX. @return true iff TX was reached.
 bool cc1101EnterTx();

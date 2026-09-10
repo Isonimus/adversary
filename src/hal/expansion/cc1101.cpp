@@ -67,6 +67,7 @@ constexpr uint8_t REG_FSTEST   = 0x29;
 constexpr uint8_t REG_TEST2    = 0x2C;
 constexpr uint8_t REG_TEST1    = 0x2D;
 constexpr uint8_t REG_TEST0    = 0x2E;
+constexpr uint8_t REG_RSSI     = 0x34;   // status register (burst-read only)
 constexpr uint8_t REG_VERSION  = 0x31;   // status register (burst-read only)
 constexpr uint8_t REG_MARCSTATE = 0x35;  // status register (burst-read only)
 constexpr uint8_t REG_PATABLE  = 0x3E;
@@ -242,6 +243,12 @@ bool cc1101EnterRx() {
     return enterState(STROBE_SRX, MARC_STATE_RX);
 }
 
+int16_t cc1101ReadRssiDbm() {
+    SPIClass* bus = SDManager::getInstance().spiBus();
+    if (!bus) return INT16_MIN;  // bus not owned: nothing to read (fail loud)
+    return cc1101RssiDbm(readStatusReg(bus, REG_RSSI));
+}
+
 bool cc1101EnterTx() {
     return enterState(STROBE_STX, MARC_STATE_TX);
 }
@@ -264,6 +271,7 @@ void cc1101Idle() {
 bool cc1101ConfigureOok(double) { return false; }
 bool cc1101EnterRx() { return false; }
 bool cc1101EnterTx() { return false; }
+int16_t cc1101ReadRssiDbm() { return INT16_MIN; }
 void cc1101Idle() {}
 
 #endif  // TARGET_CARDPUTER

@@ -7,6 +7,9 @@ releases, this can be replaced by a git-tag-generated changelog.
 ---
 
 
+## 2026-09-10
+- **Sub-GHz RSSI band-sweep (CC1101).** Reads the CC1101's RSSI across the four band presets (315 / 433.92 / 868.35 / 915 MHz) while you hold an unknown remote's button, peak-holding a bar per band and highlighting the strongest — so you learn *which band* a remote transmits on before trying to capture it. Modulation-independent (reads energy, not envelope), so it locates FSK remotes the OOK capture path can't yet demodulate. Field-verified against a tobacco-vending activator and a car keyfob (both correctly placed on 433.92). First phase of slice-0019; FSK demodulated capture follows.
+
 ## 2026-09-08
 - **CC1101 sub-GHz jamming.** Carrier-wave or modulated-noise transmission on the selected band preset to hold a channel busy against a fixed-code receiver. Hold-to-jam (emits only while the key is held) behind an interference-warning gate; each burst is chunked so the shared GDO0 keyboard-matrix row is released between bursts and ESC stays responsive. (slice-0017)
 - **Modules dashboard + hot-swap re-detection.** A live inventory of attached peripherals (Sub-GHz/2.4 GHz cap, RFID, GPS) with a **Re-scan** action, so a module seated after boot is detected without a reboot — its greyed-out menu tile un-greys as soon as the re-scan finds it. Also surfaces the cap-detection override. (slice-0018)

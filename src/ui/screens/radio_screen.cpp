@@ -42,8 +42,36 @@ const FreqPreset PRESETS[] = {
 constexpr int PRESET_COUNT = 4;
 constexpr int DEFAULT_PRESET = 1;  // 433.92 MHz — the common fixed-code band
 
+// The band-sweep samples exactly the capture presets, so its model width and the
+// preset table must agree or the sweep would index past the peak array.
+static_assert(PRESET_COUNT == static_cast<int>(rf::BAND_SWEEP_COUNT),
+              "band-sweep band count must match the frequency-preset table");
+
+// CC1101 Sub-GHz console main menu. Named so the dispatch reads by intent, not by
+// bare index — adding "Band sweep" here shifts the later items, so the indices
+// must never be spelled as literals.
+enum MainItem : int {
+    MAIN_CAPTURE = 0,
+    MAIN_BAND_SWEEP,
+    MAIN_SAVED,
+    MAIN_FREQUENCY,
+    MAIN_JAM,
+    MAIN_ITEM_COUNT
+};
+const char* const MAIN_ITEMS[MAIN_ITEM_COUNT] = {
+    "Capture", "Band sweep", "Saved signals", "Frequency", "Jam"
+};
+
 // Bound for a formatted feedback line; toasts truncate at 63.
 constexpr size_t MESSAGE_BUF = 64;
+
+// Band-sweep display scaling: dBm mapped onto bar height. SWEEP_FLOOR is an empty
+// bar (ambient noise), SWEEP_CEIL a full one (a remote right on top of the radio).
+constexpr int16_t SWEEP_FLOOR_DBM = -110;
+constexpr int16_t SWEEP_CEIL_DBM = -20;
+// RSSI settle time after entering RX before the reading is valid (CC1101 needs a
+// few RSSI samples at this RX bandwidth; measured headroom added on top).
+constexpr uint32_t RSSI_SETTLE_US = 1500;
 
 // Move a wrapping list cursor with the Cardputer's ;/. keys and follow it with
 // the scroll window. Returns true iff @p key was an up/down key.
@@ -83,6 +111,8 @@ RadioScreen::RadioScreen()
     , actionSignalValid_(false)
     , scanChannel_(0)
     , scanActive_(false)
+    , sweepBand_(0)
+    , sweepActive_(false)
 {
 }
 
@@ -125,6 +155,7 @@ void RadioScreen::updateFooterHints() {
             footerHints_.setHints({{' ', "Focus"}, {';', "Nav"}, {'\n', "Select"}, {'`', "Back"}});
             break;
         case MenuState::NRF_SCAN:
+        case MenuState::BAND_SWEEP:
             footerHints_.setHints({{'`', "Back"}});  // live sweep owns the view
             break;
         case MenuState::SIGNAL_LIST:
@@ -164,6 +195,7 @@ void RadioScreen::hide() {
     // Leaving the screen mid-sweep or mid-jam must power the radio down and release
     // the bus, or a stuck carrier / unowned SD bus outlives the screen.
     if (scanActive_) stopNrfScan();
+    if (sweepActive_) stopBandSweep();
     if (jamArmed_) jamDisarm();
     visible_ = false;
 }
@@ -448,6 +480,40 @@ void RadioScreen::stepNrfScan() {
     needsRedraw_ = true;
 }
 
+// --- CC1101 RSSI band-sweep (slice-0019): borrowed bus; remount on exit ------
+
+void RadioScreen::startBandSweep() {
+    bandSweep_.reset();
+    sweepBand_ = 0;
+    sweepActive_ = true;
+    state_ = MenuState::BAND_SWEEP;
+    needsRedraw_ = true;
+}
+
+void RadioScreen::stopBandSweep() {
+#ifdef ESP32
+    hal::cc1101Idle();
+    SDManager::getInstance().remount();
+#endif
+    sweepActive_ = false;
+}
+
+void RadioScreen::stepBandSweep() {
+#ifdef ESP32
+    // Retune to the next band and read RSSI. cc1101ConfigureOok() starts with SRES,
+    // so it re-tunes cleanly from the previous band with no explicit idle between;
+    // the radio stays owned across bands (remount happens only on exit).
+    const double mhz = PRESETS[sweepBand_].mhz;
+    if (hal::cc1101ConfigureOok(mhz) && hal::cc1101EnterRx()) {
+        delayMicroseconds(RSSI_SETTLE_US);
+        const int16_t dbm = hal::cc1101ReadRssiDbm();
+        if (dbm != INT16_MIN) bandSweep_.observe(sweepBand_, dbm);
+    }
+    sweepBand_ = static_cast<uint8_t>((sweepBand_ + 1) % PRESET_COUNT);
+    needsRedraw_ = true;
+#endif
+}
+
 // --- CC1101 jammer (slice-0017): borrowed bus; remount on exit ---------------
 
 bool RadioScreen::jamArm() {
@@ -503,6 +569,8 @@ void RadioScreen::update() {
         }
     } else if (state_ == MenuState::NRF_SCAN && scanActive_) {
         stepNrfScan();
+    } else if (state_ == MenuState::BAND_SWEEP && sweepActive_) {
+        stepBandSweep();
     } else if (state_ == MenuState::JAM_ACTIVE && jamArmed_) {
         stepJam();
     }
@@ -550,20 +618,31 @@ bool RadioScreen::handleInput(char key) {
             return true;
 
         case MenuState::MAIN:
-            if (listNav(key, mainSelection_, 4, unusedScroll, 4)) return true;
+            if (listNav(key, mainSelection_, MAIN_ITEM_COUNT, unusedScroll,
+                        MAIN_ITEM_COUNT)) {
+                return true;
+            }
             if (key == '\n' || key == '\r') {
-                if (mainSelection_ == 0) {
-                    startCapture();
-                } else if (mainSelection_ == 1) {
-                    loadSignalList();
-                    fileSelection_ = 0;
-                    fileScroll_ = 0;
-                    state_ = MenuState::SIGNAL_LIST;
-                } else if (mainSelection_ == 2) {
-                    state_ = MenuState::FREQ_SELECT;
-                } else {
-                    jamModeSel_ = 0;
-                    state_ = MenuState::JAM_SELECT;
+                switch (mainSelection_) {
+                    case MAIN_CAPTURE:
+                        startCapture();
+                        break;
+                    case MAIN_BAND_SWEEP:
+                        startBandSweep();
+                        break;
+                    case MAIN_SAVED:
+                        loadSignalList();
+                        fileSelection_ = 0;
+                        fileScroll_ = 0;
+                        state_ = MenuState::SIGNAL_LIST;
+                        break;
+                    case MAIN_FREQUENCY:
+                        state_ = MenuState::FREQ_SELECT;
+                        break;
+                    case MAIN_JAM:
+                        jamModeSel_ = 0;
+                        state_ = MenuState::JAM_SELECT;
+                        break;
                 }
             } else if (key == '`') {
                 state_ = MenuState::RADIO_SELECT;  // back to the radio root
@@ -574,6 +653,13 @@ bool RadioScreen::handleInput(char key) {
             if (key == '`') {
                 stopNrfScan();
                 state_ = MenuState::RADIO_SELECT;
+            }
+            return true;
+
+        case MenuState::BAND_SWEEP:
+            if (key == '`') {
+                stopBandSweep();
+                state_ = MenuState::MAIN;  // back to the CC1101 console
             }
             return true;
 
@@ -689,6 +775,7 @@ void RadioScreen::render(Canvas& canvas) {
     switch (state_) {
         case MenuState::RADIO_SELECT: drawRadioSelect(canvas); break;
         case MenuState::NRF_SCAN:     drawNrfScan(canvas); break;
+        case MenuState::BAND_SWEEP:   drawBandSweep(canvas); break;
         case MenuState::MAIN:
         case MenuState::NAMING:      drawMain(canvas); break;
         case MenuState::CAPTURING:   drawCapturing(canvas); break;
@@ -810,6 +897,67 @@ void RadioScreen::drawNrfScan(Canvas& canvas) {
     canvas.print("occupancy > -64 dBm");
 }
 
+void RadioScreen::drawBandSweep(Canvas& canvas) {
+    int16_t x = theme::PADDING_MD;
+    int16_t y = HEADER_HEIGHT + 4;
+    canvas.setTextSize(1);
+    canvas.setTextColor(theme::ACCENT());
+    canvas.setCursor(x, y);
+    canvas.print("CC1101 RSSI sweep");
+    y += LINE_HEIGHT;
+    canvas.setTextColor(theme::TEXT_DISABLED());
+    canvas.setCursor(x, y);
+    canvas.print("Hold the remote's button");
+    y += LINE_HEIGHT - 2;
+
+    const int strongest = rf::bandSweepStrongest(bandSweep_);
+
+    const int16_t plotX = x;
+    const int16_t plotW = static_cast<int16_t>(canvas.width() - 2 * theme::PADDING_MD);
+    const int16_t plotTop = y + 2;
+    constexpr int16_t PLOT_H = 50;
+    const int16_t baseline = plotTop + PLOT_H;
+    const int16_t colW = plotW / PRESET_COUNT;
+    constexpr int16_t BAR_INSET = 7;  // gap each side of a bar within its column
+
+    canvas.fillRect(plotX, baseline, plotW, 1, theme::TEXT_DISABLED());  // baseline
+
+    for (int b = 0; b < PRESET_COUNT; ++b) {
+        const int16_t colX = static_cast<int16_t>(plotX + b * colW);
+        const bool isStrongest = (b == strongest);
+        const int16_t dbm = bandSweep_.peakDbm[b];
+
+        // Bar height from the peak dBm, clamped to the display window. An unsampled
+        // band (BAND_RSSI_NONE) draws no bar.
+        int16_t barH = 0;
+        if (dbm != rf::BAND_RSSI_NONE) {
+            int16_t c = dbm;
+            if (c < SWEEP_FLOOR_DBM) c = SWEEP_FLOOR_DBM;
+            if (c > SWEEP_CEIL_DBM) c = SWEEP_CEIL_DBM;
+            barH = static_cast<int16_t>((c - SWEEP_FLOOR_DBM) * PLOT_H /
+                                        (SWEEP_CEIL_DBM - SWEEP_FLOOR_DBM));
+        }
+
+        const uint16_t accent = isStrongest ? theme::SUCCESS() : theme::TEXT_SECONDARY();
+        if (barH > 0) {
+            canvas.fillRect(static_cast<int16_t>(colX + BAR_INSET),
+                            static_cast<int16_t>(baseline - barH),
+                            static_cast<int16_t>(colW - 2 * BAR_INSET), barH, accent);
+        }
+
+        // Band (MHz, integer) and the peak dBm (or "--") beneath each bar.
+        int16_t ly = baseline + 3;
+        canvas.setTextColor(accent);
+        canvas.setCursor(static_cast<int16_t>(colX + 2), ly);
+        canvas.printf("%d", static_cast<int>(PRESETS[b].mhz));
+        ly += LINE_HEIGHT - 2;
+        canvas.setTextColor(theme::TEXT_DISABLED());
+        canvas.setCursor(static_cast<int16_t>(colX + 2), ly);
+        if (dbm == rf::BAND_RSSI_NONE) canvas.print("--");
+        else canvas.printf("%ddBm", static_cast<int>(dbm));
+    }
+}
+
 void RadioScreen::drawMain(Canvas& canvas) {
     int16_t x = theme::PADDING_MD;
     int16_t y = HEADER_HEIGHT + 6;
@@ -819,8 +967,7 @@ void RadioScreen::drawMain(Canvas& canvas) {
     canvas.printf("CC1101  %s", PRESETS[presetIndex_].label);
     y += LINE_HEIGHT + 2;
 
-    const char* items[4] = {"Capture", "Saved signals", "Frequency", "Jam"};
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < MAIN_ITEM_COUNT; ++i) {
         if (i == mainSelection_) {
             canvas.fillRect(0, y - 2, canvas.width(), LINE_HEIGHT, theme::BG_SELECTED());
             canvas.setTextColor(theme::TEXT_PRIMARY());
@@ -828,7 +975,7 @@ void RadioScreen::drawMain(Canvas& canvas) {
             canvas.setTextColor(theme::TEXT_SECONDARY());
         }
         canvas.setCursor(x, y);
-        canvas.print(items[i]);
+        canvas.print(MAIN_ITEMS[i]);
         y += LINE_HEIGHT;
     }
 }

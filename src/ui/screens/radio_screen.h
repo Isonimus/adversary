@@ -23,6 +23,7 @@
 #include "../components/text_input_popup.h"
 #include "../../modules/rf/ook_signal.h"
 #include "../../modules/rf/spectrum_scan.h"
+#include "../../modules/rf/band_sweep.h"
 #include "screen_interface.h"
 
 namespace adversary {
@@ -68,6 +69,7 @@ private:
         JAM_CONFIRM,     // jammer: interference warning gate before arming
         JAM_ACTIVE,      // jammer: armed; emits while the hold key is held
         NRF_SCAN,        // NRF24: live 2.4 GHz occupancy sweep (slice-0006)
+        BAND_SWEEP,      // CC1101: live RSSI sweep across the band presets (slice-0019)
     };
 
     struct SignalEntry {
@@ -79,6 +81,7 @@ private:
     void drawUnavailable(Canvas& canvas);
     void drawRadioSelect(Canvas& canvas);
     void drawNrfScan(Canvas& canvas);
+    void drawBandSweep(Canvas& canvas);
     void drawMain(Canvas& canvas);
     void drawCapturing(Canvas& canvas);
     void drawCaptureReview(Canvas& canvas);
@@ -115,6 +118,13 @@ private:
     void stopNrfScan();
     void stepNrfScan();
 
+    // CC1101 RSSI band-sweep (slice-0019): per update() retune to the next band
+    // preset, enter RX, read RSSI into the peak-hold model, until the operator
+    // leaves. Borrows the bus like capture; powers down + remounts on exit.
+    void startBandSweep();
+    void stopBandSweep();
+    void stepBandSweep();
+
     // CC1101 jammer (slice-0017): arm the radio into TX once, emit one bit-banged
     // GDO0 burst per frame while the hold key is down, power down on exit.
     bool jamArm();     // cc1101ConfigureOok + EnterTx on the current preset
@@ -149,6 +159,11 @@ private:
     rf::SpectrumScan spectrumScan_;  // per-channel occupancy tally
     uint8_t scanChannel_;            // next channel to sample this sweep
     bool scanActive_;                // radio is powered up and sweeping
+
+    // CC1101 band-sweep state.
+    rf::BandSweep bandSweep_;  // per-band peak-held RSSI
+    uint8_t sweepBand_;        // next band preset to sample
+    bool sweepActive_;         // sweep is running (owns the bus)
 
     ui::FooterHints footerHints_;
 
