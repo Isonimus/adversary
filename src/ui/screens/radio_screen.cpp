@@ -1,6 +1,7 @@
 /**
  * @file radio_screen.cpp
- * @brief RadioScreen — CC1101 OOK capture/replay console (slice-0003).
+ * @brief RadioScreen — CC1101 sub-GHz console: OOK + FSK capture/replay, band
+ *        sweep, jammer, and the NRF24 analyzer (slice-0003 / 0006 / 0017 / 0019).
  */
 
 #include "radio_screen.h"
@@ -48,10 +49,11 @@ static_assert(PRESET_COUNT == static_cast<int>(rf::BAND_SWEEP_COUNT),
               "band-sweep band count must match the frequency-preset table");
 
 // CC1101 Sub-GHz console main menu. Named so the dispatch reads by intent, not by
-// bare index — adding "Band sweep" here shifts the later items, so the indices
-// must never be spelled as literals.
+// bare index — inserting an item here shifts the later ones, so the indices must
+// never be spelled as literals.
 enum MainItem : int {
-    MAIN_CAPTURE = 0,
+    MAIN_CAPTURE = 0,   // OOK raw capture
+    MAIN_FSK_CAPTURE,   // FSK demodulated capture (slice-0019)
     MAIN_BAND_SWEEP,
     MAIN_SAVED,
     MAIN_FREQUENCY,
@@ -59,8 +61,43 @@ enum MainItem : int {
     MAIN_ITEM_COUNT
 };
 const char* const MAIN_ITEMS[MAIN_ITEM_COUNT] = {
-    "Capture", "Band sweep", "Saved signals", "Frequency", "Jam"
+    "OOK Capture", "FSK Capture", "Band sweep", "Saved signals", "Frequency", "Jam"
 };
+
+// FSK modem presets (slice-0019). Deviation/data-rate/RX-bandwidth cannot be
+// inferred from an unknown signal, so the operator iterates this table of common
+// sub-GHz configurations. GFSK reception is the 2-FSK demod path; MSK entries stay
+// above the CC1101 ~26 kBaud floor (cc1101FskConfigValid guards the rest).
+struct FskPreset {
+    const char* label;
+    double mhz;
+    rf::Modulation modulation;
+    double deviationHz;
+    double dataRateBaud;
+    double rxBwHz;
+};
+const FskPreset FSK_PRESETS[] = {
+    {"433 2FSK 4.8k",  hal::CC1101_FREQ_43392_MHZ, rf::Modulation::Fsk2,  47607.0,   4800.0, 203125.0},
+    {"433 2FSK 2.4k",  hal::CC1101_FREQ_43392_MHZ, rf::Modulation::Fsk2,   5157.0,   2400.0, 101562.0},
+    {"868 GFSK 38k",   hal::CC1101_FREQ_86835_MHZ, rf::Modulation::Gfsk,  20000.0,  38400.0, 203125.0},
+    {"915 2FSK 250k",  hal::CC1101_FREQ_915_MHZ,   rf::Modulation::Fsk2, 127000.0, 250000.0, 541666.0},
+    {"915 MSK 125k",   hal::CC1101_FREQ_915_MHZ,   rf::Modulation::Msk,       0.0, 125000.0, 270833.0},
+    {"915 MSK 500k",   hal::CC1101_FREQ_915_MHZ,   rf::Modulation::Msk,       0.0, 500000.0, 541666.0},
+};
+constexpr int FSK_PRESET_COUNT =
+    static_cast<int>(sizeof(FSK_PRESETS) / sizeof(FSK_PRESETS[0]));
+
+// Storage modulation -> CC1101 MOD_FORMAT register value. The screen bridges the
+// module-layer enum and the HAL register bits so neither depends on the other.
+uint8_t cc1101ModFormatFor(rf::Modulation mod) {
+    switch (mod) {
+        case rf::Modulation::Fsk2: return hal::CC1101_MOD_2FSK;
+        case rf::Modulation::Gfsk: return hal::CC1101_MOD_GFSK;
+        case rf::Modulation::Msk:  return hal::CC1101_MOD_MSK;
+        case rf::Modulation::Ook:  return hal::CC1101_MOD_ASK_OOK;
+    }
+    return hal::CC1101_MOD_ASK_OOK;
+}
 
 // Bound for a formatted feedback line; toasts truncate at 63.
 constexpr size_t MESSAGE_BUF = 64;
@@ -100,7 +137,11 @@ RadioScreen::RadioScreen()
     , lastHintState_(MenuState::RADIO_SELECT)
     , radioSelection_(0)
     , mainSelection_(0)
+    , mainScroll_(0)
     , presetIndex_(DEFAULT_PRESET)
+    , fskPresetIndex_(0)
+    , fskScroll_(0)
+    , captureIsFsk_(false)
     , actionSelection_(0)
     , fileSelection_(0)
     , fileScroll_(0)
@@ -175,6 +216,9 @@ void RadioScreen::updateFooterHints() {
         case MenuState::FREQ_SELECT:
             footerHints_.setHints({{' ', "Focus"}, {';', "Nav"}, {'\n', "OK"}, {'`', "Back"}});
             break;
+        case MenuState::FSK_SELECT:
+            footerHints_.setHints({{' ', "Focus"}, {';', "Nav"}, {'\n', "Capture"}, {'`', "Back"}});
+            break;
         case MenuState::JAM_SELECT:
             footerHints_.setHints({{' ', "Focus"}, {';', "Nav"}, {'\n', "Select"}, {'`', "Back"}});
             break;
@@ -211,21 +255,50 @@ void RadioScreen::fullPath(const char* name, char* out, size_t outSize) const {
 // --- Capture / replay orchestration (borrowed bus; remount after) ------------
 
 bool RadioScreen::captureSignal(rf::OokSignal& out) {
-    const double mhz = currentFreqMHz();
+    // OOK and FSK share the RMT edge-timing path (the FSK demod drives GDO0 with a
+    // recovered NRZ line just as the OOK slicer does); only the radio config and the
+    // stored descriptor differ. captureIsFsk_ is set when the operator enters.
+    const FskPreset& fsk = FSK_PRESETS[fskPresetIndex_];
+    const double mhz = captureIsFsk_ ? fsk.mhz : currentFreqMHz();
     bool ok = false;
-    if (hal::cc1101ConfigureOok(mhz) && hal::cc1101EnterRx()) {
+    if (captureIsFsk_) {
+        if (hal::cc1101ConfigureFsk(mhz, cc1101ModFormatFor(fsk.modulation),
+                                    fsk.deviationHz, fsk.dataRateBaud, fsk.rxBwHz) &&
+            hal::cc1101EnterRx()) {
+            ok = rf::ookRmtCapture(CAPTURE_WINDOW_MS, out);
+        }
+    } else if (hal::cc1101ConfigureOok(mhz) && hal::cc1101EnterRx()) {
         ok = rf::ookRmtCapture(CAPTURE_WINDOW_MS, out);
     }
     hal::cc1101Idle();
     SDManager::getInstance().remount();
-    if (ok) out.frequencyHz = static_cast<uint32_t>(llround(mhz * 1000000.0));
+    if (ok) {
+        out.frequencyHz = static_cast<uint32_t>(llround(mhz * 1000000.0));
+        if (captureIsFsk_) {
+            // Store the modem descriptor so replay reconstructs this exact config
+            // (saved as SUB2). OOK leaves the default Ook modulation -> SUB1.
+            out.modulation = fsk.modulation;
+            out.deviationHz = static_cast<uint32_t>(fsk.deviationHz);
+            out.dataRateBaud = static_cast<uint32_t>(fsk.dataRateBaud);
+            out.rxBwHz = static_cast<uint32_t>(fsk.rxBwHz);
+        }
+    }
     return ok;
 }
 
 bool RadioScreen::replaySignal(const rf::OokSignal& sig) {
     const double mhz = static_cast<double>(sig.frequencyHz) / 1000000.0;
+    // Rebuild the radio from the signal's own modulation descriptor: an OOK signal
+    // through the OOK config, an FSK signal (SUB2) through the FSK config it carries.
+    const bool configured =
+        sig.modulation == rf::Modulation::Ook
+            ? hal::cc1101ConfigureOok(mhz)
+            : hal::cc1101ConfigureFsk(mhz, cc1101ModFormatFor(sig.modulation),
+                                      static_cast<double>(sig.deviationHz),
+                                      static_cast<double>(sig.dataRateBaud),
+                                      static_cast<double>(sig.rxBwHz));
     bool ok = false;
-    if (hal::cc1101ConfigureOok(mhz) && hal::cc1101EnterTx()) {
+    if (configured && hal::cc1101EnterTx()) {
         ok = rf::ookRmtReplay(sig);
     }
     hal::cc1101Idle();
@@ -281,9 +354,16 @@ void RadioScreen::promptForName() {
 
 void RadioScreen::describeSignal(const rf::OokSignal& sig, char* out,
                                  size_t outSize) const {
-    // OOK is always raw (no protocol decode, per slice-0003), so the encoding
-    // line is edge count plus the carrier it was captured on.
-    snprintf(out, outSize, "RAW %u edges  %.2f MHz",
+    // Always raw (no protocol decode), so the encoding line is the modulation, the
+    // edge count, and the carrier it was captured on.
+    const char* mod = "OOK";
+    switch (sig.modulation) {
+        case rf::Modulation::Fsk2: mod = "2FSK"; break;
+        case rf::Modulation::Gfsk: mod = "GFSK"; break;
+        case rf::Modulation::Msk:  mod = "MSK"; break;
+        case rf::Modulation::Ook:  mod = "OOK"; break;
+    }
+    snprintf(out, outSize, "%s %u edges  %.2f MHz", mod,
              static_cast<unsigned>(sig.durationsUs.size()),
              static_cast<double>(sig.frequencyHz) / 1000000.0);
 }
@@ -371,7 +451,7 @@ void RadioScreen::loadActionSignal() {
 
     SDManager& sd = SDManager::getInstance();
     const size_t size = sd.getFileSize(path);
-    if (size == 0 || size > rf::ookSignalSerializedSize(rf::OOK_MAX_PULSES)) return;
+    if (size == 0 || size > rf::subGhzSignalMaxSerializedSize()) return;
 
     std::vector<uint8_t> buffer(size);
     const FileResult result = sd.readFile(path, buffer.data(), buffer.size());
@@ -392,7 +472,7 @@ void RadioScreen::replaySelected() {
 
     SDManager& sd = SDManager::getInstance();
     const size_t size = sd.getFileSize(path);
-    if (size == 0 || size > rf::ookSignalSerializedSize(rf::OOK_MAX_PULSES)) {
+    if (size == 0 || size > rf::subGhzSignalMaxSerializedSize()) {
         showErrorToast("Bad file size");
         state_ = MenuState::SIGNAL_ACTION;
         needsRedraw_ = true;
@@ -608,6 +688,7 @@ bool RadioScreen::handleInput(char key) {
             if (key == '\n' || key == '\r') {
                 if (radioSelection_ == 0) {
                     mainSelection_ = 0;
+                    mainScroll_ = 0;
                     state_ = MenuState::MAIN;  // CC1101 Sub-GHz console
                 } else {
                     startNrfScan();  // NRF24 2.4 GHz analyzer
@@ -618,14 +699,20 @@ bool RadioScreen::handleInput(char key) {
             return true;
 
         case MenuState::MAIN:
-            if (listNav(key, mainSelection_, MAIN_ITEM_COUNT, unusedScroll,
-                        MAIN_ITEM_COUNT)) {
+            if (listNav(key, mainSelection_, MAIN_ITEM_COUNT, mainScroll_,
+                        VISIBLE_ROWS)) {
                 return true;
             }
             if (key == '\n' || key == '\r') {
                 switch (mainSelection_) {
                     case MAIN_CAPTURE:
+                        captureIsFsk_ = false;
                         startCapture();
+                        break;
+                    case MAIN_FSK_CAPTURE:
+                        fskPresetIndex_ = 0;
+                        fskScroll_ = 0;
+                        state_ = MenuState::FSK_SELECT;
                         break;
                     case MAIN_BAND_SWEEP:
                         startBandSweep();
@@ -702,6 +789,19 @@ bool RadioScreen::handleInput(char key) {
                 return true;
             }
             if (key == '\n' || key == '\r' || key == '`') state_ = MenuState::MAIN;
+            return true;
+
+        case MenuState::FSK_SELECT:
+            if (listNav(key, fskPresetIndex_, FSK_PRESET_COUNT, fskScroll_,
+                        VISIBLE_ROWS)) {
+                return true;
+            }
+            if (key == '\n' || key == '\r') {
+                captureIsFsk_ = true;
+                startCapture();  // capture uses the selected FSK preset
+            } else if (key == '`') {
+                state_ = MenuState::MAIN;
+            }
             return true;
 
         case MenuState::JAM_SELECT:
@@ -789,6 +889,7 @@ void RadioScreen::render(Canvas& canvas) {
             drawConfirm(canvas, "Delete this signal?", theme::WARNING());
             break;
         case MenuState::FREQ_SELECT:  drawFreqSelect(canvas); break;
+        case MenuState::FSK_SELECT:   drawFskSelect(canvas); break;
         case MenuState::JAM_SELECT:
         case MenuState::JAM_CONFIRM:
         case MenuState::JAM_ACTIVE:   drawJam(canvas); break;
@@ -967,7 +1068,10 @@ void RadioScreen::drawMain(Canvas& canvas) {
     canvas.printf("CC1101  %s", PRESETS[presetIndex_].label);
     y += LINE_HEIGHT + 2;
 
-    for (int i = 0; i < MAIN_ITEM_COUNT; ++i) {
+    // Scrolled window (the menu is taller than the space above the footer).
+    const int end = (mainScroll_ + VISIBLE_ROWS < MAIN_ITEM_COUNT)
+                        ? mainScroll_ + VISIBLE_ROWS : MAIN_ITEM_COUNT;
+    for (int i = mainScroll_; i < end; ++i) {
         if (i == mainSelection_) {
             canvas.fillRect(0, y - 2, canvas.width(), LINE_HEIGHT, theme::BG_SELECTED());
             canvas.setTextColor(theme::TEXT_PRIMARY());
@@ -986,7 +1090,8 @@ void RadioScreen::drawCapturing(Canvas& canvas) {
     canvas.setTextSize(1);
     canvas.setTextColor(theme::SUCCESS());
     canvas.setCursor(x, y);
-    canvas.printf("Listening  %s", PRESETS[presetIndex_].label);
+    canvas.printf("Listening  %s", captureIsFsk_ ? FSK_PRESETS[fskPresetIndex_].label
+                                                 : PRESETS[presetIndex_].label);
     y += LINE_HEIGHT + 2;
     canvas.setTextColor(theme::TEXT_SECONDARY());
     canvas.setCursor(x, y);
@@ -1185,6 +1290,31 @@ void RadioScreen::drawFreqSelect(Canvas& canvas) {
         }
         canvas.setCursor(x, y);
         canvas.print(PRESETS[i].label);
+        y += LINE_HEIGHT;
+    }
+}
+
+void RadioScreen::drawFskSelect(Canvas& canvas) {
+    int16_t x = theme::PADDING_MD;
+    int16_t y = HEADER_HEIGHT + 6;
+    canvas.setTextSize(1);
+    canvas.setTextColor(theme::ACCENT());
+    canvas.setCursor(x, y);
+    canvas.print("FSK modem preset");
+    y += LINE_HEIGHT + 2;
+
+    // Scrolled window (the preset table is taller than the space above the footer).
+    const int end = (fskScroll_ + VISIBLE_ROWS < FSK_PRESET_COUNT)
+                        ? fskScroll_ + VISIBLE_ROWS : FSK_PRESET_COUNT;
+    for (int i = fskScroll_; i < end; ++i) {
+        if (i == fskPresetIndex_) {
+            canvas.fillRect(0, y - 2, canvas.width(), LINE_HEIGHT, theme::BG_SELECTED());
+            canvas.setTextColor(theme::TEXT_PRIMARY());
+        } else {
+            canvas.setTextColor(theme::TEXT_SECONDARY());
+        }
+        canvas.setCursor(x, y);
+        canvas.print(FSK_PRESETS[i].label);
         y += LINE_HEIGHT;
     }
 }

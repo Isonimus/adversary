@@ -65,6 +65,7 @@ private:
         REPLAY_CONFIRM,  // "transmit?" gate (replay emits RF)
         DELETE_CONFIRM,  // "delete?" gate
         FREQ_SELECT,     // pick a frequency preset
+        FSK_SELECT,      // CC1101: pick an FSK modem preset to capture on (slice-0019)
         JAM_SELECT,      // CC1101 jammer: pick emission mode (slice-0017)
         JAM_CONFIRM,     // jammer: interference warning gate before arming
         JAM_ACTIVE,      // jammer: armed; emits while the hold key is held
@@ -89,6 +90,7 @@ private:
     void drawSignalAction(Canvas& canvas);
     void drawConfirm(Canvas& canvas, const char* question, uint16_t accent);
     void drawFreqSelect(Canvas& canvas);
+    void drawFskSelect(Canvas& canvas);  // FSK modem preset picker (slice-0019)
     void drawJam(Canvas& canvas);  // mode-select / confirm / active (slice-0017)
 
     // Draws an OOK signal's summary (RAW · N edges · freq) plus its static
@@ -139,8 +141,12 @@ private:
     MenuState state_;
     MenuState lastHintState_;  // footer hints are refreshed only when state_ changes
     int radioSelection_;   // root: 0=CC1101 Sub-GHz 1=NRF24 2.4 GHz
-    int mainSelection_;    // 0=Capture 1=Saved 2=Frequency
+    int mainSelection_;    // index into the CC1101 console main menu (MainItem)
+    int mainScroll_;       // scroll window offset for the main menu
     int presetIndex_;      // index into the frequency-preset table
+    int fskPresetIndex_;   // index into the FSK modem-preset table (slice-0019)
+    int fskScroll_;        // scroll window offset for the FSK preset list
+    bool captureIsFsk_;    // the in-flight capture is FSK (else OOK) — set on entry
     int actionSelection_;  // 0=Replay 1=Delete
     int fileSelection_;
     int fileScroll_;

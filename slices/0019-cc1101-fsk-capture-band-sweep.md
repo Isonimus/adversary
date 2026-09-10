@@ -192,3 +192,38 @@ _Pending. `cc1101ConfigureFsk()` register math (DEVIATN / DRATE / CHANBW) + nati
 `MOD_FORMAT` selection with the 2-FSK/GFSK/MSK/4-FSK ceilings documented above, the `SUB2`
 format bump + round-trip test, and the FSK capture states in `RadioScreen`. To be verified
 against a controlled 2-FSK source. Do not edit above this line._
+
+## Amendment — 2026-09-10: Phase 2 built (on-device round-trip deferred)
+
+Phase 2 shipped, native-tested with a clean Cardputer build. The on-device capture/replay
+round-trip is **deferred to the LEDGER** — no controlled, static 2-FSK source was on hand
+(the operator's realistic FSK target, a car keyfob, is rolling-code and cannot serve as a
+replay fixture). Scope choice recorded 2026-09-10: **2-FSK / GFSK / MSK** presets ship;
+4-FSK stays detect-only.
+
+- **Register math (native-tested, `test_cc1101_fsk`).** `cc1101DeviatnReg` (DEVIATN
+  mantissa/exponent), `cc1101DrateRegs` (DRATE_E/M), `cc1101ChanbwNibble` (CHANBW), and the
+  `cc1101ModemRegs` composer — anchored to SmartRF-documented vectors. The composed
+  `MDMCFG4` for (47.6 kHz, 4.8 kBaud, 203 kHz) is `0x87`, which **cross-checks the OOK
+  block's own hand-written `MDMCFG4`** — a formula regression is caught against known-good
+  silicon values. `cc1101FskConfigValid` enforces the MSK ≥26 kBaud floor (native-tested,
+  and `cc1101ConfigureFsk` refuses a config that fails it — fail loud).
+- **`SUB2` format (native-tested, `test_ook_signal`).** `OokSignal` gained a modulation
+  descriptor (`Modulation` + deviation/data-rate/RX-bandwidth). OOK serialises as `SUB1`
+  **byte-identically** (existing captures unaffected — regression-pinned); FSK serialises as
+  `SUB2` and round-trips the descriptor; a `SUB2` whose modFormat says OOK or names an
+  unknown scheme is rejected (fail loud).
+- **HAL (`cc1101ConfigureFsk`, hardware-only).** Programs MOD_FORMAT + the computed modem
+  regs, single-entry PATABLE (constant envelope, `FREND0=0x10`), GDO0 async-serial — so the
+  **RMT capture/replay layer is unchanged** (the FSK demod drives GDO0 with recovered NRZ
+  exactly as the OOK slicer does). The FS-calibration block is **deliberately duplicated**
+  from the OOK path, not shared: the OOK block is on-device-verified and this FSK path is
+  not, so they must not be coupled where an FSK change could silently regress OOK. The AGC/
+  FOCCFG/BSCFG values are SmartRF 2-FSK defaults, unverified on hardware (part of the
+  deferred round-trip).
+- **Screen (`RadioScreen`).** "Capture" renamed **"OOK Capture"**; new **"FSK Capture"**
+  opens an `FSK_SELECT` preset picker (the operator can't infer deviation/data-rate from an
+  unknown signal, so a table is offered). Capture/replay/describe are modulation-aware;
+  replay rebuilds the radio from a signal's own descriptor, so a saved `SUB2` file replays
+  through the FSK config transparently. The main menu and FSK list scroll (both exceed the
+  space above the footer at 6 rows). GUI verified on hardware 2026-09-10 before commit.
