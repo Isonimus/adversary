@@ -1,10 +1,11 @@
 /**
  * @file cc1101.cpp
- * @brief CC1101 sub-GHz OOK driver over the SD-shared FSPI bus (slice-0003).
+ * @brief CC1101 sub-GHz driver over the SD-shared FSPI bus (slice-0003 / 0019).
  *
  * Firmware-only: the register-driving I/O crosses the HAL boundary and only
- * compiles for the Cardputer. The pure carrier->register math lives inline in
- * cc1101.h and is native-tested (test/test_cc1101_freq).
+ * compiles for the Cardputer. The pure carrier/RSSI/FSK-modem register math lives
+ * inline in cc1101.h and is native-tested (test/test_cc1101_freq, _rssi, _fsk).
+ * OOK and FSK both drive GDO0 as an async-serial line so the RMT layer is shared.
  *
  * The register set and timings here are exactly the ones a throwaway on-device
  * spike proved on the real Cardputer ADV before slice-0003 was frozen: the
@@ -42,6 +43,7 @@ constexpr uint8_t REG_PKTCTRL1 = 0x07;
 constexpr uint8_t REG_PKTCTRL0 = 0x08;
 constexpr uint8_t REG_ADDR     = 0x09;
 constexpr uint8_t REG_FSCTRL1  = 0x0B;
+constexpr uint8_t REG_FSCTRL0  = 0x0C;
 constexpr uint8_t REG_FREQ2    = 0x0D;
 constexpr uint8_t REG_FREQ1    = 0x0E;
 constexpr uint8_t REG_FREQ0    = 0x0F;
@@ -67,6 +69,7 @@ constexpr uint8_t REG_FSTEST   = 0x29;
 constexpr uint8_t REG_TEST2    = 0x2C;
 constexpr uint8_t REG_TEST1    = 0x2D;
 constexpr uint8_t REG_TEST0    = 0x2E;
+constexpr uint8_t REG_RSSI     = 0x34;   // status register (burst-read only)
 constexpr uint8_t REG_VERSION  = 0x31;   // status register (burst-read only)
 constexpr uint8_t REG_MARCSTATE = 0x35;  // status register (burst-read only)
 constexpr uint8_t REG_PATABLE  = 0x3E;
@@ -96,6 +99,10 @@ constexpr uint8_t CC1101_VERSION_EXPECTED = 0x14;
 // the 2-entry table so the OOK modulator toggles between these two.
 constexpr uint8_t OOK_PATABLE_OFF = 0x00;
 constexpr uint8_t OOK_PATABLE_ON  = 0xC0;
+
+// FSK is constant-envelope: a single PA entry (FREND0=0x10 selects index 0), full
+// power. No on/off toggling — the data rides the frequency, not the amplitude.
+constexpr uint8_t FSK_PATABLE_POWER = 0xC0;
 
 // Chip-ready poll budget after SRES. Spike measured ~350-380 us; give margin.
 constexpr uint32_t CHIP_READY_TIMEOUT_US = 10000;
@@ -139,8 +146,7 @@ void strobe(SPIClass* bus, uint8_t command) {
     bus->endTransaction();
 }
 
-void writePaTable(SPIClass* bus) {
-    const uint8_t table[8] = {OOK_PATABLE_OFF, OOK_PATABLE_ON, 0, 0, 0, 0, 0, 0};
+void writePaTable(SPIClass* bus, const uint8_t (&table)[8]) {
     bus->beginTransaction(capSpiSettings());
     digitalWrite(pins::CC1101_CS, LOW);
     bus->transfer(WRITE_BURST | REG_PATABLE);
@@ -234,12 +240,88 @@ bool cc1101ConfigureOok(double carrierMHz) {
     writeReg(bus, REG_ADDR, 0x00);
     writeReg(bus, REG_PKTLEN, 0x00);
 
-    writePaTable(bus);
+    const uint8_t ookTable[8] = {OOK_PATABLE_OFF, OOK_PATABLE_ON, 0, 0, 0, 0, 0, 0};
+    writePaTable(bus, ookTable);
+    return true;
+}
+
+bool cc1101ConfigureFsk(double carrierMHz, uint8_t modFormat, double deviationHz,
+                        double dataRateBaud, double rxBwHz) {
+    if (!cc1101FskConfigValid(modFormat, dataRateBaud)) {
+        Serial.printf("[CC1101] MSK below %.0f baud floor (%.0f); FSK configure refused\n",
+                      CC1101_MSK_MIN_BAUD, dataRateBaud);
+        return false;
+    }
+
+    SPIClass* bus = SDManager::getInstance().spiBus();
+    if (!bus) {
+        Serial.println("[CC1101] SPI bus not owned (launcher mount); FSK configure skipped");
+        return false;
+    }
+
+    deselectSdCard();
+    selectChipSelectOutput();
+
+    strobe(bus, STROBE_SRES);
+    if (!waitChipReady(bus)) return false;
+
+    const Cc1101FreqRegs freq = cc1101FreqRegs(carrierMHz);
+    const Cc1101ModemRegs modem = cc1101ModemRegs(deviationHz, dataRateBaud, rxBwHz);
+
+    // The FS-calibration / TEST / synth block is deliberately duplicated from
+    // cc1101ConfigureOok rather than shared: that block is on-device-verified for
+    // OOK, and this FSK path is not yet (slice-0019 defers the round-trip). Keeping
+    // them separate means an FSK tuning change can never silently regress the
+    // proven OOK path. Extract a shared bring-up when a third config arrives.
+    writeReg(bus, REG_FSCTRL1, 0x06);
+    writeReg(bus, REG_FSCTRL0, 0x00);
+    writeReg(bus, REG_FREQ2, freq.freq2);
+    writeReg(bus, REG_FREQ1, freq.freq1);
+    writeReg(bus, REG_FREQ0, freq.freq0);
+    writeReg(bus, REG_MDMCFG4, modem.mdmcfg4);  // CHANBW (RX BW) + DRATE_E
+    writeReg(bus, REG_MDMCFG3, modem.mdmcfg3);  // DRATE_M
+    writeReg(bus, REG_MDMCFG2,
+             static_cast<uint8_t>((modFormat << 4)));  // MOD_FORMAT, no sync (raw)
+    writeReg(bus, REG_MDMCFG1, 0x02);
+    writeReg(bus, REG_MDMCFG0, 0xF8);
+    writeReg(bus, REG_DEVIATN, modem.deviatn);  // ignored by the chip for MSK
+    writeReg(bus, REG_MCSM0, 0x18);     // auto-calibrate on IDLE->RX/TX
+    writeReg(bus, REG_FOCCFG, 0x16);
+    writeReg(bus, REG_BSCFG, 0x6C);
+    writeReg(bus, REG_AGCCTRL2, 0x43);  // SmartRF 2-FSK AGC block
+    writeReg(bus, REG_AGCCTRL1, 0x40);
+    writeReg(bus, REG_AGCCTRL0, 0x91);
+    writeReg(bus, REG_FREND1, 0x56);
+    writeReg(bus, REG_FREND0, 0x10);    // single-entry PATABLE (constant envelope)
+    writeReg(bus, REG_FSCAL3, 0xE9);
+    writeReg(bus, REG_FSCAL2, 0x2A);
+    writeReg(bus, REG_FSCAL1, 0x00);
+    writeReg(bus, REG_FSCAL0, 0x1F);
+    writeReg(bus, REG_FSTEST, 0x59);
+    writeReg(bus, REG_TEST2, 0x81);
+    writeReg(bus, REG_TEST1, 0x35);
+    writeReg(bus, REG_TEST0, 0x09);
+    writeReg(bus, REG_FIFOTHR, 0x47);
+    writeReg(bus, REG_PKTCTRL1, 0x04);
+    writeReg(bus, REG_PKTCTRL0, 0x32);  // async serial, infinite length
+    writeReg(bus, REG_IOCFG2, 0x0D);
+    writeReg(bus, REG_IOCFG0, 0x0D);    // GDO0 = async serial data (RX out / TX in)
+    writeReg(bus, REG_ADDR, 0x00);
+    writeReg(bus, REG_PKTLEN, 0x00);
+
+    const uint8_t fskTable[8] = {FSK_PATABLE_POWER, 0, 0, 0, 0, 0, 0, 0};
+    writePaTable(bus, fskTable);
     return true;
 }
 
 bool cc1101EnterRx() {
     return enterState(STROBE_SRX, MARC_STATE_RX);
+}
+
+int16_t cc1101ReadRssiDbm() {
+    SPIClass* bus = SDManager::getInstance().spiBus();
+    if (!bus) return INT16_MIN;  // bus not owned: nothing to read (fail loud)
+    return cc1101RssiDbm(readStatusReg(bus, REG_RSSI));
 }
 
 bool cc1101EnterTx() {
@@ -262,8 +344,10 @@ void cc1101Idle() {
 #else  // !TARGET_CARDPUTER
 
 bool cc1101ConfigureOok(double) { return false; }
+bool cc1101ConfigureFsk(double, uint8_t, double, double, double) { return false; }
 bool cc1101EnterRx() { return false; }
 bool cc1101EnterTx() { return false; }
+int16_t cc1101ReadRssiDbm() { return INT16_MIN; }
 void cc1101Idle() {}
 
 #endif  // TARGET_CARDPUTER
