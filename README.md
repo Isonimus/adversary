@@ -367,7 +367,8 @@ capture, per service) shows as colored dots in the Captures screen.
 │   └── credentials/
 │       └── *.json                - Evil Twin credentials
 ├── dashboard/
-│   └── index.html, ...           - Web dashboard (Server mode)
+│   └── index.html, ...           - Web dashboard (Server mode); deploy with
+│                                    scripts/deploy_dashboard.sh (see Development)
 └── logs/
     └── system.log                 - Debug/activity logs
 ```
@@ -469,6 +470,22 @@ pio test -e native -f test_handshake_capture
 # View test coverage
 pio test -e native --verbose
 ```
+
+### Deploying the dashboard
+
+The web dashboard is served directly off the SD card from `/adversary/dashboard/`.
+Its source lives in `dashboard_dev/`, and nothing syncs the two automatically —
+editing `dashboard_dev/` has no effect on the device until the files are copied
+onto the card. Pop the SD into a card reader and run:
+
+```bash
+# <sd_mount_path> is where the card is mounted, e.g. /media/$USER/CARDPUTER
+scripts/deploy_dashboard.sh <sd_mount_path>
+```
+
+The script copies every asset, verifies each file's size on the card matches the
+source (a truncated or 0-byte write renders as a blank dashboard), and flushes
+the card before reporting success.
 
 ### Code Standards
 
