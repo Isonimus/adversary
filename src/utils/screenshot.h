@@ -4,8 +4,9 @@
  *
  * The Cardputer LCD is write-only over SPI (no panel read-back), so the only
  * faithful frame capture is the firmware dumping the canvas it renders into.
- * saveScreenshot() reads the global RGB332 canvas back as BGR888 and writes a
- * 24-bit BMP to /adversary/screenshots/shot_NNN.bmp for pop-the-SD retrieval.
+ * saveScreenshot() reads the global RGB332 canvas back into BMP's B,G,R byte
+ * order and writes a 24-bit BMP to /adversary/screenshots/shot_NNN.bmp for
+ * pop-the-SD retrieval.
  */
 
 #pragma once

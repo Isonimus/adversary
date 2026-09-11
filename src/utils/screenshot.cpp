@@ -66,7 +66,7 @@ bool saveScreenshot(Canvas& canvas, SDManager& sd, char* outPath, size_t outPath
 
     bmp::writeBmp24Header(buffer, width, height);
 
-    // Zero the pixel area only when rows carry 4-byte padding; readRectRGB()
+    // Zero the pixel area only when rows carry 4-byte padding; the readback
     // fills exactly width*3 bytes per row and would otherwise leave pad bytes
     // uninitialised. Current targets are 240 px wide (720 B rows, unpadded).
     uint8_t* pixels = buffer + bmp::BMP24_HEADER_SIZE;
@@ -74,11 +74,14 @@ bool saveScreenshot(Canvas& canvas, SDManager& sd, char* outPath, size_t outPath
         memset(pixels, 0, bmp::bmp24PixelBytes(width, height));
     }
 
-    // BMP rows are bottom-up: source row y lands at destination row (h-1-y).
-    // readRectRGB() yields BGR888, which is BMP's native channel order.
+    // BMP 24bpp pixels are stored B,G,R, bottom-up. LovyanGFX's type names are
+    // inverted from memory layout: rgb888_t is laid out {b,g,r} in memory,
+    // which is exactly BMP order, whereas readRectRGB()/bgr888_t is {r,g,b} and
+    // would swap red and blue (bright pink renders as purple). So read each row
+    // as rgb888_t. Source row y lands at destination row (h-1-y) for bottom-up.
     for (uint16_t y = 0; y < height; ++y) {
         uint8_t* dest = pixels + static_cast<size_t>(height - 1 - y) * rowBytes;
-        canvas.readRectRGB(0, y, width, 1, dest);
+        canvas.readRect(0, y, width, 1, reinterpret_cast<lgfx::rgb888_t*>(dest));
     }
 
     FileResult result = sd.writeFile(path, buffer, fileSize);

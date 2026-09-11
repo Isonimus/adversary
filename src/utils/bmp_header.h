@@ -6,9 +6,10 @@
  * where every off-by-one or wrong-endian field silently produces a corrupt or
  * blank image — can be unit-tested on the native target without M5GFX.
  *
- * The pixel array that follows this header must be bottom-up rows of BGR888
- * triples, each row padded to a 4-byte boundary (see bmp24RowBytes()). M5GFX's
- * readRectRGB() already yields BGR888, which is BMP's native channel order.
+ * The pixel array that follows this header must be bottom-up rows of B,G,R
+ * byte triples, each row padded to a 4-byte boundary (see bmp24RowBytes()).
+ * M5GFX reads back into that order via readRect<lgfx::rgb888_t> — note
+ * LovyanGFX's rgb888_t is laid out {b,g,r} in memory (bgr888_t is {r,g,b}).
  */
 
 #pragma once
