@@ -89,9 +89,18 @@ public:
      * state machine is re-synced from CMD0. Needed after the multi-radio cap
      * probe transacts on the shared bus, which desyncs the card and yields CRC
      * errors on subsequent SD access (slice-0002).
+     *
+     * There is no card-detect pin, so a full mount attempt is the only way to
+     * answer "is a card present?". Once init() concludes NO_CARD this boot, a
+     * plain remount() is a no-op that returns the cached verdict — otherwise a
+     * cardless boot would pay the ~5.6 s mount ladder on every shared-bus
+     * re-sync. The operator's explicit "Retry SD mount" passes @p forceRetry to
+     * clear the verdict and attempt a real mount (slice-0020).
+     *
+     * @param forceRetry Clear a cached NO_CARD verdict and attempt a real mount.
      * @return true if the card re-mounted successfully.
      */
-    bool remount();
+    bool remount(bool forceRetry = false);
 
     /**
      * @brief Deinitialize SD card
@@ -209,6 +218,11 @@ private:
 
     SDStatus m_status;
     bool m_initialized;
+    // Set once init() concludes no card is present this boot. Makes a plain
+    // remount() a no-op (a cardless mount attempt costs the full ~5.6 s ladder
+    // with no card-detect pin to shortcut it); cleared by remount(forceRetry)
+    // when the operator retries after inserting a card (slice-0020).
+    bool m_noCardVerdict;
 };
 
 } // namespace adversary

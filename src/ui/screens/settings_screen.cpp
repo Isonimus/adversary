@@ -7,6 +7,7 @@
 #include "modules/system/system_manager.h"
 #include "modules/system/time_manager.h"
 #include "modules/storage/capture_registry.h"
+#include "hal/storage/sd_manager.h"
 
 #ifdef ESP32
 #include <Arduino.h>
@@ -175,6 +176,7 @@ void SettingsScreen::buildSettingsList() {
     // Storage section
     items_[itemCount_++] = SettingItem::header("-- Storage --");
     items_[itemCount_++] = SettingItem::action("Rebuild Index");
+    items_[itemCount_++] = SettingItem::action("Retry SD Mount");
 
     // Count selectable items (non-headers)
     selectableCount_ = 0;
@@ -401,6 +403,40 @@ bool SettingsScreen::handleInput(char key) {
                             rebuildPendingFrames_ = 2;
                         });
                         actionMenu_.show();
+                    } else if (strcmp(label, "Retry SD Mount") == 0) {
+                        // Explicit operator retry: clear any cached no-card verdict
+                        // and attempt a real mount, so a card inserted after a
+                        // cardless boot works without a reboot (slice-0020). Bounded
+                        // (~5.6s worst case) and operator-initiated, so run inline.
+                        bool mounted = SDManager::getInstance().remount(true);
+                        if (mounted) {
+                            // A cardless boot skipped SettingsManager::load(), so
+                            // in-memory settings are compiled defaults. Reconcile the
+                            // whole settings struct with the now-mounted card BEFORE
+                            // this screen's exit autosave writes those defaults over
+                            // the card's real values (which clobbered a saved theme).
+                            // Reload every setting, re-apply the runtime-applied ones,
+                            // and reseed this screen's edit buffer so hide() persists
+                            // the card's values, not stale defaults.
+                            SettingsManager& sm = SettingsManager::getInstance();
+                            sm.load();
+                            sm.loadWhitelist();
+                            sm.checkApiKeyFile();
+                            const auto& s = sm.get();
+                            ThemeManager::getInstance().setTheme(
+                                static_cast<ThemePreset>(s.display.themePreset));
+                            SystemManager::getInstance().setDisplayBrightness(s.display.brightness);
+                            NotificationManager::getInstance().setAudioEnabled(s.system.notifySounds);
+                            NotificationManager::getInstance().setLedEnabled(s.system.notifyLeds);
+                            ToastManager::getInstance().setPosition(
+                                static_cast<ToastPosition>(s.display.toastPosition));
+                            buildSettingsList();  // reseed temp*_ from the reloaded settings
+                        }
+                        ToastManager::getInstance().show(
+                            mounted ? "SD mounted, settings reloaded" : "No SD card found",
+                            mounted ? ToastType::SUCCESS : ToastType::WARNING,
+                            ToastPriority::PRIORITY_HIGH);
+                        needsRedraw_ = true;
                     } else if (strncmp(label, "Fixed MAC:", 10) == 0) {
                          actionMenu_.setTitle("Configure BLE MAC");
                          actionMenu_.clearItems();

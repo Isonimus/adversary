@@ -6,6 +6,7 @@
  */
 
 #include "sd_manager.h"
+#include "sd_mount_policy.h"
 #include "config/config.h"
 
 #ifndef UNIT_TEST
@@ -58,6 +59,7 @@ SDManager& SDManager::getInstance() {
 SDManager::SDManager()
     : m_status(SDStatus::NOT_INITIALIZED)
     , m_initialized(false)
+    , m_noCardVerdict(false)
 {
 }
 
@@ -77,6 +79,7 @@ bool SDManager::init() {
     Serial.println("[SDManager] M5Stick has no SD slot - using internal storage");
     m_status = SDStatus::NO_CARD;
     m_initialized = false;
+    m_noCardVerdict = true;  // never any card here; keep remount() a no-op
     return false;  // Not an error, just no SD available
 #endif
 
@@ -172,33 +175,17 @@ bool SDManager::init() {
         }
     }
     
+    // No Method 3 default-SPI fallback: SPI.begin() on these same pins re-inits a
+    // second peripheral over the FSPI instance above (logs "addApbChangeCallback:
+    // duplicate func") and the first SD.begin() on it spins forever in sdWait()
+    // when no card is present — the measured no-card boot freeze (slice-0020). The
+    // dedicated-FSPI ladder above is the proven and only working mount path on this
+    // board, so a failure here means no usable card.
     if (!success) {
-        // Method 3: Try with default SPI
-        Serial.println("[SDManager] Trying with default SPI bus...");
-        SD.end();
-        delay(100);
-        
-        SPI.begin(sd_clk, sd_miso, sd_mosi, sd_cs);
-        
-        for (uint32_t freq : {400000U, 1000000U, 4000000U}) {
-            Serial.printf("[SDManager] Default SPI at %u Hz... ", freq);
-            if (SD.begin(sd_cs, SPI, freq)) {
-                if (SD.cardType() != CARD_NONE) {
-                    Serial.printf("SUCCESS!\n");
-                    success = true;
-                    break;
-                }
-            }
-            Serial.println("failed");
-            SD.end();
-            delay(50);
-        }
-    }
-    
-    if (!success) {
-        Serial.println("[SDManager] All SD init methods failed!");
+        Serial.println("[SDManager] No card mounted on the dedicated FSPI bus.");
         Serial.println("[SDManager] Note: If M5Launcher sees the card, try direct USB flash");
         m_status = SDStatus::NO_CARD;
+        m_noCardVerdict = true;  // don't re-run the ladder on shared-bus re-syncs
         return false;
     }
 
@@ -211,6 +198,7 @@ bool SDManager::init() {
 
     m_status = SDStatus::READY;
     m_initialized = true;
+    m_noCardVerdict = false;
 
     // Create directory structure
     createDirectoryStructure();
@@ -230,7 +218,18 @@ SPIClass* SDManager::spiBus() {
     return g_sdSpiReady ? &sdSPI : nullptr;
 }
 
-bool SDManager::remount() {
+bool SDManager::remount(bool forceRetry) {
+    // Once a cardless boot is known (no card-detect pin, so the verdict cost the
+    // full FSPI ladder once), don't pay that ladder again on every shared-bus
+    // re-sync. Only an explicit operator retry (forceRetry) re-attempts.
+    if (!sdShouldAttemptRemount(m_noCardVerdict, forceRetry)) {
+        Serial.println("[SDManager] remount skipped: no card (cached verdict)");
+        return false;
+    }
+    if (forceRetry) {
+        m_noCardVerdict = false;
+    }
+
     // Tear the driver down so init() re-runs the full mount (Method 1's
     // cardType() reads CARD_NONE after SD.end(), so it takes the dedicated-SPI
     // path and re-syncs the card from CMD0) rather than short-circuiting on
@@ -462,6 +461,7 @@ bool SDManager::hasSpaceFor(size_t requiredBytes) const {
 bool SDManager::init() {
     m_status = SDStatus::READY;
     m_initialized = true;
+    m_noCardVerdict = false;
     return true;
 }
 
@@ -471,7 +471,16 @@ void SDManager::deinit() {
 }
 
 SPIClass* SDManager::spiBus() { return nullptr; }
-bool SDManager::remount() { return init(); }
+
+bool SDManager::remount(bool forceRetry) {
+    if (!sdShouldAttemptRemount(m_noCardVerdict, forceRetry)) {
+        return false;
+    }
+    if (forceRetry) {
+        m_noCardVerdict = false;
+    }
+    return init();
+}
 
 SDCardInfo SDManager::getCardInfo() const {
     return {1024 * 1024 * 1024, 100 * 1024 * 1024, 924 * 1024 * 1024, "MOCK"};
