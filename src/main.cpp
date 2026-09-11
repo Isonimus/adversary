@@ -70,6 +70,7 @@
 #include "core/module_detection.h"
 #include "assets/generated_icons.h"
 #include "utils/bitmap_remapper.h"
+#include "utils/screenshot.h"
 
 #if defined(TARGET_CARDPUTER)
 #include <M5Cardputer.h>
@@ -911,7 +912,24 @@ void handleInput() {
             key = pressedKey;
         }
         if (key == 0) return;  // No valid key
-        
+
+        // Global hotkey: Fn+S captures the canvas to SD from any screen. Hooked
+        // here (not per-screen) because Cardputer input is dispatched centrally
+        // and Fn is otherwise unused; Fn does not remap the character, so this
+        // never collides with text entry. Intercept before routing so no screen
+        // sees the key.
+        if (state.fn && (key == 's' || key == 'S')) {
+            if (globalCanvas) {
+                char shotPath[64] = {0};
+                if (adversary::saveScreenshot(*globalCanvas, sdManager, shotPath, sizeof(shotPath))) {
+                    adversary::showSuccessToast(shotPath);
+                } else {
+                    adversary::showErrorToast("Screenshot failed");
+                }
+            }
+            return;
+        }
+
         // Route to active screen via adversary::ScreenManager (handles all non-menu screens)
         if (!routeInputToActiveScreen(key)) {
             // On menu screen - handle menu input directly

@@ -230,6 +230,7 @@ pio run -e m5stick -t upload
 - **ENTER**: Select / Confirm
 - **↑/↓** or **;/.**: Navigate lists
 - **Number keys** (1-9): Quick menu selection
+- **Fn + S**: Screenshot — saves the current screen as a BMP to `/adversary/screenshots/` (any screen)
 
 ### Menu Structure
 
@@ -368,6 +369,8 @@ capture, per service) shows as colored dots in the Captures screen.
 │       └── *.json                - Evil Twin credentials
 ├── dashboard/
 │   └── index.html, ...           - Web dashboard (Server mode)
+├── screenshots/
+│   └── shot_NNN.bmp              - Screen captures (Fn + S)
 └── logs/
     └── system.log                 - Debug/activity logs
 ```
