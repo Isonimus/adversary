@@ -23,6 +23,7 @@
 #include "../components/text_input_popup.h"
 #include "../../modules/rf/ook_signal.h"
 #include "../../modules/rf/spectrum_scan.h"
+#include "../../modules/rf/band_sweep.h"
 #include "screen_interface.h"
 
 namespace adversary {
@@ -64,10 +65,12 @@ private:
         REPLAY_CONFIRM,  // "transmit?" gate (replay emits RF)
         DELETE_CONFIRM,  // "delete?" gate
         FREQ_SELECT,     // pick a frequency preset
+        FSK_SELECT,      // CC1101: pick an FSK modem preset to capture on (slice-0019)
         JAM_SELECT,      // CC1101 jammer: pick emission mode (slice-0017)
         JAM_CONFIRM,     // jammer: interference warning gate before arming
         JAM_ACTIVE,      // jammer: armed; emits while the hold key is held
         NRF_SCAN,        // NRF24: live 2.4 GHz occupancy sweep (slice-0006)
+        BAND_SWEEP,      // CC1101: live RSSI sweep across the band presets (slice-0019)
     };
 
     struct SignalEntry {
@@ -79,6 +82,7 @@ private:
     void drawUnavailable(Canvas& canvas);
     void drawRadioSelect(Canvas& canvas);
     void drawNrfScan(Canvas& canvas);
+    void drawBandSweep(Canvas& canvas);
     void drawMain(Canvas& canvas);
     void drawCapturing(Canvas& canvas);
     void drawCaptureReview(Canvas& canvas);
@@ -86,6 +90,7 @@ private:
     void drawSignalAction(Canvas& canvas);
     void drawConfirm(Canvas& canvas, const char* question, uint16_t accent);
     void drawFreqSelect(Canvas& canvas);
+    void drawFskSelect(Canvas& canvas);  // FSK modem preset picker (slice-0019)
     void drawJam(Canvas& canvas);  // mode-select / confirm / active (slice-0017)
 
     // Draws an OOK signal's summary (RAW · N edges · freq) plus its static
@@ -115,6 +120,13 @@ private:
     void stopNrfScan();
     void stepNrfScan();
 
+    // CC1101 RSSI band-sweep (slice-0019): per update() retune to the next band
+    // preset, enter RX, read RSSI into the peak-hold model, until the operator
+    // leaves. Borrows the bus like capture; powers down + remounts on exit.
+    void startBandSweep();
+    void stopBandSweep();
+    void stepBandSweep();
+
     // CC1101 jammer (slice-0017): arm the radio into TX once, emit one bit-banged
     // GDO0 burst per frame while the hold key is down, power down on exit.
     bool jamArm();     // cc1101ConfigureOok + EnterTx on the current preset
@@ -129,8 +141,12 @@ private:
     MenuState state_;
     MenuState lastHintState_;  // footer hints are refreshed only when state_ changes
     int radioSelection_;   // root: 0=CC1101 Sub-GHz 1=NRF24 2.4 GHz
-    int mainSelection_;    // 0=Capture 1=Saved 2=Frequency
+    int mainSelection_;    // index into the CC1101 console main menu (MainItem)
+    int mainScroll_;       // scroll window offset for the main menu
     int presetIndex_;      // index into the frequency-preset table
+    int fskPresetIndex_;   // index into the FSK modem-preset table (slice-0019)
+    int fskScroll_;        // scroll window offset for the FSK preset list
+    bool captureIsFsk_;    // the in-flight capture is FSK (else OOK) — set on entry
     int actionSelection_;  // 0=Replay 1=Delete
     int fileSelection_;
     int fileScroll_;
@@ -149,6 +165,11 @@ private:
     rf::SpectrumScan spectrumScan_;  // per-channel occupancy tally
     uint8_t scanChannel_;            // next channel to sample this sweep
     bool scanActive_;                // radio is powered up and sweeping
+
+    // CC1101 band-sweep state.
+    rf::BandSweep bandSweep_;  // per-band peak-held RSSI
+    uint8_t sweepBand_;        // next band preset to sample
+    bool sweepActive_;         // sweep is running (owns the bus)
 
     ui::FooterHints footerHints_;
 

@@ -65,7 +65,9 @@ and **Radio** (Sub-GHz / 2.4 GHz, shown when the multi-radio cap is attached), p
 
 ### 📻 Radio — Sub-GHz & 2.4 GHz (multi-radio cap)
 Requires the CC1101/NRF24 expansion cap; the **Radio** entry is greyed out when no cap is detected.
+- **Sub-GHz Band Sweep** - CC1101 RSSI read across the 315 / 433.92 / 868.35 / 915 MHz presets while you hold a remote's button, with a peak-held bar per band and the strongest highlighted — tells you *which band* an unknown remote transmits on before you try to capture it. Reads energy, not modulation (independent of OOK vs FSK).
 - **Sub-GHz OOK Capture & Replay** - CC1101-based raw OOK capture and replay across 315 / 433.92 / 868.35 / 915 MHz (e.g. simple remotes and sensors), with a pulse-train preview of the captured signal.
+- **Sub-GHz FSK Capture & Replay** - CC1101 FSK demodulated capture (2-FSK / GFSK / MSK) for constant-amplitude remotes the OOK envelope-slicer can't see, chosen from a table of common modem presets (deviation / data rate / RX bandwidth), stored so a captured signal replays under its own configuration. Constant-amplitude modulation carries no envelope, so unknown deviation/data-rate is a preset search, not a read — and rolling-code targets won't actuate on replay (this is not an SDR).
 - **Sub-GHz Jamming** - CC1101 carrier-wave or modulated-noise transmission on the selected band preset to hold a channel busy against a fixed-code receiver. Hold-to-jam (emits only while the key is held) behind an interference-warning gate — authorized testing only.
 - **2.4 GHz Spectrum Analyzer** - NRF24-based channel sweep (received-power detection) across the 2.4 GHz band for activity/interference mapping.
 
@@ -368,7 +370,8 @@ capture, per service) shows as colored dots in the Captures screen.
 │   └── credentials/
 │       └── *.json                - Evil Twin credentials
 ├── dashboard/
-│   └── index.html, ...           - Web dashboard (Server mode)
+│   └── index.html, ...           - Web dashboard (Server mode); deploy with
+│                                    scripts/deploy_dashboard.sh (see Development)
 ├── screenshots/
 │   └── shot_NNN.bmp              - Screen captures (Fn + S)
 └── logs/
@@ -472,6 +475,22 @@ pio test -e native -f test_handshake_capture
 # View test coverage
 pio test -e native --verbose
 ```
+
+### Deploying the dashboard
+
+The web dashboard is served directly off the SD card from `/adversary/dashboard/`.
+Its source lives in `dashboard_dev/`, and nothing syncs the two automatically —
+editing `dashboard_dev/` has no effect on the device until the files are copied
+onto the card. Pop the SD into a card reader and run:
+
+```bash
+# <sd_mount_path> is where the card is mounted, e.g. /media/$USER/CARDPUTER
+scripts/deploy_dashboard.sh <sd_mount_path>
+```
+
+The script copies every asset, verifies each file's size on the card matches the
+source (a truncated or 0-byte write renders as a blank dashboard), and flushes
+the card before reporting success.
 
 ### Code Standards
 

@@ -7,6 +7,31 @@ releases, this can be replaced by a git-tag-generated changelog.
 ---
 
 
+## 2026-09-10
+- **Sub-GHz FSK capture & replay (CC1101).** FSK-demodulated capture (2-FSK / GFSK / MSK) for constant-amplitude remotes the OOK envelope-slicer can't demodulate, chosen from a table of common modem presets (deviation / data rate / RX bandwidth, which can't be inferred from an unknown signal). Reuses the RMT edge-timing path (the FSK demod drives GDO0 with recovered NRZ just like the OOK slicer), with a new `SUB2` on-SD format carrying the modulation descriptor so a captured signal replays under its own configuration; existing OOK `.sub` files keep loading unchanged. MSK below the CC1101 ~26 kBaud floor is rejected, not mis-tuned; 4-FSK is detect-only (no raw path on this silicon). The register math (deviation/data-rate/RX-bandwidth) is native-tested and cross-checked against the OOK block's own registers; the on-device capture/replay round-trip against a controlled 2-FSK source is a tracked follow-up. Second phase of slice-0019. The Radio menu's "Capture" is now "OOK Capture".
+- **Sub-GHz RSSI band-sweep (CC1101).** Reads the CC1101's RSSI across the four band presets (315 / 433.92 / 868.35 / 915 MHz) while you hold an unknown remote's button, peak-holding a bar per band and highlighting the strongest — so you learn *which band* a remote transmits on before trying to capture it. Modulation-independent (reads energy, not envelope), so it locates FSK remotes the OOK capture path can't yet demodulate. Field-verified against a tobacco-vending activator and a car keyfob (both correctly placed on 433.92). First phase of slice-0019; FSK demodulated capture follows.
+
+## 2026-09-08
+- **CC1101 sub-GHz jamming.** Carrier-wave or modulated-noise transmission on the selected band preset to hold a channel busy against a fixed-code receiver. Hold-to-jam (emits only while the key is held) behind an interference-warning gate; each burst is chunked so the shared GDO0 keyboard-matrix row is released between bursts and ESC stays responsive. (slice-0017)
+- **Modules dashboard + hot-swap re-detection.** A live inventory of attached peripherals (Sub-GHz/2.4 GHz cap, RFID, GPS) with a **Re-scan** action, so a module seated after boot is detected without a reboot — its greyed-out menu tile un-greys as soon as the re-scan finds it. Also surfaces the cap-detection override. (slice-0018)
+- **Status bar surfaces the multi-radio cap; RFID badge spelled out.** The resolved cap shows an "RF" badge; the RFID indicator reads "RFID" rather than a terse glyph.
+- **RFID and a cap GPS can run together.** Previously RFID was blanket-skipped whenever a cap GPS was present; now both coexist on their separate buses.
+- **Browser-based web flasher shipped.** An ESP Web Tools page on GitHub Pages flashes the prebuilt firmware over WebSerial. Includes the **dio-not-qio factory-image fix** (qio bricked the S3 via a boot-loop on the chip-less board), same-origin firmware serving to dodge CORS, and a Pages redeploy dispatched after each release so the flasher tracks the latest build. Web flash observed green on hardware. (slice-0016)
+- **Dependencies pinned with a resolved lock snapshot.** Exact versions across all envs (no `^` ranges) plus a `DEPENDENCIES.lock.md` snapshot, so a reinstall can't silently drift the M5/transitive libs.
+
+## 2026-09-07
+- **Tag-triggered GitHub Release for Cardputer firmware.** Pushing a version tag builds and publishes the firmware artifacts as a GitHub Release. (slice-0014)
+- **CodeQL scoped to our own sources.** Vendored/library results are filtered out and the one real source finding was fixed, so the scan signal is about our code. (slice-0015)
+- **Evil-twin config warns when enabling deauth.** A heads-up in the config flow that turning on deauth is the active/noisy path.
+- **GPS fix events on the EventBus.** `GPS_FIX_ACQUIRED` / `GPS_FIX_LOST` are emitted so screens can react to fix state without polling.
+- **ArduinoJson unified to v7 across all build environments.** (slice-0013)
+
+## 2026-09-06 (initial public release)
+- **The Adversary firmware went public.** First public source drop, with CI building every target and running the native test suite on push/PR (slice-0010) and the repository infrastructure for public release (slice-0011). Python pinned to 3.13 for the ESP32 builds; GitHub Actions bumped (checkout/cache/setup-python/codeql).
+- **Sub-GHz OOK capture & replay (CC1101).** Raw OOK capture and replay across 315 / 433.92 / 868.35 / 915 MHz via the multi-radio cap, with a pulse-train preview of the captured signal. (First appearance in this log; shipped earlier as slice-0003.)
+- **2.4 GHz spectrum analyzer (NRF24).** Channel-occupancy sweep (received-power detection) across the 2.4 GHz band for activity/interference mapping. (slice-0006)
+- **IR record & replay.** Learn a remote's IR frame (NEC/RC5/raw — decoded or raw timing train) via the cap's IR receiver, persist it to SD, and replay it with a pulse preview.
+
 ## 2026-07-02 (field-test follow-ups)
 - **Auto Hunt attempted-target tracking fixed.** The attempted-BSSID list capped at 16 and `markNetworkAttempted()` silently dropped beyond that, so in any area with >16 APs attempted targets were never recorded → the same targets got re-selected repeatedly and the skipped count only grew on new captures. Now a **128-entry ring buffer** (evict oldest when full, dedup on insert) — tracking never goes deaf, targets cycle. *(Field-confirmed 18-upload/9-handshake sync ran with flat heap: every pre-connect `largest=47092`, no progressive fragmentation — validates the sync design for 20+.)*
 - **Handshake History view no longer near-OOMs mid-capture.** Session list stored full `CapturedHandshake` (~1.4KB each, EAPOL buffers never populated for list entries) and `loadSessionHandshakes()` copied the whole buffer (~26KB for 9, resident afterward → attack heap 70K→51K after a peek; History dipped to ~20-30K). New lightweight `SessionHandshakeEntry` (~45B) — ~30× smaller.
