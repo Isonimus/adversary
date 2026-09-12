@@ -35,6 +35,7 @@
 | 0018 | Module hot-swap re-detection (Modules dashboard) | accepted |
 | 0019 | CC1101 RSSI band-sweep + FSK capture (2-FSK/GFSK/4-FSK/MSK) | accepted |
 | 0020 | Graceful boot with no SD card (remove the hanging default-SPI fallback) | accepted |
+| 0021 | Grey out SD-blocked menu entries when no card is present | accepted |
 
 ## Supersession
 
