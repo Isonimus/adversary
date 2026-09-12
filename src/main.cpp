@@ -492,7 +492,19 @@ void setup() {
     
     // Initialize the hierarchical menu
     initializeMenu();
-    
+
+    // Tell the operator once, at idle, that storage features are unavailable when
+    // no card mounted — otherwise a cardless boot degrades silently and SD actions
+    // just fail with no explanation. Recover without a reboot via Settings > SD
+    // (slice-0020).
+    if (sdManager.getStatus() == adversary::SDStatus::NO_CARD) {
+        adversary::ToastManager::getInstance().show(
+            "No SD card - captures, logs & dashboard disabled",
+            adversary::ToastType::WARNING,
+            adversary::ToastPriority::PRIORITY_MEDIUM,
+            4000);
+    }
+
     // All screens are now lazy-loaded via registerFactory()
     // Lazy-loaded screens — Phase 5 (Scanner/Sniffer — closures now use getActiveScreen())
     screenMgr.registerFactory(adversary::ScreenId::SCANNER,
