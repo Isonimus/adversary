@@ -34,7 +34,8 @@ GPSManager::GPSManager()
     , detectedChip_(nullptr)
     , detectedPinSet_(nullptr)
     , bufferPos_(0)
-    , taskHandle_(nullptr) {
+    , taskHandle_(nullptr)
+    , bgProbeCapPort_(true) {
 }
 
 bool GPSManager::init(bool probeCapPort) {
@@ -326,7 +327,12 @@ bool GPSManager::tryRedetect(bool probeCapPort) {
 #endif
 }
 
-void GPSManager::startBackgroundDetection() {
+void GPSManager::startBackgroundDetection(bool probeCapPort) {
+    // Forwarded to the task's periodic tryRedetect() so the background probe is
+    // cap-aware: never drive a UART onto G13/G15 when the multi-radio cap owns
+    // them as CC1101 control lines (slice-0002/slice-0018). Set before the task
+    // starts, and outside the ARDUINO guard so the parameter is used on native.
+    bgProbeCapPort_ = probeCapPort;
 #ifdef ARDUINO
     // Don't start if already detected or task already running
     if (detected_ || taskHandle_ != nullptr) {
@@ -368,7 +374,7 @@ void GPSManager::backgroundDetectionTask(void* param) {
         vTaskDelay(pdMS_TO_TICKS(CHECK_INTERVAL_MS));
         
         // Try to detect GPS
-        if (self->tryRedetect()) {
+        if (self->tryRedetect(self->bgProbeCapPort_)) {
             Serial.println("[GPS] Background detection succeeded - stopping task");
             self->taskHandle_ = nullptr;
             vTaskDelete(nullptr);  // Delete self

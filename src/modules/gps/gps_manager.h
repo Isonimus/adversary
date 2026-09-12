@@ -153,11 +153,18 @@ public:
     
     /**
      * @brief Start background detection task
-     * 
-     * Creates a FreeRTOS task that periodically attempts GPS detection
-     * if the module wasn't detected at boot. Task self-terminates on success.
+     *
+     * Creates a FreeRTOS task that periodically attempts GPS detection if the
+     * module wasn't detected at boot. Task self-terminates on success.
+     *
+     * @param probeCapPort forwarded to every periodic tryRedetect(). Pass false
+     *        when a multi-radio cap owns the cap-GPS UART pins (G13/G15 = CC1101
+     *        control lines) so the background probe never drives a UART onto them
+     *        (slice-0002/slice-0018). Required (no default) so each call site makes
+     *        the cap-aware decision explicitly and a new caller cannot silently
+     *        reintroduce the pin conflict.
      */
-    void startBackgroundDetection();
+    void startBackgroundDetection(bool probeCapPort);
     
     /**
      * @brief Stop background detection task
@@ -199,6 +206,7 @@ private:
     
     // Background detection task
     void* taskHandle_;              ///< FreeRTOS task handle for background detection
+    bool bgProbeCapPort_;           ///< probeCapPort forwarded to the task's tryRedetect(); set by startBackgroundDetection()
     static void backgroundDetectionTask(void* param);
 
 #ifdef ARDUINO
