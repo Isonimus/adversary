@@ -148,7 +148,8 @@ void initHardware();
 void showMenu();
 void handleInput();
 void handleMenuAction(int actionId);
-void initializeMenu();
+// adversary::initializeMenu() is declared in core/module_detection.h (a namespaced
+// composition-root callback like redetectModules(), so screens can trigger a rebuild).
 void stopAllAttacks();  // Clean up all running attacks/modules
 bool routeInputToActiveScreen(char key);  // Route input via adversary::ScreenManager
 void navigateToScreen(adversary::ScreenId screen);  // Navigate and sync adversary::ScreenManager
@@ -491,7 +492,7 @@ void setup() {
     stateMachine.transitionTo(adversary::AppState::IDLE);
     
     // Initialize the hierarchical menu
-    initializeMenu();
+    adversary::initializeMenu();
 
     // Tell the operator once, at idle, that storage features are unavailable when
     // no card mounted — otherwise a cardless boot degrades silently and SD actions
@@ -703,7 +704,7 @@ void initHardware() {
 /**
  * @brief Initialize the hierarchical menu structure
  */
-void initializeMenu() {
+void adversary::initializeMenu() {
     using adversary::MenuItem;
     using adversary::MenuItemType;
     
@@ -725,7 +726,12 @@ void initializeMenu() {
             MenuItem::action("Wardriving", ACTION_WARDRIVING, 'd') :
             MenuItem::disabled("Wardriving (No GPS)"),
         MenuItem::separator(),
-        MenuItem::action("Captures", ACTION_CAPTURES, 'c'),
+        // Captures is a pure browser over SD capture files — nothing to show
+        // without a card, so grey it out (slice-0021). Un-greys on the next menu
+        // rebuild, which the Settings > Retry SD Mount handler triggers.
+        sdManager.isReady() ?
+            MenuItem::action("Captures", ACTION_CAPTURES, 'c') :
+            MenuItem::disabled("Captures (No SD)"),
         MenuItem::action("Whitelist", ACTION_WHITELIST, 'l'),
         MenuItem::separator(),
         MenuItem::back()
@@ -735,7 +741,11 @@ void initializeMenu() {
     std::vector<MenuItem> bleMenu = {
         MenuItem::action("BLE Scanner", ACTION_BLE_SCAN, 's'),
         MenuItem::action("Apple Attack", ACTION_BLE_APPLE_ATTACK, 'a'),
-        MenuItem::action("BadBLE (HID)", ACTION_BLE_BAD_BLE, 'h'),
+        // BadBLE has no built-in scripts — it only runs SD .txt scripts, so it is
+        // useless without a card (slice-0021). Un-greys on the next menu rebuild.
+        sdManager.isReady() ?
+            MenuItem::action("BadBLE (HID)", ACTION_BLE_BAD_BLE, 'h') :
+            MenuItem::disabled("BadBLE (No SD)"),
         MenuItem::action("Identity Spoof", ACTION_BLE_SPOOF, 'i'),
         MenuItem::action("BLE Spam", ACTION_BLE_SPAM, 'p'),
         MenuItem::separator(),
@@ -813,9 +823,17 @@ void initializeMenu() {
     carouselItems.push_back({"MODULES", adversary::assets::ICON_MODULES, ACTION_MODULES,
                              true, ""});
 
-    // Server entry - enabled if dashboard exists
-    bool serverEnabled = sdManager.fileExists("/adversary/dashboard/index.html");
-    carouselItems.push_back({"SERVER", adversary::assets::ICON_SERVER, ACTION_SERVER, serverEnabled, "Dashboard index missing"});
+    // Server entry - serves the dashboard straight off SD, so it needs both a
+    // mounted card and the dashboard files. Distinguish the two so the greyed-tile
+    // reason is honest instead of always blaming a missing index (slice-0021). The
+    // fileExists() check stays build-time (SD I/O must not run per-frame in the
+    // carousel's live enabledFn); a menu rebuild on Retry SD Mount refreshes it.
+    const bool sdReadyForServer = sdManager.isReady();
+    const bool serverEnabled = sdReadyForServer &&
+        sdManager.fileExists("/adversary/dashboard/index.html");
+    const char* serverDisabledReason = sdReadyForServer ? "Dashboard index missing"
+                                                        : "No SD card";
+    carouselItems.push_back({"SERVER", adversary::assets::ICON_SERVER, ACTION_SERVER, serverEnabled, serverDisabledReason});
 
     carouselItems.push_back({"SETTINGS", adversary::assets::ICON_SETTINGS, ACTION_SETTINGS, true, ""});
     carouselItems.push_back({"ABOUT", adversary::assets::ICON_ABOUT, ACTION_ABOUT, true, ""});

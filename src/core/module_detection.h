@@ -31,4 +31,20 @@ namespace adversary {
  */
 void redetectModules();
 
+/**
+ * @brief (Re)build the root carousel and list menus from current detection + SD
+ *        state.
+ *
+ * The single menu-definition site. setup() calls it once at boot; the Settings →
+ * Retry SD Mount handler calls it again after a successful mount so SD-blocked
+ * entries (Captures, BadBLE, SERVER) un-grey without a reboot (slice-0021). Both
+ * menu layers gate at build time — the list items are boot-frozen structs and the
+ * SERVER tile's gate needs SD I/O that must not run per-frame — so a rebuild, not
+ * a live per-frame check, is how SD state changes reach the menu. Idempotent;
+ * resets the menu cursor to root.
+ *
+ * Defined in main.cpp for the same composition-root reason as redetectModules().
+ */
+void initializeMenu();
+
 } // namespace adversary
