@@ -33,10 +33,12 @@ namespace adversary {
 namespace {
 // The dedicated FSPI bus SDManager mounts the card on (Method 2). Shared with
 // the multi-radio cap probe so both SPI devices drive one peripheral instance
-// rather than a conflicting second SPIClass (slice-0002). Only valid once
-// Method 2 has owned the bus; a launcher pre-mount (Method 1) leaves it unowned.
+// rather than a conflicting second SPIClass (slice-0002). Valid once Method 2
+// has called sdSPI.begin(): this tracks bus initialisation, NOT card-mount
+// success, so a cap seated with no card is still probeable. A launcher
+// pre-mount (Method 1) returns before begin() and leaves the bus unowned.
 SPIClass sdSPI(FSPI);
-bool g_sdSpiReady = false;
+bool g_sdBusBegun = false;
 }  // namespace
 #endif
 
@@ -139,8 +141,11 @@ bool SDManager::init() {
     // bus instance (slice-0002).
     Serial.println("[SDManager] Attempting Arduino SD init with FSPI...");
 
-    // Initialize SPI with SD card pins
+    // Initialize SPI with SD card pins. The bus is now owned and shareable with
+    // the cap probe regardless of whether a card mounts below, decoupling cap
+    // detection from card presence (a seated cap must be probeable with no card).
     sdSPI.begin(sd_clk, sd_miso, sd_mosi, sd_cs);
+    g_sdBusBegun = true;
     
     // Try mounting at different frequencies (Safer speed first: 4MHz)
     const uint32_t frequencies[] = {4000000, 10000000, 20000000, 1000000, 400000};
@@ -163,7 +168,6 @@ bool SDManager::init() {
                     Serial.printf("SUCCESS (type=%d)\n", SD.cardType());
                     root.close();
                     success = true;
-                    g_sdSpiReady = true;  // we own sdSPI; shareable with the cap probe
                 } else {
                     Serial.println("mount ok but root unreadable (speed too high?)");
                 }
@@ -215,7 +219,7 @@ void SDManager::deinit() {
 }
 
 SPIClass* SDManager::spiBus() {
-    return g_sdSpiReady ? &sdSPI : nullptr;
+    return g_sdBusBegun ? &sdSPI : nullptr;
 }
 
 bool SDManager::remount(bool forceRetry) {
