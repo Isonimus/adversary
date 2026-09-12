@@ -8,6 +8,7 @@
 #include "modules/system/time_manager.h"
 #include "modules/storage/capture_registry.h"
 #include "hal/storage/sd_manager.h"
+#include "core/module_detection.h"  // adversary::initializeMenu() — rebuild menu on retry-mount
 
 #ifdef ESP32
 #include <Arduino.h>
@@ -431,6 +432,11 @@ bool SettingsScreen::handleInput(char key) {
                             ToastManager::getInstance().setPosition(
                                 static_cast<ToastPosition>(s.display.toastPosition));
                             buildSettingsList();  // reseed temp*_ from the reloaded settings
+                            // Rebuild the menu so the SD-blocked entries (Captures,
+                            // BadBLE, SERVER) un-grey without a reboot — both menu
+                            // layers gate at build time, so a rebuild is how the new
+                            // SD state reaches them (slice-0021).
+                            initializeMenu();
                         }
                         ToastManager::getInstance().show(
                             mounted ? "SD mounted, settings reloaded" : "No SD card found",
