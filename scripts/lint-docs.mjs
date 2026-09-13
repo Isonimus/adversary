@@ -317,7 +317,7 @@ const rules = {
   // Severity splits on *why* the corpus is empty. No adr/ or slices/ at all means the
   // root is wrong — no repo using this method lacks both, so that is an error. Dirs that
   // exist but hold no documents are a correctly-scaffolded repo that has not written its
-  // first ADR yet; erroring there would fail `npm run lint` during install, so it warns.
+  // first ADR yet; erroring there would fail `node scripts/lint-docs.mjs` during install, so it warns.
   corpus(docs, root, report) {
     if (docs.length > 0) return;
     const present = DOC_DIRS.filter((d) => existsSync(join(root, d)));
