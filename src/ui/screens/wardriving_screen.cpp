@@ -6,6 +6,7 @@
 #include "wardriving_screen.h"
 #include "modules/system/time_manager.h"
 #include "modules/wifi/wifi_scanner.h"
+#include "hal/expansion/expansion_cap.h"
 #include <Arduino.h>
 
 namespace adversary {
@@ -57,7 +58,8 @@ void WardrivingScreen::show() {
     // This avoids the 3-second blocking delay that causes UI lag
     auto& gps = GPSManager::getInstance();
     if (!gps.isDetected()) {
-        gps.startBackgroundDetection();
+        gps.startBackgroundDetection(
+            hal::resolvedExpansionCap() != hal::ExpansionCap::MultiRadio);
     }
     
     footerHints_.setHints({}); // Will be set dynamically in render

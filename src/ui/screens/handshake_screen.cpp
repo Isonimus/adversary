@@ -11,6 +11,7 @@
 #include "modules/network/wpasec_service.h"
 #include "modules/wifi/station_scanner.h"
 #include "modules/gps/gps_manager.h"
+#include "hal/expansion/expansion_cap.h"
 #include "ui/components/status_bar.h"
 #include "ui/components/toast_manager.h"
 #include "ui/screen_manager.h"
@@ -114,7 +115,8 @@ void HandshakeScreen::show() {
     // This avoids the 3-second blocking delay that causes UI lag
     auto& gps = GPSManager::getInstance();
     if (!gps.isDetected()) {
-        gps.startBackgroundDetection();
+        gps.startBackgroundDetection(
+            hal::resolvedExpansionCap() != hal::ExpansionCap::MultiRadio);
     }
     
     footerHints_.setHints({}); // Will be set dynamically in render
