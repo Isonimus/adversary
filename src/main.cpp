@@ -16,37 +16,15 @@
 #include "hal/storage/sd_manager.h"
 #include "ui/theme.h"
 #include "modules/wifi/wifi_scanner.h"
-#include "ui/screens/scanner_screen.h"
-#include "ui/screens/sniffer_screen.h"
-#include "ui/screens/deauth_screen.h"
-#include "ui/screens/handshake_screen.h"
-#include "ui/screens/evil_twin_screen.h"
-#include "ui/screens/karma_screen.h"
-#include "ui/screens/beacon_spam_screen.h"
-#include "ui/screens/probe_flood_screen.h"
-#include "ui/screens/captures_screen.h"
-
-#include "ui/screens/settings_screen.h"
-#include "ui/screens/saved_networks_screen.h"
-#include "ui/screens/about_screen.h"
-#include "ui/screens/whitelist_screen.h"
-
-#include "ui/screens/wardriving_screen.h"
-#include "ui/screens/ble_scanner_screen.h"
-
-#include "ui/screens/rfid_screen.h"
-#include "ui/screens/ir_tvbgone_screen.h"
-#include "ui/screens/ir_record_screen.h"
-#include "ui/screens/ble_spam_screen.h"
-#include "ui/screens/ble_apple_attack_screen.h"
-#include "ui/screens/ble_bad_ble_screen.h"
-#include "ui/screens/badusb_screen.h"
-#include "ui/screens/mouse_jiggler_screen.h"
-#include "ui/screens/ble_spoof_screen.h"
-#include "ui/screens/server_menu_screen.h"
-#include "ui/screens/server_status_screen.h"
+// Only the screens main.cpp constructs or downcasts directly are included here;
+// the full screen->factory catalogue lives in screen_registry.cpp (slice-0023).
+#include "ui/screens/scanner_screen.h"     // stopAllAttacks() + scanner action wiring
+#include "ui/screens/sniffer_screen.h"     // stopAllAttacks() + sniffer action wiring
+#include "ui/screens/evil_twin_screen.h"   // stopAllAttacks() stop()+forceStopPortal()
+#include "ui/screens/karma_screen.h"       // stopAllAttacks() stop()+forceStopPortal()
 #include "modules/server/server_manager.h"
-#include "ui/screens/splash_screen.h"
+#include "ui/screens/splash_screen.h"      // global splashScreen instance
+#include "ui/screen_registry.h"
 #include "ui/screen_manager.h"
 #include "ui/components/menu.h"
 #include "modules/storage/capture_registry.h"
@@ -60,6 +38,7 @@
 #include "modules/system/system_manager.h"
 #include "modules/system/time_manager.h"
 #include "modules/ble/ble_scanner.h"
+#include "modules/ble/ble_spanner.h"   // stopAllAttacks() -> BLESpanner::forceRelease()
 #include "ui/screens/ble_scanner_screen.h"
 
 #include "hal/input/input_manager.h"
@@ -161,11 +140,8 @@ void adversary_ui_render_forced();     // Force manual render during blocking ta
 static adversary::StateMachine& stateMachine = adversary::StateMachine::getInstance();
 static adversary::SDManager& sdManager = adversary::SDManager::getInstance();
 static adversary::WiFiScanner& wifiScanner = adversary::WiFiScanner::getInstance();
-// All 22 screens are now lazy-loaded via adversary::ScreenManager::registerFactory().
-// adversary::ScannerScreen and adversary::SnifferScreen were the last holdouts (closure captures)
-// and are now also factory-migrated by using getActiveScreen() inside lambdas.
-// NOTE: Phase 3 screens now lazy-loaded: adversary::SettingsScreen, adversary::SavedNetworksScreen,
-//       adversary::WardrivingScreen, adversary::BleSpamScreen, adversary::ServerMenuScreen, adversary::ServerStatusScreen
+// Every screen is lazy-loaded via a factory; the factory table is registered by
+// adversary::registerAllScreens() (screen_registry.cpp, slice-0023).
 static adversary::SplashScreen splashScreen;
 static adversary::Menu mainMenu;
 static adversary::CarouselMenu carouselMenu;
@@ -506,78 +482,10 @@ void setup() {
             4000);
     }
 
-    // All screens are now lazy-loaded via registerFactory()
-    // Lazy-loaded screens — Phase 5 (Scanner/Sniffer — closures now use getActiveScreen())
-    screenMgr.registerFactory(adversary::ScreenId::SCANNER,
-        []() -> adversary::IScreen* { return new adversary::ScannerScreen(); });
-    screenMgr.registerFactory(adversary::ScreenId::SNIFFER,
-        []() -> adversary::IScreen* { return new adversary::SnifferScreen(); });
-
-    // Lazy-loaded screens — Phase 5 (BLE scanner)
-    screenMgr.registerFactory(adversary::ScreenId::BLE_SCANNER,
-        []() -> adversary::IScreen* { return new adversary::BleScannerScreen(); });
-
-    // Lazy-loaded screens — Phase 4 (attack screens with setParams override)
-    screenMgr.registerFactory(adversary::ScreenId::DEAUTH,
-        []() -> adversary::IScreen* { return new adversary::DeauthScreen(); });
-    screenMgr.registerFactory(adversary::ScreenId::HANDSHAKE,
-        []() -> adversary::IScreen* { return new adversary::HandshakeScreen(); });
-    screenMgr.registerFactory(adversary::ScreenId::EVIL_TWIN,
-        []() -> adversary::IScreen* { return new adversary::EvilTwinScreen(); });
-    screenMgr.registerFactory(adversary::ScreenId::PROBE_FLOOD,
-        []() -> adversary::IScreen* { return new adversary::ProbeFloodScreen(); });
-    screenMgr.registerFactory(adversary::ScreenId::KARMA,
-        []() -> adversary::IScreen* { return new adversary::KarmaScreen(); });
-    screenMgr.registerFactory(adversary::ScreenId::BEACON_SPAM,
-        []() -> adversary::IScreen* { return new adversary::BeaconSpamScreen(); });
-    screenMgr.registerFactory(adversary::ScreenId::ABOUT,
-        []() -> adversary::IScreen* { return new adversary::AboutScreen(); });
-    screenMgr.registerFactory(adversary::ScreenId::RADIO,
-        []() -> adversary::IScreen* { return new adversary::RadioScreen(); });
-    screenMgr.registerFactory(adversary::ScreenId::MODULES,
-        []() -> adversary::IScreen* { return new adversary::ModulesScreen(); });
-    screenMgr.registerFactory(adversary::ScreenId::WHITELIST,
-        []() -> adversary::IScreen* { return new adversary::WhitelistScreen(); });
-    screenMgr.registerFactory(adversary::ScreenId::CAPTURES,
-        []() -> adversary::IScreen* { return new adversary::CapturesScreen(); });
-    screenMgr.registerFactory(adversary::ScreenId::RFID,
-        []() -> adversary::IScreen* { return new adversary::RfidScreen(); });
-    screenMgr.registerFactory(adversary::ScreenId::INFRARED_TVB_GONE,
-        []() -> adversary::IScreen* { return new adversary::IrTvBGoneScreen(); });
-    screenMgr.registerFactory(adversary::ScreenId::INFRARED_RECORD,
-        []() -> adversary::IScreen* { return new adversary::IrRecordScreen(); });
-    screenMgr.registerFactory(adversary::ScreenId::USB_BADUSB,
-        []() -> adversary::IScreen* { return new adversary::BadUsbScreen(); });
-    screenMgr.registerFactory(adversary::ScreenId::HID_MOUSE_JIGGLER,
-        []() -> adversary::IScreen* { return new adversary::MouseJigglerScreen(); });
-    screenMgr.registerFactory(adversary::ScreenId::BLE_BAD_BLE,
-        []() -> adversary::IScreen* { return new adversary::BleBadBleScreen(); });
-    screenMgr.registerFactory(adversary::ScreenId::BLE_SPOOF,
-        []() -> adversary::IScreen* { return new adversary::BleSpoofScreen(); });
-    screenMgr.registerFactory(adversary::ScreenId::BLE_APPLE_ATTACK,
-        []() -> adversary::IScreen* { return new adversary::BleAppleAttackScreen(); });
-
-    // Lazy-loaded screens — Phase 3 (simple callbacks or standalone with init)
-    screenMgr.registerFactory(adversary::ScreenId::SETTINGS,
-        []() -> adversary::IScreen* {
-            auto* s = new adversary::SettingsScreen();
-            s->setOnSavedNetworksRequested([]() {
-                Serial.println("[Settings] Navigating to Saved Networks");
-                navigateToScreen(adversary::ScreenId::SAVED_NETWORKS);
-            });
-            return s;
-        });
-    screenMgr.registerFactory(adversary::ScreenId::SAVED_NETWORKS,
-        []() -> adversary::IScreen* { return new adversary::SavedNetworksScreen(); });
-    screenMgr.registerFactory(adversary::ScreenId::WARDRIVING,
-        []() -> adversary::IScreen* { return new adversary::WardrivingScreen(); });
-    screenMgr.registerFactory(adversary::ScreenId::BLE_SPAM,
-        []() -> adversary::IScreen* { return new adversary::BleSpamScreen(); });
-    screenMgr.registerFactory(adversary::ScreenId::SERVER_MENU,
-        []() -> adversary::IScreen* { return new adversary::ServerMenuScreen(); });
-    screenMgr.registerFactory(adversary::ScreenId::SERVER_STATUS,
-        []() -> adversary::IScreen* { return new adversary::ServerStatusScreen(); });
-    Serial.println("[Init] All screens registered with adversary::ScreenManager");
+    // The screen->factory table lives in screen_registry.cpp so this entry point
+    // no longer #includes the ~25 concrete screen headers it never otherwise names
+    // (slice-0023).
+    adversary::registerAllScreens(screenMgr);
 
     showMenu();
 
