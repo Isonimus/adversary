@@ -409,6 +409,18 @@ A: Ensure it's a `[4WAY]` or `[EAPOL]` type. Check WPA-SEC upload status in Capt
 - Try a different/smaller card (8-32GB recommended)
 - Check for physical damage to card or slot
 
+**SD Card Works on Direct USB Flash but Not via M5Launcher**
+Some cards — more often larger ones (16GB+) — mount fine when you flash The Adversary
+directly over USB, yet fail every time the firmware is launched from M5Launcher. This is a
+card quirk, not a firmware bug. M5Launcher hands control over with a *warm* reset, and the
+Cardputer ADV has no way to power-cycle the SD card's power rail across that reset; some
+cards latch into a state where they report as present but refuse to re-initialize until
+they get a genuine power cycle. A direct USB flash works because that is a cold power-on.
+Fixes, easiest first:
+- **Reseat the card** — physically remove and reinsert it (its only power cycle), then boot.
+- **Flash The Adversary directly over USB** onto that card instead of launching via M5Launcher.
+- **Use a card that tolerates the warm reset** — in testing an 8GB card mounted first try where a 16GB did not.
+
 **Handshake Capture Failures**
 - Verify target is WPA/WPA2 (not WPA3-only or Open)
 - Enable Auto Deauth if no clients reconnecting
