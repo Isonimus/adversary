@@ -79,9 +79,12 @@ public:
      *        skipped. Under the multi-radio cap those pins are the CC1101
      *        GDO0/CS control lines, not a UART, so a GPS probe must never drive
      *        them (slice-0002). The Grove-port GPS is unaffected.
+     *        Required (no default) so cap-awareness is a conscious decision at every
+     *        call site — the omission that caused the background-detect trap is now a
+     *        compile error (slice-0018 follow-up).
      * @return true if GPS module detected, false otherwise
      */
-    bool init(bool probeCapPort = true);
+    bool init(bool probeCapPort);
     
     /**
      * @brief Deinitialize GPS module
@@ -146,10 +149,11 @@ public:
      * @param probeCapPort when false, the cap-GPS UART pins (G13/G15) are skipped —
      *        pass false when the multi-radio cap owns those pins so a re-probe never
      *        drives a UART onto the CC1101 control lines (slice-0002 / slice-0018).
-     *        Defaults to true to preserve existing callers.
+     *        Required (no default) so each call site makes the cap-aware decision
+     *        explicitly and a new caller cannot silently reintroduce the pin conflict.
      * @return true if GPS module detected (now or previously)
      */
-    bool tryRedetect(bool probeCapPort = true);
+    bool tryRedetect(bool probeCapPort);
     
     /**
      * @brief Start background detection task
