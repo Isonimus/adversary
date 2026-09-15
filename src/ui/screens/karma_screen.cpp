@@ -85,6 +85,10 @@ void KarmaScreen::hide() {
     if (karma_.isRunning()) {
         stop();
     }
+    // Reclaim the captive-portal DNS/HTTP server heap on teardown, not just on an
+    // explicit stop — hide() is the screen's full lifecycle teardown. Idempotent: no-ops
+    // when no portal is up, so a plain back-to-menu exit is safe.
+    forceStopPortal();
 }
 
 void KarmaScreen::update() {
