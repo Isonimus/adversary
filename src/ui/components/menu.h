@@ -210,12 +210,16 @@ void Menu::render(Canvas& canvas) {
     // Menu items
     int16_t yPos = 20 + 8;
     
-    // Calculate visible range for scrolling
-    // Account for: status bar (20px), padding (8px), action bar (20px)
+    // Visible-row budget. A row's selection band is itemHeight tall and starts
+    // highlightInsetAbove px above the text baseline (yPos), so a row is fully visible
+    // when that band clears the action bar top. Count the bands that fit rather than a
+    // naive contentHeight/itemHeight: 87/18 truncated to 4 and dropped a 5th row that
+    // in fact fits (band at yPos=100 ends at y=113, above the y=115 action bar).
     const int16_t itemHeight = 18;
     const int16_t separatorHeight = 14;
-    const int16_t contentAreaHeight = config::SCREEN_HEIGHT - 20 - 8 - 20;  // 135 - 48 = 87px
-    const int maxVisible = contentAreaHeight / itemHeight;  // ~4-5 items
+    const int16_t highlightInsetAbove = 5;
+    const int16_t actionBarTop = config::SCREEN_HEIGHT - 20;                    // 115
+    const int maxVisible = (actionBarTop - (yPos - highlightInsetAbove)) / itemHeight;  // (115-23)/18 = 5
     
     int startIdx = 0;
     if (selection_ >= maxVisible) {
@@ -226,8 +230,8 @@ void Menu::render(Canvas& canvas) {
     for (size_t i = startIdx; i < items.size() && visibleCount < maxVisible; i++) {
         const MenuItem& item = items[i];
         
-        // Check if we'd overflow into the action bar
-        if (yPos + itemHeight > config::SCREEN_HEIGHT - 20) {
+        // Stop before a row's selection band would cross into the action bar.
+        if ((yPos - highlightInsetAbove) + itemHeight > actionBarTop) {
             break;
         }
         
