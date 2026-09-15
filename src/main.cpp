@@ -18,10 +18,8 @@
 #include "modules/wifi/wifi_scanner.h"
 // Only the screens main.cpp constructs or downcasts directly are included here;
 // the full screen->factory catalogue lives in screen_registry.cpp (slice-0023).
-#include "ui/screens/scanner_screen.h"     // stopAllAttacks() + scanner action wiring
-#include "ui/screens/sniffer_screen.h"     // stopAllAttacks() + sniffer action wiring
-#include "ui/screens/evil_twin_screen.h"   // stopAllAttacks() stop()+forceStopPortal()
-#include "ui/screens/karma_screen.h"       // stopAllAttacks() stop()+forceStopPortal()
+#include "ui/screens/scanner_screen.h"     // scanner->attack action-callback wiring
+#include "ui/screens/sniffer_screen.h"     // sniffer->attack action-callback wiring
 #include "modules/server/server_manager.h"
 #include "ui/screens/splash_screen.h"      // global splashScreen instance
 #include "ui/screen_registry.h"
@@ -116,44 +114,14 @@ static M5Canvas* globalCanvas = nullptr;
 void stopAllAttacks() {
     Serial.println("[Main] Stopping all attacks/modules...");
     
-    // Single active-screen reference for all lazy-loaded screen cleanup
-    auto& sm = adversary::ScreenManager::getInstance();
-    auto aid = sm.getActiveScreenId();
-    adversary::IScreen* activeScr = sm.getActiveScreen();
-    
-    // Stop scanner / sniffer if active
-    if (aid == adversary::ScreenId::SCANNER && activeScr) {
-        static_cast<adversary::ScannerScreen*>(activeScr)->setActive(false);
-    } else if (aid == adversary::ScreenId::SNIFFER && activeScr) {
-        static_cast<adversary::SnifferScreen*>(activeScr)->setActive(false);
-    }
-    
-    // Stop attack screens
+    // Tear down whatever screen is active through its polymorphic lifecycle hook.
+    // hide() is each screen's full teardown (stops its radio, releases its heap,
+    // unsubscribes its EventBus handlers) and is idempotent — the subsequent screen
+    // transition calls hide() again via ScreenManager::setActiveScreen(). No concrete
+    // screen type is named here: the four former downcasts (Scanner/Sniffer setActive,
+    // Evil Twin/Karma stop+forceStopPortal) are now subsumed by their own hide().
+    adversary::IScreen* activeScr = adversary::ScreenManager::getInstance().getActiveScreen();
     if (activeScr) {
-        if (aid == adversary::ScreenId::DEAUTH || aid == adversary::ScreenId::HANDSHAKE ||
-            aid == adversary::ScreenId::BEACON_SPAM || aid == adversary::ScreenId::PROBE_FLOOD) {
-            activeScr->hide();
-        } else if (aid == adversary::ScreenId::EVIL_TWIN) {
-            auto* et = static_cast<adversary::EvilTwinScreen*>(activeScr);
-            et->stop();
-            et->forceStopPortal();
-        } else if (aid == adversary::ScreenId::KARMA) {
-            auto* ks = static_cast<adversary::KarmaScreen*>(activeScr);
-            ks->stop();
-            ks->forceStopPortal();
-        }
-    }
-
-
-    // Stop Other Modules (IR, RFID, BLE peripherals) — lazy-loaded
-    if (activeScr && (
-        aid == adversary::ScreenId::INFRARED_TVB_GONE ||
-        aid == adversary::ScreenId::RFID ||
-        aid == adversary::ScreenId::BLE_BAD_BLE ||
-        aid == adversary::ScreenId::USB_BADUSB ||
-        aid == adversary::ScreenId::HID_MOUSE_JIGGLER ||
-        aid == adversary::ScreenId::BLE_SPOOF ||
-        aid == adversary::ScreenId::BLE_APPLE_ATTACK)) {
         activeScr->hide();
     }
 
@@ -162,13 +130,6 @@ void stopAllAttacks() {
     // but when switching to a different module we must reclaim heap
     adversary::BLESpanner::getInstance().forceRelease();
     adversary::BLEScanner::getInstance().deinit();
-    
-    // Server & Wardriving — lazy-loaded; cleanup via active screen
-    if (activeScr && (
-        aid == adversary::ScreenId::SERVER_MENU || aid == adversary::ScreenId::SERVER_STATUS ||
-        aid == adversary::ScreenId::WARDRIVING)) {
-        activeScr->hide();
-    }
 
     // GLOBAL WIFI RESET
     // Only manipulate WiFi if the driver was actually initialized.
