@@ -2,7 +2,7 @@
 id: '0031'
 title: "Return to the originating list after an attack drill-down, instead of dumping to the root menu"
 type: slice
-status: proposed
+status: accepted
 date: 2026-09-16
 supersedes: []
 superseded_by: []

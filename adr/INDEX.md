@@ -44,7 +44,7 @@
 | 0028 | Dissolve the Scanner/Sniffer action-callback downcasts via an attack-target EventBus event | accepted |
 | 0029 | Extract handleMenuAction()'s dispatch switch into a data-driven menu route table | accepted |
 | 0030 | Extract the pure key-normalization out of handleInput() into a native-testable keymap | accepted |
-| 0031 | Return to the originating list after an attack drill-down, instead of dumping to the root menu | proposed |
+| 0031 | Return to the originating list after an attack drill-down, instead of dumping to the root menu | accepted |
 | 0032 | Remove the never-wired HandshakeCapturedCallback from SnifferScreen | accepted |
 
 ## Supersession
