@@ -7,6 +7,9 @@ releases, this can be replaced by a git-tag-generated changelog.
 ---
 
 
+## 2026-09-16
+- **Attacks launched from a list return to that list.** Picking a target in the Scanner or Sniffer and launching an attack (Deauth / Handshake / Evil Twin / Probe Flood / Karma), then pressing ESC, now returns to the originating list instead of dropping to the root menu. (slice-0031)
+
 ## 2026-09-10
 - **Sub-GHz FSK capture & replay (CC1101).** FSK-demodulated capture (2-FSK / GFSK / MSK) for constant-amplitude remotes the OOK envelope-slicer can't demodulate, chosen from a table of common modem presets (deviation / data rate / RX bandwidth, which can't be inferred from an unknown signal). Reuses the RMT edge-timing path (the FSK demod drives GDO0 with recovered NRZ just like the OOK slicer), with a new `SUB2` on-SD format carrying the modulation descriptor so a captured signal replays under its own configuration; existing OOK `.sub` files keep loading unchanged. MSK below the CC1101 ~26 kBaud floor is rejected, not mis-tuned; 4-FSK is detect-only (no raw path on this silicon). The register math (deviation/data-rate/RX-bandwidth) is native-tested and cross-checked against the OOK block's own registers; the on-device capture/replay round-trip against a controlled 2-FSK source is a tracked follow-up. Second phase of slice-0019. The Radio menu's "Capture" is now "OOK Capture".
 - **Sub-GHz RSSI band-sweep (CC1101).** Reads the CC1101's RSSI across the four band presets (315 / 433.92 / 868.35 / 915 MHz) while you hold an unknown remote's button, peak-holding a bar per band and highlighting the strongest — so you learn *which band* a remote transmits on before trying to capture it. Modulation-independent (reads energy, not envelope), so it locates FSK remotes the OOK capture path can't yet demodulate. Field-verified against a tobacco-vending activator and a car keyfob (both correctly placed on 433.92). First phase of slice-0019; FSK demodulated capture follows.
