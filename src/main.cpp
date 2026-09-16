@@ -16,10 +16,9 @@
 #include "hal/storage/sd_manager.h"
 #include "ui/theme.h"
 #include "modules/wifi/wifi_scanner.h"
-// Only the screens main.cpp constructs or downcasts directly are included here;
-// the full screen->factory catalogue lives in screen_registry.cpp (slice-0023).
-#include "ui/screens/scanner_screen.h"     // scanner->attack action-callback wiring
-#include "ui/screens/sniffer_screen.h"     // sniffer->attack action-callback wiring
+// main.cpp holds no concrete screen types: the full screen->factory catalogue lives in
+// screen_registry.cpp (slice-0023), and screen->attack navigation now flows through the
+// ATTACK_TARGET_SELECTED EventBus event (slice-0028), not concrete-type downcasts.
 #include "modules/server/server_manager.h"
 #include "ui/screens/splash_screen.h"      // global splashScreen instance
 #include "ui/screen_registry.h"
@@ -152,8 +151,30 @@ void stopAllAttacks() {
 
     // Give time for WiFi resources to be fully released
     delay(100);
-    
+
     Serial.println("[Main] All attacks stopped");
+}
+
+/**
+ * @brief Navigate to the attack chosen on a scanned network / sniffed packet.
+ *
+ * Handles ATTACK_TARGET_SELECTED, published by ScannerScreen/SnifferScreen (slice-0028).
+ * Deliberately screen-agnostic: the target attack screen and the victim identity both
+ * arrive in the event, so this launches any attack without naming one — the shape the
+ * future MenuController/ScreenManager push API wants. stopAllAttacks() runs first and,
+ * because the scanner/sniffer is still the active screen at this point, tears it down via
+ * its own hide() before the attack screen inits.
+ */
+static void launchAttackTarget(const adversary::EventData& evt) {
+    stopAllAttacks();
+    adversary::IScreen::ScreenParams p;
+    memcpy(p.bssid, evt.payload.attackTarget.bssid, 6);
+    strncpy(p.ssid, evt.payload.attackTarget.ssid, 32);
+    p.ssid[32] = '\0';
+    p.channel = evt.payload.attackTarget.channel;
+    screenMgr.navigateWithParams(
+        static_cast<adversary::ScreenId>(evt.payload.attackTarget.targetScreen), p);
+    stateMachine.transitionTo(adversary::AppState::ATTACKING);
 }
 
 /**
@@ -406,6 +427,12 @@ void setup() {
     // no longer #includes the ~25 concrete screen headers it never otherwise names
     // (slice-0023).
     adversary::registerAllScreens(screenMgr);
+
+    // Route Scanner/Sniffer attack-target selections to the navigator. Subscribed once for
+    // the program's lifetime — the handler is stateless (slice-0028).
+    adversary::EventBus::getInstance().subscribe(
+        adversary::EventType::ATTACK_TARGET_SELECTED,
+        [](const adversary::EventData& evt) { launchAttackTarget(evt); });
 
     showMenu();
 
@@ -742,116 +769,17 @@ void handleMenuAction(int actionId) {
     switch (actionId) {
         case ACTION_SCAN_NETWORKS:
             Serial.println("Starting WiFi Scanner...");
-            navigateToScreen(adversary::ScreenId::SCANNER);  // factory creates + init() + show()
-            if (auto* sc = screenMgr.getActiveScreen()) {
-                auto* scanner = static_cast<adversary::ScannerScreen*>(sc);
-                // Set callback for network action selection
-                scanner->setOnNetworkAction([](const adversary::NetworkInfo& network, adversary::NetworkAction action) {
-                    Serial.printf("[Scanner] Action on %s: ", network.ssid.c_str());
-                    stopAllAttacks();
-                    switch (action) {
-                        case adversary::NetworkAction::DEAUTH: {
-                            Serial.println("DEAUTH");
-                            adversary::IScreen::ScreenParams p;
-                            memcpy(p.bssid, network.bssid, 6);
-                            strncpy(p.ssid, network.ssid.c_str(), 32);
-                            p.channel = network.channel;
-                            screenMgr.navigateWithParams(adversary::ScreenId::DEAUTH, p);
-                            stateMachine.transitionTo(adversary::AppState::ATTACKING);
-                            break;
-                        }
-                        case adversary::NetworkAction::HANDSHAKE: {
-                            Serial.println("HANDSHAKE");
-                            adversary::IScreen::ScreenParams p;
-                            memcpy(p.bssid, network.bssid, 6);
-                            strncpy(p.ssid, network.ssid.c_str(), 32);
-                            p.channel = network.channel;
-                            screenMgr.navigateWithParams(adversary::ScreenId::HANDSHAKE, p);
-                            stateMachine.transitionTo(adversary::AppState::ATTACKING);
-                            break;
-                        }
-                        case adversary::NetworkAction::EVIL_TWIN: {
-                            Serial.println("EVIL_TWIN");
-                            adversary::IScreen::ScreenParams p;
-                            memcpy(p.bssid, network.bssid, 6);
-                            strncpy(p.ssid, network.ssid.c_str(), 32);
-                            p.channel = network.channel;
-                            screenMgr.navigateWithParams(adversary::ScreenId::EVIL_TWIN, p);
-                            stateMachine.transitionTo(adversary::AppState::ATTACKING);
-                            break;
-                        }
-                        case adversary::NetworkAction::PROBE_FLOOD: {
-                            Serial.println("PROBE_FLOOD");
-                            adversary::IScreen::ScreenParams p;
-                            strncpy(p.ssid, network.ssid.c_str(), 32);
-                            p.channel = network.channel;
-                            screenMgr.navigateWithParams(adversary::ScreenId::PROBE_FLOOD, p);
-                            stateMachine.transitionTo(adversary::AppState::ATTACKING);
-                            break;
-                        }
-                        case adversary::NetworkAction::INFO:
-                            Serial.println("INFO");
-                            break;
-                    }
-                });
-                scanner->setActive(true);
-            }
+            // The scanner's show() starts the scan; when the operator picks an attack on a
+            // network it publishes ATTACK_TARGET_SELECTED, handled by launchAttackTarget().
+            navigateToScreen(adversary::ScreenId::SCANNER);
             stateMachine.transitionTo(adversary::AppState::SCANNING);
             break;
-            
+
         case ACTION_PACKET_SNIFFER:
             Serial.println("Starting Packet Sniffer...");
-            navigateToScreen(adversary::ScreenId::SNIFFER);  // factory creates + init() + show()
-            if (auto* sf = screenMgr.getActiveScreen()) {
-                auto* sniffer = static_cast<adversary::SnifferScreen*>(sf);
-                sniffer->show();  // extra show() to reset screen state to STATS view
-                sniffer->setOnPacketAction([](const adversary::PacketSummary& packet, adversary::PacketAction action) {
-                    Serial.printf("[Sniffer] Action callback: %d\n", static_cast<int>(action));
-                    // Stop sniffer before transitioning
-                    if (auto* cur = screenMgr.getActiveScreen())
-                        static_cast<adversary::SnifferScreen*>(cur)->setActive(false);
-                    switch (action) {
-                        case adversary::PacketAction::HANDSHAKE_CAPTURE: {
-                            adversary::IScreen::ScreenParams p;
-                            memcpy(p.bssid, packet.srcMac, 6);
-                            strncpy(p.ssid, packet.ssid, 32);
-                            p.channel = packet.channel;
-                            screenMgr.navigateWithParams(adversary::ScreenId::HANDSHAKE, p);
-                            stateMachine.transitionTo(adversary::AppState::ATTACKING);
-                            break;
-                        }
-                        case adversary::PacketAction::DEAUTH_ATTACK: {
-                            adversary::IScreen::ScreenParams p;
-                            memcpy(p.bssid, packet.srcMac, 6);
-                            strncpy(p.ssid, packet.ssid, 32);
-                            p.channel = packet.channel;
-                            screenMgr.navigateWithParams(adversary::ScreenId::DEAUTH, p);
-                            stateMachine.transitionTo(adversary::AppState::ATTACKING);
-                            break;
-                        }
-                        case adversary::PacketAction::EVIL_TWIN: {
-                            adversary::IScreen::ScreenParams p;
-                            memcpy(p.bssid, packet.srcMac, 6);
-                            strncpy(p.ssid, packet.ssid, 32);
-                            p.channel = packet.channel;
-                            screenMgr.navigateWithParams(adversary::ScreenId::EVIL_TWIN, p);
-                            stateMachine.transitionTo(adversary::AppState::ATTACKING);
-                            break;
-                        }
-                        case adversary::PacketAction::KARMA_ATTACK:
-                            navigateToScreen(adversary::ScreenId::KARMA);
-                            stateMachine.transitionTo(adversary::AppState::ATTACKING);
-                            break;
-                        case adversary::PacketAction::COPY_BSSID:
-                            Serial.printf("[Sniffer] BSSID: %02X:%02X:%02X:%02X:%02X:%02X\n",
-                                         packet.srcMac[0], packet.srcMac[1], packet.srcMac[2],
-                                         packet.srcMac[3], packet.srcMac[4], packet.srcMac[5]);
-                            break;
-                        default:
-                            break;
-                    }
-                });
-            }
+            // Same as the scanner: the sniffer publishes ATTACK_TARGET_SELECTED when the
+            // operator picks an attack on a captured packet; launchAttackTarget() navigates.
+            navigateToScreen(adversary::ScreenId::SNIFFER);
             stateMachine.transitionTo(adversary::AppState::SCANNING);
             break;
             

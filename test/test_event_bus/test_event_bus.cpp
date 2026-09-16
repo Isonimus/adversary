@@ -206,6 +206,37 @@ void test_event_data_payload_integrity() {
     bus.unsubscribe(id);
 }
 
+// 13. test_attack_target_payload_integrity
+// Guards the ATTACK_TARGET_SELECTED contract added in slice-0028: the Scanner/Sniffer
+// publish this event to launch an attack, and the navigator reads back every field. The
+// targetScreen field exercises the new AttackTargetEventData union member (a raw ScreenId-
+// shaped int16_t is used so this native test pulls in no UI/hardware headers).
+void test_attack_target_payload_integrity() {
+    EventBus& bus = EventBus::getInstance();
+    auto id = bus.subscribe(EventType::ATTACK_TARGET_SELECTED, [](const EventData& d){
+        handler1.handle(d);
+    });
+
+    const int16_t targetScreen = 4242;  // arbitrary ScreenId-shaped sentinel
+    const uint8_t bssid[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
+
+    EventData data(EventType::ATTACK_TARGET_SELECTED);
+    data.payload.attackTarget.targetScreen = targetScreen;
+    memcpy(data.payload.attackTarget.bssid, bssid, 6);
+    strncpy(data.payload.attackTarget.ssid, "TargetNet", 32);
+    data.payload.attackTarget.channel = 6;
+
+    bus.publish(data);
+
+    TEST_ASSERT_EQUAL(1, handler1.callCount);
+    TEST_ASSERT_EQUAL_INT16(targetScreen, handler1.lastData.payload.attackTarget.targetScreen);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(bssid, handler1.lastData.payload.attackTarget.bssid, 6);
+    TEST_ASSERT_EQUAL_STRING("TargetNet", handler1.lastData.payload.attackTarget.ssid);
+    TEST_ASSERT_EQUAL(6, handler1.lastData.payload.attackTarget.channel);
+
+    bus.unsubscribe(id);
+}
+
 int main(int argc, char **argv) {
     UNITY_BEGIN();
     RUN_TEST(test_subscribe_returns_valid_id);
@@ -220,5 +251,6 @@ int main(int argc, char **argv) {
     RUN_TEST(test_getTotalSubscriptions);
     RUN_TEST(test_getQueueSize);
     RUN_TEST(test_event_data_payload_integrity);
+    RUN_TEST(test_attack_target_payload_integrity);
     return UNITY_END();
 }

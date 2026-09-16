@@ -43,6 +43,7 @@ const char* eventTypeToString(EventType type) {
         case EventType::DEAUTH_PACKET_SENT:    return "DEAUTH_PACKET_SENT";
         case EventType::BEACON_SPAM_TICK:      return "BEACON_SPAM_TICK";
         case EventType::PROBE_FLOOD_TICK:      return "PROBE_FLOOD_TICK";
+        case EventType::ATTACK_TARGET_SELECTED: return "ATTACK_TARGET_SELECTED";
         
         // Handshake
         case EventType::HANDSHAKE_CAPTURED:    return "HANDSHAKE_CAPTURED";

@@ -5,8 +5,24 @@
 
 #include "scanner_screen.h"
 #include <algorithm>
+#include <cstring>
+#include "core/event_bus.h"
+#include "core/event_data.h"
 
 namespace adversary {
+
+// Announce the operator's attack choice on a scanned network. The navigator (subscribed in
+// main.cpp) tears down the scanner and launches `target` on this network — the screen never
+// reaches into the attack screens itself, which is why no concrete-type coupling remains.
+static void publishAttackTarget(ScreenId target, const NetworkInfo& net) {
+    EventData evt(EventType::ATTACK_TARGET_SELECTED);
+    evt.payload.attackTarget.targetScreen = static_cast<int16_t>(target);
+    memcpy(evt.payload.attackTarget.bssid, net.bssid, 6);
+    strncpy(evt.payload.attackTarget.ssid, net.ssid.c_str(), 32);
+    evt.payload.attackTarget.ssid[32] = '\0';
+    evt.payload.attackTarget.channel = net.channel;
+    EventBus::getInstance().publish(evt);
+}
 
 ScannerScreen::ScannerScreen()
     : m_scanner(WiFiScanner::getInstance())
@@ -287,36 +303,25 @@ void ScannerScreen::handleAction(char action) {
         case 'D':  // Deauth Attack
         case 'd':
             Serial.printf("[Scanner] Deauth selected for %s\n", m_selectedNetwork.ssid.c_str());
-            if (m_onNetworkAction) {
-                m_onNetworkAction(m_selectedNetwork, NetworkAction::DEAUTH);
-            } else if (m_onNetworkSelected) {
-                // Legacy callback
-                m_onNetworkSelected(m_selectedNetwork);
-            }
+            publishAttackTarget(ScreenId::DEAUTH, m_selectedNetwork);
             break;
             
         case 'H':  // Handshake Capture
         case 'h':
             Serial.printf("[Scanner] Handshake capture selected for %s\n", m_selectedNetwork.ssid.c_str());
-            if (m_onNetworkAction) {
-                m_onNetworkAction(m_selectedNetwork, NetworkAction::HANDSHAKE);
-            }
+            publishAttackTarget(ScreenId::HANDSHAKE, m_selectedNetwork);
             break;
             
         case 'T':  // Evil Twin
         case 't':
             Serial.printf("[Scanner] Evil Twin selected for %s\n", m_selectedNetwork.ssid.c_str());
-            if (m_onNetworkAction) {
-                m_onNetworkAction(m_selectedNetwork, NetworkAction::EVIL_TWIN);
-            }
+            publishAttackTarget(ScreenId::EVIL_TWIN, m_selectedNetwork);
             break;
             
         case 'P':  // Probe Flood
         case 'p':
             Serial.printf("[Scanner] Probe Flood selected for %s\n", m_selectedNetwork.ssid.c_str());
-            if (m_onNetworkAction) {
-                m_onNetworkAction(m_selectedNetwork, NetworkAction::PROBE_FLOOD);
-            }
+            publishAttackTarget(ScreenId::PROBE_FLOOD, m_selectedNetwork);
             break;
             
         case 'C':  // Connect/Disconnect
@@ -382,9 +387,7 @@ void ScannerScreen::handleAction(char action) {
                           m_selectedNetwork.bssid[2], m_selectedNetwork.bssid[3],
                           m_selectedNetwork.bssid[4], m_selectedNetwork.bssid[5],
                           m_selectedNetwork.channel, m_selectedNetwork.rssi);
-            if (m_onNetworkAction) {
-                m_onNetworkAction(m_selectedNetwork, NetworkAction::INFO);
-            }
+            // INFO is not an attack: the line above is the whole behaviour. No event.
             break;
     }
 }
