@@ -6,6 +6,8 @@
 #include "sniffer_screen.h"
 #include "config/config.h"
 #include <cstring>
+#include "core/event_bus.h"
+#include "core/event_data.h"
 
 namespace adversary {
 
@@ -861,17 +863,38 @@ void SnifferScreen::executeAction(PacketAction action)
     if (action == PacketAction::CANCEL) return;  // Just close menu
     
     const PacketSummary& pkt = m_packetLog[m_packetLogSelection];
-    
+
     // Log action
-    Serial.printf("[Sniffer] Executing action %s on %s\n", 
+    Serial.printf("[Sniffer] Executing action %s on %s\n",
                  getActionName(action), pkt.ssid[0] ? pkt.ssid : "<hidden>");
-    
-    // Call callback to let main.cpp handle screen transition
-    if (m_onPacketAction) {
-        m_onPacketAction(pkt, action);
-    } else {
-        Serial.println("[Sniffer] No action callback registered!");
+
+    // COPY_BSSID is an in-screen convenience, not an attack launch.
+    if (action == PacketAction::COPY_BSSID) {
+        Serial.printf("[Sniffer] BSSID: %02X:%02X:%02X:%02X:%02X:%02X\n",
+                      pkt.srcMac[0], pkt.srcMac[1], pkt.srcMac[2],
+                      pkt.srcMac[3], pkt.srcMac[4], pkt.srcMac[5]);
+        return;
     }
+
+    // Map the chosen attack to its screen. The navigator (subscribed in main.cpp) tears down
+    // this screen via hide() and launches the attack on the packet's source — the sniffer
+    // never reaches into the attack screens itself, which is why no downcast is needed here.
+    ScreenId target;
+    switch (action) {
+        case PacketAction::HANDSHAKE_CAPTURE: target = ScreenId::HANDSHAKE; break;
+        case PacketAction::DEAUTH_ATTACK:     target = ScreenId::DEAUTH;    break;
+        case PacketAction::EVIL_TWIN:         target = ScreenId::EVIL_TWIN; break;
+        case PacketAction::KARMA_ATTACK:      target = ScreenId::KARMA;     break;
+        default: return;  // no attack mapping for this action
+    }
+
+    EventData evt(EventType::ATTACK_TARGET_SELECTED);
+    evt.payload.attackTarget.targetScreen = static_cast<int16_t>(target);
+    memcpy(evt.payload.attackTarget.bssid, pkt.srcMac, 6);
+    strncpy(evt.payload.attackTarget.ssid, pkt.ssid, 32);
+    evt.payload.attackTarget.ssid[32] = '\0';
+    evt.payload.attackTarget.channel = pkt.channel;
+    EventBus::getInstance().publish(evt);
 }
 
 // =============================================================================

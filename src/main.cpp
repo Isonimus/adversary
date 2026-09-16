@@ -16,12 +16,9 @@
 #include "hal/storage/sd_manager.h"
 #include "ui/theme.h"
 #include "modules/wifi/wifi_scanner.h"
-// Only the screens main.cpp constructs or downcasts directly are included here;
-// the full screen->factory catalogue lives in screen_registry.cpp (slice-0023).
-#include "ui/screens/scanner_screen.h"     // stopAllAttacks() + scanner action wiring
-#include "ui/screens/sniffer_screen.h"     // stopAllAttacks() + sniffer action wiring
-#include "ui/screens/evil_twin_screen.h"   // stopAllAttacks() stop()+forceStopPortal()
-#include "ui/screens/karma_screen.h"       // stopAllAttacks() stop()+forceStopPortal()
+// main.cpp holds no concrete screen types: the full screen->factory catalogue lives in
+// screen_registry.cpp (slice-0023), and screen->attack navigation now flows through the
+// ATTACK_TARGET_SELECTED EventBus event (slice-0028), not concrete-type downcasts.
 #include "modules/server/server_manager.h"
 #include "ui/screens/splash_screen.h"      // global splashScreen instance
 #include "ui/screen_registry.h"
@@ -46,6 +43,7 @@
 #include "ui/components/carousel_menu.h"
 #include "ui/menu_actions.h"    // MenuActionId (shared with menu_factory.cpp, slice-0024)
 #include "ui/menu_factory.h"    // buildRootMenuItems() / buildCarouselItems() (slice-0024)
+#include "ui/menu_routes.h"     // findMenuRoute() dispatch table (slice-0029)
 #include "ui/screens/radio_screen.h"
 #include "ui/screens/modules_screen.h"
 #include "core/module_detection.h"
@@ -116,44 +114,14 @@ static M5Canvas* globalCanvas = nullptr;
 void stopAllAttacks() {
     Serial.println("[Main] Stopping all attacks/modules...");
     
-    // Single active-screen reference for all lazy-loaded screen cleanup
-    auto& sm = adversary::ScreenManager::getInstance();
-    auto aid = sm.getActiveScreenId();
-    adversary::IScreen* activeScr = sm.getActiveScreen();
-    
-    // Stop scanner / sniffer if active
-    if (aid == adversary::ScreenId::SCANNER && activeScr) {
-        static_cast<adversary::ScannerScreen*>(activeScr)->setActive(false);
-    } else if (aid == adversary::ScreenId::SNIFFER && activeScr) {
-        static_cast<adversary::SnifferScreen*>(activeScr)->setActive(false);
-    }
-    
-    // Stop attack screens
+    // Tear down whatever screen is active through its polymorphic lifecycle hook.
+    // hide() is each screen's full teardown (stops its radio, releases its heap,
+    // unsubscribes its EventBus handlers) and is idempotent — the subsequent screen
+    // transition calls hide() again via ScreenManager::setActiveScreen(). No concrete
+    // screen type is named here: the four former downcasts (Scanner/Sniffer setActive,
+    // Evil Twin/Karma stop+forceStopPortal) are now subsumed by their own hide().
+    adversary::IScreen* activeScr = adversary::ScreenManager::getInstance().getActiveScreen();
     if (activeScr) {
-        if (aid == adversary::ScreenId::DEAUTH || aid == adversary::ScreenId::HANDSHAKE ||
-            aid == adversary::ScreenId::BEACON_SPAM || aid == adversary::ScreenId::PROBE_FLOOD) {
-            activeScr->hide();
-        } else if (aid == adversary::ScreenId::EVIL_TWIN) {
-            auto* et = static_cast<adversary::EvilTwinScreen*>(activeScr);
-            et->stop();
-            et->forceStopPortal();
-        } else if (aid == adversary::ScreenId::KARMA) {
-            auto* ks = static_cast<adversary::KarmaScreen*>(activeScr);
-            ks->stop();
-            ks->forceStopPortal();
-        }
-    }
-
-
-    // Stop Other Modules (IR, RFID, BLE peripherals) — lazy-loaded
-    if (activeScr && (
-        aid == adversary::ScreenId::INFRARED_TVB_GONE ||
-        aid == adversary::ScreenId::RFID ||
-        aid == adversary::ScreenId::BLE_BAD_BLE ||
-        aid == adversary::ScreenId::USB_BADUSB ||
-        aid == adversary::ScreenId::HID_MOUSE_JIGGLER ||
-        aid == adversary::ScreenId::BLE_SPOOF ||
-        aid == adversary::ScreenId::BLE_APPLE_ATTACK)) {
         activeScr->hide();
     }
 
@@ -162,13 +130,6 @@ void stopAllAttacks() {
     // but when switching to a different module we must reclaim heap
     adversary::BLESpanner::getInstance().forceRelease();
     adversary::BLEScanner::getInstance().deinit();
-    
-    // Server & Wardriving — lazy-loaded; cleanup via active screen
-    if (activeScr && (
-        aid == adversary::ScreenId::SERVER_MENU || aid == adversary::ScreenId::SERVER_STATUS ||
-        aid == adversary::ScreenId::WARDRIVING)) {
-        activeScr->hide();
-    }
 
     // GLOBAL WIFI RESET
     // Only manipulate WiFi if the driver was actually initialized.
@@ -191,8 +152,30 @@ void stopAllAttacks() {
 
     // Give time for WiFi resources to be fully released
     delay(100);
-    
+
     Serial.println("[Main] All attacks stopped");
+}
+
+/**
+ * @brief Navigate to the attack chosen on a scanned network / sniffed packet.
+ *
+ * Handles ATTACK_TARGET_SELECTED, published by ScannerScreen/SnifferScreen (slice-0028).
+ * Deliberately screen-agnostic: the target attack screen and the victim identity both
+ * arrive in the event, so this launches any attack without naming one — the shape the
+ * future MenuController/ScreenManager push API wants. stopAllAttacks() runs first and,
+ * because the scanner/sniffer is still the active screen at this point, tears it down via
+ * its own hide() before the attack screen inits.
+ */
+static void launchAttackTarget(const adversary::EventData& evt) {
+    stopAllAttacks();
+    adversary::IScreen::ScreenParams p;
+    memcpy(p.bssid, evt.payload.attackTarget.bssid, 6);
+    strncpy(p.ssid, evt.payload.attackTarget.ssid, 32);
+    p.ssid[32] = '\0';
+    p.channel = evt.payload.attackTarget.channel;
+    screenMgr.navigateWithParams(
+        static_cast<adversary::ScreenId>(evt.payload.attackTarget.targetScreen), p);
+    stateMachine.transitionTo(adversary::AppState::ATTACKING);
 }
 
 /**
@@ -445,6 +428,12 @@ void setup() {
     // no longer #includes the ~25 concrete screen headers it never otherwise names
     // (slice-0023).
     adversary::registerAllScreens(screenMgr);
+
+    // Route Scanner/Sniffer attack-target selections to the navigator. Subscribed once for
+    // the program's lifetime — the handler is stateless (slice-0028).
+    adversary::EventBus::getInstance().subscribe(
+        adversary::EventType::ATTACK_TARGET_SELECTED,
+        [](const adversary::EventData& evt) { launchAttackTarget(evt); });
 
     showMenu();
 
@@ -767,276 +756,24 @@ void handleInput() {
  * @brief Handle menu action selection
  */
 void handleMenuAction(int actionId) {
-    // CRITICAL: Clear carousel icons to free ~30KB RAM for the target screen
-    if (carouselMenu.isAnimating()) {
-        // Just in case, but usually animation stops before action
-    }
-    // carouselMenu.clearCache(); // Removed: Direct rendering no longer uses cache
-    
     Serial.printf("[Main] handleMenuAction: %d\n", actionId);
-    // Stop any running attacks before starting new ones
-    // This also clears the Carousel cache globally
+
+    // Stop any running attacks/modules before starting the next one. Runs once for every
+    // action — the six arms that used to repeat this call (BadBLE/BadUSB/etc.) were redundant.
     stopAllAttacks();
-    
-    switch (actionId) {
-        case ACTION_SCAN_NETWORKS:
-            Serial.println("Starting WiFi Scanner...");
-            navigateToScreen(adversary::ScreenId::SCANNER);  // factory creates + init() + show()
-            if (auto* sc = screenMgr.getActiveScreen()) {
-                auto* scanner = static_cast<adversary::ScannerScreen*>(sc);
-                // Set callback for network action selection
-                scanner->setOnNetworkAction([](const adversary::NetworkInfo& network, adversary::NetworkAction action) {
-                    Serial.printf("[Scanner] Action on %s: ", network.ssid.c_str());
-                    stopAllAttacks();
-                    switch (action) {
-                        case adversary::NetworkAction::DEAUTH: {
-                            Serial.println("DEAUTH");
-                            adversary::IScreen::ScreenParams p;
-                            memcpy(p.bssid, network.bssid, 6);
-                            strncpy(p.ssid, network.ssid.c_str(), 32);
-                            p.channel = network.channel;
-                            screenMgr.navigateWithParams(adversary::ScreenId::DEAUTH, p);
-                            stateMachine.transitionTo(adversary::AppState::ATTACKING);
-                            break;
-                        }
-                        case adversary::NetworkAction::HANDSHAKE: {
-                            Serial.println("HANDSHAKE");
-                            adversary::IScreen::ScreenParams p;
-                            memcpy(p.bssid, network.bssid, 6);
-                            strncpy(p.ssid, network.ssid.c_str(), 32);
-                            p.channel = network.channel;
-                            screenMgr.navigateWithParams(adversary::ScreenId::HANDSHAKE, p);
-                            stateMachine.transitionTo(adversary::AppState::ATTACKING);
-                            break;
-                        }
-                        case adversary::NetworkAction::EVIL_TWIN: {
-                            Serial.println("EVIL_TWIN");
-                            adversary::IScreen::ScreenParams p;
-                            memcpy(p.bssid, network.bssid, 6);
-                            strncpy(p.ssid, network.ssid.c_str(), 32);
-                            p.channel = network.channel;
-                            screenMgr.navigateWithParams(adversary::ScreenId::EVIL_TWIN, p);
-                            stateMachine.transitionTo(adversary::AppState::ATTACKING);
-                            break;
-                        }
-                        case adversary::NetworkAction::PROBE_FLOOD: {
-                            Serial.println("PROBE_FLOOD");
-                            adversary::IScreen::ScreenParams p;
-                            strncpy(p.ssid, network.ssid.c_str(), 32);
-                            p.channel = network.channel;
-                            screenMgr.navigateWithParams(adversary::ScreenId::PROBE_FLOOD, p);
-                            stateMachine.transitionTo(adversary::AppState::ATTACKING);
-                            break;
-                        }
-                        case adversary::NetworkAction::INFO:
-                            Serial.println("INFO");
-                            break;
-                    }
-                });
-                scanner->setActive(true);
-            }
-            stateMachine.transitionTo(adversary::AppState::SCANNING);
-            break;
-            
-        case ACTION_PACKET_SNIFFER:
-            Serial.println("Starting Packet Sniffer...");
-            navigateToScreen(adversary::ScreenId::SNIFFER);  // factory creates + init() + show()
-            if (auto* sf = screenMgr.getActiveScreen()) {
-                auto* sniffer = static_cast<adversary::SnifferScreen*>(sf);
-                sniffer->show();  // extra show() to reset screen state to STATS view
-                sniffer->setOnPacketAction([](const adversary::PacketSummary& packet, adversary::PacketAction action) {
-                    Serial.printf("[Sniffer] Action callback: %d\n", static_cast<int>(action));
-                    // Stop sniffer before transitioning
-                    if (auto* cur = screenMgr.getActiveScreen())
-                        static_cast<adversary::SnifferScreen*>(cur)->setActive(false);
-                    switch (action) {
-                        case adversary::PacketAction::HANDSHAKE_CAPTURE: {
-                            adversary::IScreen::ScreenParams p;
-                            memcpy(p.bssid, packet.srcMac, 6);
-                            strncpy(p.ssid, packet.ssid, 32);
-                            p.channel = packet.channel;
-                            screenMgr.navigateWithParams(adversary::ScreenId::HANDSHAKE, p);
-                            stateMachine.transitionTo(adversary::AppState::ATTACKING);
-                            break;
-                        }
-                        case adversary::PacketAction::DEAUTH_ATTACK: {
-                            adversary::IScreen::ScreenParams p;
-                            memcpy(p.bssid, packet.srcMac, 6);
-                            strncpy(p.ssid, packet.ssid, 32);
-                            p.channel = packet.channel;
-                            screenMgr.navigateWithParams(adversary::ScreenId::DEAUTH, p);
-                            stateMachine.transitionTo(adversary::AppState::ATTACKING);
-                            break;
-                        }
-                        case adversary::PacketAction::EVIL_TWIN: {
-                            adversary::IScreen::ScreenParams p;
-                            memcpy(p.bssid, packet.srcMac, 6);
-                            strncpy(p.ssid, packet.ssid, 32);
-                            p.channel = packet.channel;
-                            screenMgr.navigateWithParams(adversary::ScreenId::EVIL_TWIN, p);
-                            stateMachine.transitionTo(adversary::AppState::ATTACKING);
-                            break;
-                        }
-                        case adversary::PacketAction::KARMA_ATTACK:
-                            navigateToScreen(adversary::ScreenId::KARMA);
-                            stateMachine.transitionTo(adversary::AppState::ATTACKING);
-                            break;
-                        case adversary::PacketAction::COPY_BSSID:
-                            Serial.printf("[Sniffer] BSSID: %02X:%02X:%02X:%02X:%02X:%02X\n",
-                                         packet.srcMac[0], packet.srcMac[1], packet.srcMac[2],
-                                         packet.srcMac[3], packet.srcMac[4], packet.srcMac[5]);
-                            break;
-                        default:
-                            break;
-                    }
-                });
-            }
-            stateMachine.transitionTo(adversary::AppState::SCANNING);
-            break;
-            
-        case ACTION_DEAUTH_ATTACK:
-            Serial.println("Starting Deauth Attack...");
-            navigateToScreen(adversary::ScreenId::DEAUTH);  // factory: init() + show()
-            stateMachine.transitionTo(adversary::AppState::ATTACKING);
-            break;
-            
-        case ACTION_BEACON_SPAM:
-            Serial.println("Starting Beacon Spam...");
-            navigateToScreen(adversary::ScreenId::BEACON_SPAM);  // factory: init() + show()
-            stateMachine.transitionTo(adversary::AppState::ATTACKING);
-            break;
-            
-        case ACTION_PROBE_FLOOD:
-            Serial.println("Starting Probe Flood...");
-            navigateToScreen(adversary::ScreenId::PROBE_FLOOD);  // factory: init() + show()
-            stateMachine.transitionTo(adversary::AppState::ATTACKING);
-            break;
-            
-        case ACTION_HANDSHAKE_CAPTURE:
-            Serial.println("Starting Handshake Capture...");
-            navigateToScreen(adversary::ScreenId::HANDSHAKE);  // factory: init() + show()
-            stateMachine.transitionTo(adversary::AppState::ATTACKING);
-            break;
-            
-        case ACTION_EVIL_TWIN:
-            Serial.println("Starting Evil Twin AP...");
-            navigateToScreen(adversary::ScreenId::EVIL_TWIN);
-            stateMachine.transitionTo(adversary::AppState::ATTACKING);
-            break;
-            
-        case ACTION_KARMA_AP:
-            Serial.println("Starting Karma AP...");
-            navigateToScreen(adversary::ScreenId::KARMA);
-            stateMachine.transitionTo(adversary::AppState::ATTACKING);
-            break;
-            
-        case ACTION_CAPTURES:
-            Serial.println("Opening Captures Browser...");
-            navigateToScreen(adversary::ScreenId::CAPTURES);  // factory: init() + show()
-            break;
-            
 
-        
-        case ACTION_WARDRIVING:
-            Serial.println("Starting Wardriving Mode...");
-            navigateToScreen(adversary::ScreenId::WARDRIVING);  // factory: init() + show()
-            stateMachine.transitionTo(adversary::AppState::SCANNING);
-            break;
-
-        case ACTION_BLE_SCAN:
-            Serial.println("Starting BLE Scanner...");
-            navigateToScreen(adversary::ScreenId::BLE_SCANNER);
-            stateMachine.transitionTo(adversary::AppState::SCANNING);
-            break;
-            
-
-            
-        case ACTION_BLE_APPLE_ATTACK:
-            Serial.println("Starting Apple Attack...");
-            stopAllAttacks();
-            navigateToScreen(adversary::ScreenId::BLE_APPLE_ATTACK);
-            break;
-            
-        case ACTION_BLE_BAD_BLE:
-            Serial.println("Starting BadBLE...");
-            stopAllAttacks();
-            navigateToScreen(adversary::ScreenId::BLE_BAD_BLE);
-            break;
-
-        case ACTION_USB_BADUSB:
-            Serial.println("Starting BadUSB...");
-            stopAllAttacks();
-            navigateToScreen(adversary::ScreenId::USB_BADUSB);
-            break;
-
-        case ACTION_MOUSE_JIGGLER:
-            Serial.println("Starting Mouse Jiggler...");
-            stopAllAttacks();
-            navigateToScreen(adversary::ScreenId::HID_MOUSE_JIGGLER);
-            break;
-
-        case ACTION_BLE_SPOOF:
-            Serial.println("Starting BLE Spoof...");
-            stopAllAttacks();
-            navigateToScreen(adversary::ScreenId::BLE_SPOOF);
-            break;
-            
-        case ACTION_BLE_SPAM:
-            Serial.println("Starting BLE Spam...");
-            navigateToScreen(adversary::ScreenId::BLE_SPAM);  // factory creates + shows
-            break;
-            
-        case ACTION_IR_TVB_GONE:
-            Serial.println("Starting IR TV-B-Gone...");
-            navigateToScreen(adversary::ScreenId::INFRARED_TVB_GONE);  // factory creates + shows
-            break;
-
-        case ACTION_IR_RECORD:
-            Serial.println("Opening IR Record/Replay...");
-            navigateToScreen(adversary::ScreenId::INFRARED_RECORD);  // factory creates + shows
-            break;
-            
-
-            
-        case ACTION_SETTINGS:
-            Serial.println("Opening Settings...");
-            navigateToScreen(adversary::ScreenId::SETTINGS);  // factory: init() + callback + show()
-            break;
-            
-        case ACTION_ABOUT:
-            Serial.println("Opening About...");
-            navigateToScreen(adversary::ScreenId::ABOUT);  // factory creates + shows
-            break;
-
-        case ACTION_RADIO:
-            Serial.println("Opening Radio...");
-            navigateToScreen(adversary::ScreenId::RADIO);  // factory creates + shows
-            break;
-
-        case ACTION_MODULES:
-            Serial.println("Opening Modules...");
-            navigateToScreen(adversary::ScreenId::MODULES);  // factory creates + shows
-            break;
-            
-        case ACTION_WHITELIST:
-            Serial.println("Opening Whitelist...");
-            navigateToScreen(adversary::ScreenId::WHITELIST);  // factory: init() + show()
-            break;
-            
-        case ACTION_RFID_DASHBOARD:
-            Serial.println("Opening RFID Dashboard...");
-            navigateToScreen(adversary::ScreenId::RFID);  // factory creates + shows
-            break;
-            
-        case ACTION_SERVER:
-            Serial.println("Opening Server adversary::Menu...");
-            stopAllAttacks();
-            navigateToScreen(adversary::ScreenId::SERVER_MENU);  // factory: init() + show()
-            break;
-            
-        default:
-            Serial.printf("Unknown action: %d\n", actionId);
-            break;
+    // Dispatch is data: findMenuRoute() maps the action to its target screen and, for
+    // scan/attack screens, an AppState transition. Browsers and tools navigate without one
+    // (route->transitions == false). The table lives beside the menu catalogue in
+    // ui/menu_routes.{h,cpp} (slice-0029).
+    const adversary::MenuRoute* route = adversary::findMenuRoute(actionId);
+    if (!route) {
+        Serial.printf("[Main] Unknown action: %d\n", actionId);
+        return;
+    }
+    navigateToScreen(route->screen);
+    if (route->transitions) {
+        stateMachine.transitionTo(route->state);
     }
 }
 

@@ -142,8 +142,7 @@ enum class PacketAction : uint8_t {
 class SnifferScreen : public IScreen {
 public:
     using HandshakeCapturedCallback = std::function<void(const char* filename)>;
-    using PacketActionCallback = std::function<void(const PacketSummary& packet, PacketAction action)>;
-    
+
     SnifferScreen();
     ~SnifferScreen() override;
     
@@ -186,8 +185,7 @@ public:
     void cycleCaptureMode();
     
     void setOnHandshakeCaptured(HandshakeCapturedCallback callback) { m_onHandshakeCaptured = callback; }
-    void setOnPacketAction(PacketActionCallback callback) { m_onPacketAction = callback; }
-    
+
     bool isActive() const { return m_active; }
     void setActive(bool active);
     const CaptureStats& getStats() const { return m_stats; }
@@ -220,7 +218,6 @@ private:
     PcapWriter m_pcapWriter;
     
     HandshakeCapturedCallback m_onHandshakeCaptured;
-    PacketActionCallback m_onPacketAction;
     CaptureStats m_stats;
     CaptureMode m_captureMode;
     

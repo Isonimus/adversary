@@ -55,6 +55,22 @@ struct CredentialEventData {
 };
 
 /**
+ * @brief Attack-target selection payload
+ *
+ * Emitted when the operator picks an attack on a scanned network (ScannerScreen) or a
+ * sniffed packet (SnifferScreen). Carries the attack screen to launch plus the victim's
+ * identity, so the navigator can act without knowing which screen produced the event.
+ * targetScreen holds a ScreenId value as int16_t to keep this core header free of any UI
+ * dependency.
+ */
+struct AttackTargetEventData {
+    int16_t targetScreen;  // ScreenId of the attack screen to launch
+    uint8_t bssid[6];
+    char ssid[33];
+    uint8_t channel;
+};
+
+/**
  * @brief Attack state event payload
  */
 struct AttackStateEventData {
@@ -157,6 +173,7 @@ struct EventData {
         HandshakeEventData handshake;
         CredentialEventData credential;
         AttackStateEventData attack;
+        AttackTargetEventData attackTarget;
         PacketEventData packet;
         ProgressEventData progress;
         RFIDEventData rfid;

@@ -41,26 +41,12 @@ enum class SortMode : uint8_t {
 };
 
 /**
- * @brief Action types from action menu
- */
-enum class NetworkAction : uint8_t {
-    DEAUTH,
-    HANDSHAKE,
-    EVIL_TWIN,
-    PROBE_FLOOD,
-    INFO
-};
-
-/**
  * @brief Scanner screen UI component
  * 
  * Implements IScreen for ScreenManager compatibility.
  */
 class ScannerScreen : public IScreen {
 public:
-    using NetworkSelectedCallback = std::function<void(const NetworkInfo&)>;
-    using NetworkActionCallback = std::function<void(const NetworkInfo&, NetworkAction)>;
-    
     ScannerScreen();
     ~ScannerScreen() override;
     
@@ -97,9 +83,6 @@ public:
     void toggleScan();
     void cycleSortMode();
     
-    void setOnNetworkSelected(NetworkSelectedCallback callback) { m_onNetworkSelected = callback; }
-    void setOnNetworkAction(NetworkActionCallback callback) { m_onNetworkAction = callback; }
-    
     size_t getSelectedIndex() const { return m_selectedIndex; }
     bool isActive() const { return m_active; }
     void setActive(bool active);
@@ -117,8 +100,6 @@ private:
     void handleAction(char action);
     
     WiFiScanner& m_scanner;
-    NetworkSelectedCallback m_onNetworkSelected;
-    NetworkActionCallback m_onNetworkAction;
     size_t m_selectedIndex;
     size_t m_scrollOffset;
     SortMode m_sortMode;

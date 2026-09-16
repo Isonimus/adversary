@@ -34,6 +34,7 @@ enum class EventType : uint16_t {
     DEAUTH_PACKET_SENT = 203,
     BEACON_SPAM_TICK = 204,
     PROBE_FLOOD_TICK = 205,
+    ATTACK_TARGET_SELECTED = 206,  // Scanner/Sniffer: operator chose an attack + its target
     
     // =========================================================================
     // Handshake Capture (220-229)
