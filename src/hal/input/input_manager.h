@@ -18,7 +18,10 @@
 #include <M5Cardputer.h>
 #elif defined(TARGET_M5STICK)
 #include <M5StickCPlus2.h>
-#else
+#elif !defined(NATIVE_BUILD)
+// Generic on-device M5 build. Skipped natively so the platform-agnostic InputAction enum can
+// be included off-target (e.g. hal/input/input_keymap for its native tests, slice-0030); the
+// class's own M5 members are already #ifdef ESP32-guarded.
 #include <M5Unified.h>
 #endif
 

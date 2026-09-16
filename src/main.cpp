@@ -39,6 +39,7 @@
 #include "ui/screens/ble_scanner_screen.h"
 
 #include "hal/input/input_manager.h"
+#include "hal/input/input_keymap.h"    // normalizeCardputerKey()/inputActionToKey() (slice-0030)
 #include "hal/expansion/expansion_cap.h"
 #include "ui/components/carousel_menu.h"
 #include "ui/menu_actions.h"    // MenuActionId (shared with menu_factory.cpp, slice-0024)
@@ -664,15 +665,8 @@ void handleInput() {
                       (pressedKey >= 32 && pressedKey < 127) ? pressedKey : '?',
                       (uint8_t)pressedKey, state.enter, state.del, state.tab);
         
-        // Convert special keys to standard characters
-        char key = 0;
-        if (state.enter) {
-            key = '\n';
-        } else if (state.del) {
-            key = 0x08;  // Backspace
-        } else {
-            key = pressedKey;
-        }
+        // Normalize modifier state + pressed key into the routing char (slice-0030).
+        char key = adversary::normalizeCardputerKey(state.enter, state.del, pressedKey);
         if (key == 0) return;  // No valid key
 
         // Global hotkey: Fn+S captures the canvas to SD from any screen. Hooked
@@ -716,18 +710,8 @@ void handleInput() {
     if (action != InputAction::NONE) {
         Serial.printf("[M5Stick] InputAction: %d\n", static_cast<int>(action));
         
-        // Convert InputAction to char for backward compatibility with handleInput
-        char pressedKey = '\0';
-        switch (action) {
-            case InputAction::UP:     pressedKey = ';';  break;
-            case InputAction::DOWN:   pressedKey = '.';  break;
-            case InputAction::LEFT:   pressedKey = ';';  break;  // Also decrease
-            case InputAction::RIGHT:  pressedKey = '.';  break;  // Also increase
-            case InputAction::SELECT: pressedKey = '\n'; break;
-            case InputAction::BACK:   pressedKey = '`';  break;
-            default: break;
-        }
-        
+        // Map the logical action to the routing char (slice-0030).
+        char pressedKey = adversary::inputActionToKey(action);
         if (pressedKey == '\0') return;
         
         // Route to active screen via adversary::ScreenManager (handles all non-menu screens)
