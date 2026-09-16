@@ -12,6 +12,7 @@
 #pragma once
 
 #include "screens/screen_interface.h"
+#include "return_target_slot.h"
 #include <functional>
 #include <map>
 
@@ -174,7 +175,24 @@ public:
      * @param id The screen to navigate to
      */
     void navigateTo(ScreenId id);
-    
+
+    // =========================================================================
+    // Return-target breadcrumb (slice-0031)
+    // =========================================================================
+
+    /**
+     * @brief Arm the breadcrumb so the next screen exit returns here instead of the root menu.
+     *
+     * Set at a list->attack drill-down (Scanner/Sniffer), recording the list and the interrupted
+     * AppState. One-shot: consumed by the first exit that follows.
+     */
+    void setReturnTarget(ScreenId screen, AppState state) { returnSlot_.set(screen, state); }
+
+    /**
+     * @brief Consume the breadcrumb: the recorded {screen, state} once, else {MENU, IDLE}.
+     */
+    ReturnTarget consumeReturnTarget() { return returnSlot_.consume(); }
+
 private:
     ScreenManager() = default;
     ~ScreenManager() = default;
@@ -184,6 +202,7 @@ private:
     ScreenId activeScreenId_ = ScreenId::MENU;
     IScreen* activeScreen_ = nullptr;
     bool ownsActiveScreen_ = false;                 ///< true when screen was created by a factory
+    ReturnTargetSlot returnSlot_;                   ///< one-shot "return here on exit" breadcrumb (slice-0031)
 };
 
 } // namespace adversary

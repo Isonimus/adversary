@@ -90,6 +90,7 @@ void handleMenuAction(int actionId);
 void stopAllAttacks();  // Clean up all running attacks/modules
 bool routeInputToActiveScreen(char key);  // Route input via adversary::ScreenManager
 void navigateToScreen(adversary::ScreenId screen);  // Navigate and sync adversary::ScreenManager
+void exitActiveScreen();  // Single exit path: root menu or the originating list (slice-0031)
 void adversary_ui_purge_canvas();      // Force delete 64KB sprite to free contiguous RAM
 void adversary_ui_restore_canvas();    // Recreate the sprite for UI rendering
 void adversary_ui_render_forced();     // Force manual render during blocking tasks
@@ -168,6 +169,10 @@ void stopAllAttacks() {
  * its own hide() before the attack screen inits.
  */
 static void launchAttackTarget(const adversary::EventData& evt) {
+    // Breadcrumb: remember the originating list + interrupted state (captured before stopAllAttacks
+    // tears the list down and before the ATTACKING transition) so the attack's ESC returns here
+    // instead of the root menu (slice-0031).
+    screenMgr.setReturnTarget(screenMgr.getActiveScreenId(), stateMachine.getState());
     stopAllAttacks();
     adversary::IScreen::ScreenParams p;
     memcpy(p.bssid, evt.payload.attackTarget.bssid, 6);
@@ -511,12 +516,9 @@ void loop() {
             globalCanvas->pushSprite(0, 0);
         }
         
-        // Check if screen wants to return to menu
+        // Screen wants to exit: go to the root menu, or back to the list we drilled in from (0031).
         if (sm.shouldReturnToMenu()) {
-            sm.returnToMenu();
-            navigateToScreen(adversary::ScreenId::MENU);
-            stateMachine.transitionTo(adversary::AppState::IDLE);
-            showMenu();
+            exitActiveScreen();
         }
     } else {
         // adversary::Menu screen - check for animation or active toasts
@@ -614,6 +616,29 @@ void showMenu() {
 }
 
 /**
+ * @brief Tear down the active screen and navigate to wherever it should exit to (slice-0031).
+ *
+ * The single exit path for a screen that raised its exit flag. It consults the return breadcrumb:
+ * the default {MENU, IDLE} rebuilds the root menu (unchanged behaviour); a drill-down breadcrumb
+ * rebuilds the originating list (Scanner/Sniffer) via its factory and restores the interrupted
+ * state. Both the main loop and routeInputToActiveScreen() funnel here so the two can never drift.
+ * setActiveScreen() hide()+delete()s the attack screen before allocating the list, so only one
+ * screen is ever resident (No-PSRAM invariant).
+ */
+void exitActiveScreen() {
+    adversary::ReturnTarget target = screenMgr.consumeReturnTarget();
+    if (target.screen == adversary::ScreenId::MENU) {
+        screenMgr.returnToMenu();
+        navigateToScreen(adversary::ScreenId::MENU);
+        stateMachine.transitionTo(target.state);
+        showMenu();
+    } else {
+        navigateToScreen(target.screen);
+        stateMachine.transitionTo(target.state);
+    }
+}
+
+/**
  * @brief Route input to active screen via adversary::ScreenManager
  * @param key The key pressed
  * @return true if input was handled by a screen (not menu)
@@ -632,15 +657,12 @@ bool routeInputToActiveScreen(char key) {
     // Route input to active screen
     sm.handleInput(key);
     
-    // Check if screen wants to return to menu (via exitToMenu_ flag)
-    // Screens must explicitly set exitToMenu_ = true when they want to exit
+    // Screens set exitToMenu_ when they want to exit; route to the root menu or back to the
+    // originating list (slice-0031).
     if (sm.shouldReturnToMenu()) {
-        sm.returnToMenu();
-        navigateToScreen(adversary::ScreenId::MENU);
-        stateMachine.transitionTo(adversary::AppState::IDLE);
-        showMenu();
+        exitActiveScreen();
     }
-    
+
     return true;
 }
 
