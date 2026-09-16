@@ -19,7 +19,6 @@
 #include "screen_interface.h"
 #include <cstdint>
 #include <cstring>
-#include <functional>
 #include <vector>
 #include <queue>
 
@@ -141,8 +140,6 @@ enum class PacketAction : uint8_t {
  */
 class SnifferScreen : public IScreen {
 public:
-    using HandshakeCapturedCallback = std::function<void(const char* filename)>;
-
     SnifferScreen();
     ~SnifferScreen() override;
     
@@ -183,8 +180,6 @@ public:
     void setCaptureMode(CaptureMode mode);
     CaptureMode getCaptureMode() const { return m_captureMode; }
     void cycleCaptureMode();
-    
-    void setOnHandshakeCaptured(HandshakeCapturedCallback callback) { m_onHandshakeCaptured = callback; }
 
     bool isActive() const { return m_active; }
     void setActive(bool active);
@@ -216,8 +211,7 @@ private:
     
     PacketSniffer& m_sniffer;
     PcapWriter m_pcapWriter;
-    
-    HandshakeCapturedCallback m_onHandshakeCaptured;
+
     CaptureStats m_stats;
     CaptureMode m_captureMode;
     

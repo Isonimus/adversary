@@ -632,11 +632,6 @@ void SnifferScreen::onPacketReceived(const CapturedPacket& packet)
         // Check for EAPOL
         if (packet.isEAPOL()) {
             m_stats.eapolFrames++;
-            
-            // Notify if handshake callback set
-            if (m_onHandshakeCaptured && m_pcapWriter.isOpen()) {
-                m_onHandshakeCaptured(m_pcapWriter.getFilename().c_str());
-            }
         }
     }
     
