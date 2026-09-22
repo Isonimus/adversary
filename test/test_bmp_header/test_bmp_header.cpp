@@ -44,6 +44,24 @@ void test_sizes_for_capture_dimensions() {
     TEST_ASSERT_EQUAL_UINT32(54u + 720u * 135u, bmp24FileSize(W, H));
 }
 
+void test_source_row_is_bottom_up_bijection() {
+    // Endpoints invert: file row 0 is the bottom (source's last row), and the
+    // last file row is the source's top row 0. This is the vertical-flip guard.
+    TEST_ASSERT_EQUAL_UINT16(H - 1, bmp24SourceRow(0, H));
+    TEST_ASSERT_EQUAL_UINT16(0, bmp24SourceRow(H - 1, H));
+    TEST_ASSERT_EQUAL_UINT16(67, bmp24SourceRow(67, H));  // 135-1-67 = 67 (midpoint)
+
+    // Bijection over [0, H): every source row is hit exactly once.
+    bool seen[H] = {false};
+    for (uint16_t r = 0; r < H; ++r) {
+        uint16_t src = bmp24SourceRow(r, H);
+        TEST_ASSERT_TRUE(src < H);
+        TEST_ASSERT_FALSE(seen[src]);  // no source row emitted twice
+        seen[src] = true;
+    }
+    for (uint16_t s = 0; s < H; ++s) TEST_ASSERT_TRUE(seen[s]);  // none skipped
+}
+
 void test_header_fields() {
     uint8_t hdr[BMP24_HEADER_SIZE];
     // Poison so the builder must zero the reserved/trailing fields itself.
@@ -75,6 +93,7 @@ int main() {
     UNITY_BEGIN();
     RUN_TEST(test_row_bytes_pads_to_four);
     RUN_TEST(test_sizes_for_capture_dimensions);
+    RUN_TEST(test_source_row_is_bottom_up_bijection);
     RUN_TEST(test_header_fields);
     return UNITY_END();
 }
