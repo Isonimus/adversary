@@ -6,6 +6,7 @@
 #if defined(TARGET_CARDPUTER) || defined(TARGET_M5STICK)
 
 #include <Arduino.h>
+#include <SD.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -57,43 +58,56 @@ bool saveScreenshot(Canvas& canvas, SDManager& sd, char* outPath, size_t outPath
     const size_t rowBytes = bmp::bmp24RowBytes(width);
     const size_t fileSize = bmp::bmp24FileSize(width, height);
 
-    auto* buffer = static_cast<uint8_t*>(malloc(fileSize));
-    if (buffer == nullptr) {
-        Serial.printf("[Screenshot] malloc(%u) failed, free heap %u\n",
-                      (unsigned)fileSize, (unsigned)ESP.getFreeHeap());
+    // Stream the file row-by-row rather than buffering the whole ~97 KB BMP: on
+    // the no-PSRAM device a single contiguous file-sized malloc fails once a
+    // heavy screen is resident (slice-0034). Peak allocation here is one row
+    // (~720 B). Hold the handle open (as PcapWriter does) instead of re-opening
+    // per row, which SDManager::appendFile() would do.
+    File file = SD.open(path, FILE_WRITE);
+    if (!file) {
+        Serial.printf("[Screenshot] Could not open %s for write, free heap %u\n",
+                      path, (unsigned)ESP.getFreeHeap());
         return false;
     }
 
-    bmp::writeBmp24Header(buffer, width, height);
+    // Close the handle, drop the partial file, and fail loud. Never leave a
+    // truncated file behind — a short BMP renders as blank/garbage.
+    auto abortWrite = [&](const char* why) -> bool {
+        file.close();
+        SD.remove(path);
+        Serial.printf("[Screenshot] %s (free heap %u)\n", why, (unsigned)ESP.getFreeHeap());
+        return false;
+    };
 
-    // Zero the pixel area only when rows carry 4-byte padding; the readback
-    // fills exactly width*3 bytes per row and would otherwise leave pad bytes
-    // uninitialised. Current targets are 240 px wide (720 B rows, unpadded).
-    uint8_t* pixels = buffer + bmp::BMP24_HEADER_SIZE;
-    if (rowBytes != static_cast<size_t>(width) * 3u) {
-        memset(pixels, 0, bmp::bmp24PixelBytes(width, height));
+    uint8_t header[bmp::BMP24_HEADER_SIZE];
+    bmp::writeBmp24Header(header, width, height);
+    if (file.write(header, bmp::BMP24_HEADER_SIZE) != bmp::BMP24_HEADER_SIZE) {
+        return abortWrite("Header write failed");
     }
+
+    auto* row = static_cast<uint8_t*>(malloc(rowBytes));
+    if (row == nullptr) {
+        return abortWrite("Row buffer malloc failed");
+    }
+    // Zero once so any 4-byte row-padding tail stays 0: readRect fills only
+    // width*3 bytes. Current targets are 240 px wide (720 B rows, unpadded).
+    memset(row, 0, rowBytes);
 
     // BMP 24bpp pixels are stored B,G,R, bottom-up. LovyanGFX's type names are
     // inverted from memory layout: rgb888_t is laid out {b,g,r} in memory,
     // which is exactly BMP order, whereas readRectRGB()/bgr888_t is {r,g,b} and
     // would swap red and blue (bright pink renders as purple). So read each row
-    // as rgb888_t. Source row y lands at destination row (h-1-y) for bottom-up.
-    for (uint16_t y = 0; y < height; ++y) {
-        uint8_t* dest = pixels + static_cast<size_t>(height - 1 - y) * rowBytes;
-        canvas.readRect(0, y, width, 1, reinterpret_cast<lgfx::rgb888_t*>(dest));
+    // as rgb888_t. File row r reads source row (h-1-r) for bottom-up order.
+    for (uint16_t r = 0; r < height; ++r) {
+        canvas.readRect(0, bmp::bmp24SourceRow(r, height), width, 1,
+                        reinterpret_cast<lgfx::rgb888_t*>(row));
+        if (file.write(row, rowBytes) != rowBytes) {
+            free(row);
+            return abortWrite("Row write failed");
+        }
     }
-
-    FileResult result = sd.writeFile(path, buffer, fileSize);
-    free(buffer);
-
-    if (!result.success || result.bytesWritten != fileSize) {
-        Serial.printf("[Screenshot] Write failed (%u/%u bytes): %s\n",
-                      (unsigned)result.bytesWritten, (unsigned)fileSize,
-                      result.error ? result.error : "unknown");
-        sd.deleteFile(path);  // don't leave a truncated, blank-rendering file
-        return false;
-    }
+    free(row);
+    file.close();
 
     Serial.printf("[Screenshot] Saved %s (%u bytes)\n", path, (unsigned)fileSize);
     if (outPath != nullptr && outPathLen > 0) {

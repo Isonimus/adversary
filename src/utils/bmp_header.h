@@ -38,6 +38,14 @@ constexpr size_t bmp24FileSize(uint16_t width, uint16_t height) {
     return BMP24_HEADER_SIZE + bmp24PixelBytes(width, height);
 }
 
+// On-disk rows are bottom-up: file row 0 is the image's bottom row. Given a
+// top-down source canvas (row 0 at the top), file row r reads source row
+// (height-1-r). Isolated and tested because this is the off-by-one that would
+// silently save the image upside-down when writing rows sequentially to disk.
+constexpr uint16_t bmp24SourceRow(uint16_t fileRow, uint16_t height) {
+    return static_cast<uint16_t>(height - 1u - fileRow);
+}
+
 namespace detail {
 inline void putLE16(uint8_t* p, uint16_t v) {
     p[0] = static_cast<uint8_t>(v & 0xFF);
