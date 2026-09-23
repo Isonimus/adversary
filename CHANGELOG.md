@@ -7,6 +7,13 @@ releases, this can be replaced by a git-tag-generated changelog.
 ---
 
 
+## 2026-09-23 (v0.2.0-alpha)
+- **Captured credentials are no longer printed to the serial console.** The captive-portal login handler logged harvested usernames and passwords in cleartext via an unconditional `Serial.printf`; it now logs only a secret-free capture count, and the leftover debug pointer prints were removed. (slice-0035)
+- **Screenshots save reliably from memory-heavy screens.** Fn+S now streams the BMP to SD row-by-row instead of allocating the whole ~97 KB file at once, so a capture from a full Scanner or Sniffer list no longer fails with an out-of-memory error on the no-PSRAM device. (slice-0034)
+- **Screenshot capture (Fn+S).** Press Fn+S on any screen to save a BMP of the current display to `/adversary/screenshots/`. *(First appearance in this log; shipped earlier.)*
+- **SD-gated menu entries are greyed out when no card is present**, so unavailable actions (captures, dashboard, wardriving export, API-key import, logs) read as disabled rather than failing only after you select them. *(First appearance in this log; shipped earlier.)*
+- **Boots gracefully with no SD card.** The device no longer requires a card to start; SD-dependent actions degrade with a toast + retry instead of blocking boot. *(First appearance in this log; shipped earlier.)*
+
 ## 2026-09-16
 - **Attacks launched from a list return to that list.** Picking a target in the Scanner or Sniffer and launching an attack (Deauth / Handshake / Evil Twin / Probe Flood / Karma), then pressing ESC, now returns to the originating list instead of dropping to the root menu. (slice-0031)
 
