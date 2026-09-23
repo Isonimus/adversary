@@ -143,6 +143,46 @@ Requires the CC1101/NRF24 expansion cap; the **Radio** entry is greyed out when 
 - **Status Bar** - Battery, SD card, WiFi status, and connected module display.
 - **Footer Hints** - Context-sensitive key mapping guides.
 
+### Feature maturity
+
+The Adversary is in alpha. Everything builds and runs, but features differ in how much
+**on-hardware** mileage they have. This split is a guide, not a guarantee:
+
+**Stable — field-tested**
+Scanner · Packet Sniffer · Handshake Capture (4-way / PMKID / EAPOL) + Auto Hunt · Deauth ·
+Evil Twin + captive portal + Traffic Proxy · Karma · Beacon Spam / Probe Flood · Wardriving +
+WiGLE · Captures Browser · Cloud sync (WPA-SEC / pwncrack) · Web Dashboard · BadUSB · Mouse
+Jiggler · IR TV-B-Gone · IR Record & Replay · BLE Scanner · Apple/BLE Spam.
+
+**Experimental — works, but hardware verification is still in progress**
+Sub-GHz OOK replay (transmit) · Sub-GHz FSK capture/replay · Sub-GHz Jamming · 2.4 GHz Spectrum
+Analyzer · BadBLE (known re-pair-after-reflash quirk) · RFID Audit · BLE Identity Spoof.
+
+---
+
+## How it compares
+
+The Adversary is a newer, deliberately-engineered entrant in a category led by **Bruce** and
+**ESP32 Marauder**. It doesn't try to out-feature them on raw breadth — it competes on **rigor,
+honesty, and Cardputer-native polish**.
+
+**Reasons to choose it**
+- **Sub-GHz FSK, not just OOK** — demodulated 2-FSK/GFSK/MSK capture for constant-amplitude
+  remotes the OOK envelope-slicer can't see, plus a modulation-independent band sweep.
+- **Multi-service cloud cracking** — one **"Sync all new"** pushes every not-yet-synced handshake
+  to WPA-SEC *and* pwncrack in a single action, with per-service status per capture.
+- **Uploads you can trust** — all cloud traffic goes over certificate-validated TLS with an
+  embedded Mozilla root-CA bundle (no `setInsecure()`).
+- **Built like production software** — 770+ host-native unit tests, architecture decision records,
+  a 3-target CI matrix, and reproducible pinned builds. The engineering is the differentiator.
+- **MIT licensed** — friendlier for downstream and commercial reuse than AGPL alternatives.
+
+**Reasons to look elsewhere**
+- **No 5 GHz.** Like every ESP32-S3 firmware, The Adversary is 2.4 GHz only. If you need 5 GHz
+  scanning/deauth, use dual-band hardware (RTL8720DN/BW16, or an ESP32-C5 board) instead.
+- **It's alpha, and young.** The incumbents have larger communities, more device coverage, and
+  years of field mileage. If you need battle-tested stability today, start there.
+
 ---
 
 ## Hardware
@@ -280,6 +320,34 @@ pio run -e m5stick -t upload
 - **↑/↓** or **;/.**: Navigate lists
 - **Number keys** (1-9): Quick menu selection
 - **Fn + S**: Screenshot — saves the current screen as a BMP to `/adversary/screenshots/` (any screen)
+
+### Tutorial: capture your first handshake
+
+> Only test networks you own or are explicitly authorized to assess. See the [DISCLAIMER](DISCLAIMER.md).
+
+End to end, from a blank card to a crackable capture:
+
+1. **Prep the card.** Insert a FAT32-formatted SD card and power on. The device creates
+   `/adversary/` on first boot.
+2. *(Optional, for cloud cracking)* **Add a WPA-SEC key.** Register at
+   [wpa-sec.stanev.org](https://wpa-sec.stanev.org), then either type the key in
+   **Settings → WPA-SEC API Key**, or drop it as `/adversary/config/wpasec.txt` on the card
+   (imported and deleted on next boot).
+3. **Find a target.** From the main carousel open **Wireless → Scan Networks**. Scroll with
+   `;` / `.`; press `s` to sort by signal.
+4. **Start the capture.** Press `ENTER` on your target → **Handshake**. Enable **Auto Deauth**
+   (kicks a client so it reconnects and completes the 4-way handshake), then `ENTER` to start.
+5. **Wait for success.** The screen shows progress and reports **SUCCESS** on a complete capture
+   (or **TIMEOUT** — move closer or raise the timeout and retry). The handshake auto-saves to
+   `/adversary/captures/handshakes/` as both `.pcap` and hashcat `.22000`.
+   - *Hands-off alternative:* toggle **Auto Hunt** to scan, target, and capture across many
+     networks autonomously; press `h` to view captures, `w` to whitelist one.
+6. **Check and crack.** Open **Wireless → Captures**. A `[4WAY]` / `[PMKID]` / `[EAPOL]` badge
+   shows the type; a coloured dot shows cloud status (red = not uploaded, orange = uploaded,
+   green = cracked). Press **"Sync all new"** to upload to every configured service.
+7. *(Handy)* Press **Fn + S** at any point to save a screenshot to `/adversary/screenshots/`.
+
+That's the core loop: **scan → handshake → sync → crack.**
 
 ### Menu Structure
 
