@@ -30,7 +30,7 @@
 </p>
 
 > [!WARNING]
-> **Adversary is currently in ALPHA.** Expect frequent crashes, incomplete features, and breaking changes. Use at your own risk.
+> **Adversary is currently in ALPHA** — actively developed and built for stability, but still incomplete. Expect missing or unfinished features and occasional breaking changes between releases (backward compatibility is kept where possible). Use at your own risk.
 
 ---
 
