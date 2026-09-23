@@ -1,4 +1,8 @@
-# The Adversary
+<p align="center">
+  <img src="docs/screenshots/logo.png" alt="The Adversary logo" width="300">
+</p>
+
+<h1 align="center">The Adversary</h1>
 
 <p align="center">
   <strong>Advanced WiFi Security Testing Tool</strong>
@@ -21,25 +25,62 @@
   <a href="DISCLAIMER.md">Legal</a>
 </p>
 
+<p align="center">
+  <img src="docs/screenshots/menu-carousel.png" alt="The Adversary main menu running on an M5Stack Cardputer" width="480">
+</p>
+
 > [!WARNING]
 > **Adversary is currently in ALPHA.** Expect frequent crashes, incomplete features, and breaking changes. Use at your own risk.
 
 ---
 
-## ⚖️ Legal Disclaimer
+## Legal Disclaimer
 
 Adversary is for **educational and research purposes only.** Unauthorized access to networks is illegal. By using this tool, you agree to the terms in the [DISCLAIMER](DISCLAIMER.md).
 
 ---
 
-## 🔍 Features
+## Features
 
 The main menu is a carousel: **Wireless**, **BLE**, **Infrared**, **RFID**, **HID**,
 and **Radio** (Sub-GHz / 2.4 GHz, shown when the multi-radio cap is attached), plus
 **Modules** (live peripheral inventory + hot-swap re-scan), **Server** (dashboard),
 **Settings**, and **About**.
 
-### 📡 Wireless (WiFi)
+<table>
+  <tr>
+    <td width="33%" align="center"><a href="docs/screenshots/scanner.png"><img src="docs/screenshots/scanner.png" alt="WiFi scanner" width="260"></a><br><sub><b>Scanner</b> — security, signal, channel</sub></td>
+    <td width="33%" align="center"><a href="docs/screenshots/scanner-actions.png"><img src="docs/screenshots/scanner-actions.png" alt="Per-network action menu" width="260"></a><br><sub><b>Per-network actions</b></sub></td>
+    <td width="33%" align="center"><a href="docs/screenshots/sniffer.png"><img src="docs/screenshots/sniffer.png" alt="Packet sniffer" width="260"></a><br><sub><b>Packet sniffer</b></sub></td>
+  </tr>
+  <tr>
+    <td align="center"><a href="docs/screenshots/handshake-autohunt.png"><img src="docs/screenshots/handshake-autohunt.png" alt="Handshake Auto Hunt" width="260"></a><br><sub><b>Handshake Auto Hunt</b></sub></td>
+    <td align="center"><a href="docs/screenshots/evil-twin.png"><img src="docs/screenshots/evil-twin.png" alt="Evil Twin captive portal" width="260"></a><br><sub><b>Evil Twin</b> — captive portal</sub></td>
+    <td align="center"><a href="docs/screenshots/wardriving.png"><img src="docs/screenshots/wardriving.png" alt="Wardriving with GPS" width="260"></a><br><sub><b>Wardriving</b> — GPS mapping</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><a href="docs/screenshots/captures-browser.png"><img src="docs/screenshots/captures-browser.png" alt="Captures browser" width="260"></a><br><sub><b>Captures browser</b></sub></td>
+    <td align="center"><a href="docs/screenshots/capture-details-cracked.png"><img src="docs/screenshots/capture-details-cracked.png" alt="Capture details, cracked" width="260"></a><br><sub><b>Capture details</b> — cracked</sub></td>
+    <td align="center"><a href="docs/screenshots/ble-scanner.png"><img src="docs/screenshots/ble-scanner.png" alt="BLE scanner" width="260"></a><br><sub><b>BLE scanner</b></sub></td>
+  </tr>
+  <tr>
+    <td align="center"><a href="docs/screenshots/radio-bandsweep.png"><img src="docs/screenshots/radio-bandsweep.png" alt="Sub-GHz band sweep" width="260"></a><br><sub><b>Sub-GHz band sweep</b></sub></td>
+    <td align="center"><a href="docs/screenshots/ook-capture.png"><img src="docs/screenshots/ook-capture.png" alt="Sub-GHz OOK capture" width="260"></a><br><sub><b>Sub-GHz OOK</b> — capture/replay</sub></td>
+    <td align="center"><a href="docs/screenshots/spectrum-24.png"><img src="docs/screenshots/spectrum-24.png" alt="2.4 GHz spectrum analyzer" width="260"></a><br><sub><b>2.4 GHz spectrum</b></sub></td>
+  </tr>
+  <tr>
+    <td align="center"><a href="docs/screenshots/tv-b-gone.png"><img src="docs/screenshots/tv-b-gone.png" alt="IR TV-B-Gone" width="260"></a><br><sub><b>IR TV-B-Gone</b></sub></td>
+    <td align="center"><a href="docs/screenshots/rfid-audit.png"><img src="docs/screenshots/rfid-audit.png" alt="RFID audit" width="260"></a><br><sub><b>RFID audit</b></sub></td>
+    <td align="center"><a href="docs/screenshots/badusb.png"><img src="docs/screenshots/badusb.png" alt="BadUSB USB HID" width="260"></a><br><sub><b>BadUSB</b> — USB HID</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><a href="docs/screenshots/modules.png"><img src="docs/screenshots/modules.png" alt="Module inventory" width="260"></a><br><sub><b>Modules</b> — live inventory</sub></td>
+    <td align="center"><a href="docs/screenshots/settings.png"><img src="docs/screenshots/settings.png" alt="Settings" width="260"></a><br><sub><b>Settings</b></sub></td>
+    <td></td>
+  </tr>
+</table>
+
+### Wireless (WiFi)
 - **Scanner** - Discover networks with security type, signal strength, and channel info; context action menu per network.
 - **Packet Sniffer** - Raw 802.11 frame capture with channel hopping and filtering.
 - **Handshake Capture** - WPA/WPA2/WPA3 handshake acquisition (4-way, PMKID, partial EAPOL), with Auto Hunt (autonomous multi-target hunting + whitelist) and manual modes.
@@ -51,19 +92,19 @@ and **Radio** (Sub-GHz / 2.4 GHz, shown when the multi-radio cap is attached), p
 - **Traffic Proxy** - Real-time DNS/HTTP/HTTPS metadata capture from Evil Twin victims.
 - **Captures Browser** - Manage Handshakes/Packets/Credentials, with cloud-cracking status and a bulk **"Sync all new"** action across every configured cracking service.
 
-### 🔵 BLE (Bluetooth Low Energy)
+### BLE (Bluetooth Low Energy)
 - **BLE Scanner** - Real-time discovery and RSSI tracking of BLE peripherals.
 - **Apple Attack** - Proximity-pairing popup spam for Apple devices.
 - **BadBLE** - BLE HID keyboard emulation, including a **DuckyScript interpreter** for scripted keystroke injection over BLE.
 - **Identity Spoof** - BLE identity/address spoofing.
 - **BLE Spam** - Proximity pairing notification flooding (Apple, Android, Windows).
 
-### 🔌 HID (USB keystroke/mouse injection)
+### HID (USB keystroke/mouse injection)
 - **BadUSB** - Native USB-HID DuckyScript keyboard injection on the Cardputer (ESP32-S3 USB-OTG); built-in scripts plus SD-loaded custom scripts, with US/ES keyboard layout support.
 - **Mouse Jiggler** - Periodic small mouse movements to defeat idle-lock/screensaver timers.
 - Not available on M5StickC Plus2 (no native USB-OTG).
 
-### 📻 Radio — Sub-GHz & 2.4 GHz (multi-radio cap)
+### Radio — Sub-GHz & 2.4 GHz (multi-radio cap)
 Requires the CC1101/NRF24 expansion cap; the **Radio** entry is greyed out when no cap is detected.
 - **Sub-GHz Band Sweep** - CC1101 RSSI read across the 315 / 433.92 / 868.35 / 915 MHz presets while you hold a remote's button, with a peak-held bar per band and the strongest highlighted — tells you *which band* an unknown remote transmits on before you try to capture it. Reads energy, not modulation (independent of OOK vs FSK).
 - **Sub-GHz OOK Capture & Replay** - CC1101-based raw OOK capture and replay across 315 / 433.92 / 868.35 / 915 MHz (e.g. simple remotes and sensors), with a pulse-train preview of the captured signal.
@@ -71,26 +112,32 @@ Requires the CC1101/NRF24 expansion cap; the **Radio** entry is greyed out when 
 - **Sub-GHz Jamming** - CC1101 carrier-wave or modulated-noise transmission on the selected band preset to hold a channel busy against a fixed-code receiver. Hold-to-jam (emits only while the key is held) behind an interference-warning gate — authorized testing only.
 - **2.4 GHz Spectrum Analyzer** - NRF24-based channel sweep (received-power detection) across the 2.4 GHz band for activity/interference mapping.
 
-### 📟 Infrared
+### Infrared
 - **IR TV-B-Gone** - High-power universal IR blast to turn off TVs (NA/EU code databases, arrow-key region toggle).
 - **IR Record & Replay** - Learn a remote's IR frame (NEC/RC5/raw — decoded or raw timing train) via the cap's IR receiver, persist it to SD, and replay it, with a pulse preview of the capture.
 
-### 🔖 RFID
+### RFID
 - **RFID Audit** - MFRC522-based (13.56 MHz, I2C) NFC/RFID tag reading and dumping.
 
-### 🧩 Modules
+### Modules
 - **Module inventory & hot-swap re-scan** - A live view of which peripherals are attached right now (Sub-GHz/2.4 GHz cap, RFID reader, GPS) with a **Re-scan** action, so a module seated after boot is detected without a reboot — its greyed-out menu tile un-greys as soon as the re-scan finds it. Also surfaces the cap-detection override. Seat the module while the radio bus is idle, then Re-scan.
 
-### ☁️ Cloud Cracking & Sync
+### Cloud Cracking & Sync
 - **WPA-SEC** - Upload `.pcap` handshakes for cloud cracking; status tracking (uploaded/cracked) per capture.
 - **pwncrack.org** - Second cracking service, consumes the `.hc22000` (`.22000`) files handshake capture already writes.
 - **WiGLE** - Upload wardriving CSVs for community wireless mapping.
 - All uploads go over a certificate-validated TLS connection (Mozilla root-CA bundle, no `setInsecure()`), heap-paced to avoid OOM on large uploads.
 
-### 🌐 Server / Dashboard Mode
+### Server / Dashboard Mode
 - Serves a web dashboard from the SD card for browser-based review of captures and status, with path-traversal protection and auth enabled by default.
 
-### 🎨 User Interface
+<p align="center">
+  <a href="docs/screenshots/dashboard-1.png"><img src="docs/screenshots/dashboard-1.png" alt="Web dashboard — system configuration" width="240"></a>
+  &nbsp;&nbsp;
+  <a href="docs/screenshots/dashboard-2.png"><img src="docs/screenshots/dashboard-2.png" alt="Web dashboard — system stats" width="240"></a>
+</p>
+
+### User Interface
 - **Theme System** - Customizable color schemes.
 - **Toast Notifications** - Real-time operation feedback.
 - **Status Bar** - Battery, SD card, WiFi status, and connected module display.
