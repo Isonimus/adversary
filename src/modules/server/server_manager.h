@@ -41,6 +41,19 @@ public:
      */
     void stop();
 
+    // The dashboard AP always uses this fixed IP (softAPConfig). Exposed so the UI can
+    // show the join URL before the AP is up — the server screen is rendered one last
+    // time and pushed to the LCD before the canvas is purged for server mode.
+    static constexpr const char* kDashboardIp = "192.168.4.1";
+
+    /**
+     * @brief Ensure the dashboard AP WPA2 key exists, generating and persisting a
+     *        per-device key when the field is empty. Idempotent. Called before the
+     *        pre-purge UI render so the key can be shown, and defensively by setupAP().
+     * @return true if a valid key is present on return; false if generation failed.
+     */
+    bool ensureApKey();
+
     /**
      * @brief Check if server is running
      */

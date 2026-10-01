@@ -83,6 +83,9 @@ struct SystemSettings {
     bool dashboardAuthEnabled = true;       // Enable HTTP basic auth (secure default)
     char dashboardUsername[33] = "admin";   // Auth username (if enabled)
     char dashboardPassword[33] = "";        // Auth password (if enabled)
+    // WPA2 key for the dashboard SoftAP link (slice-0036). Empty = auto-generate a
+    // per-device key on next AP start; there is no open-AP path. 63-char WPA2 max + NUL.
+    char dashboardApPassword[64] = "";
 };
 
 struct ApiKeys {
@@ -492,6 +495,9 @@ inline bool SettingsManager::load() {
         const char* dashPass = system["dashboardPassword"] | "";
         strncpy(settings_.system.dashboardPassword, dashPass, 32);
         settings_.system.dashboardPassword[32] = '\0';
+        const char* dashApPass = system["dashboardApPassword"] | "";
+        strncpy(settings_.system.dashboardApPassword, dashApPass, 63);
+        settings_.system.dashboardApPassword[63] = '\0';
     }
     
     // Load API keys
@@ -605,7 +611,10 @@ inline bool SettingsManager::save() {
     if (settings_.system.dashboardPassword[0] != '\0') {
         system["dashboardPassword"] = settings_.system.dashboardPassword;
     }
-    
+    if (settings_.system.dashboardApPassword[0] != '\0') {
+        system["dashboardApPassword"] = settings_.system.dashboardApPassword;
+    }
+
     // API keys
     if (settings_.apiKeys.hasWpaSec() || settings_.apiKeys.hasWigle() ||
         settings_.apiKeys.hasPwncrack()) {

@@ -204,8 +204,10 @@ private:
     int32_t tempDashboardAuthEnabled_;
     TextInputPopup dashboardUserPopup_;
     TextInputPopup dashboardPassPopup_;
+    TextInputPopup dashboardApPassPopup_;
     char dashboardUserLabel_[48];
     char dashboardPassLabel_[48];
+    char dashboardApKeyLabel_[48];
     
     // API Key popups
     TextInputPopup wpaSecKeyPopup_;

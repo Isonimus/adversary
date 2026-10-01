@@ -18,6 +18,11 @@
 
 #include "../../config/config.h"
 #include "../../utils/path_security.h"
+#include "../../utils/wifi_password.h"
+
+#ifdef ESP32
+#include <esp_random.h>
+#endif
 
 namespace adversary {
 
@@ -102,19 +107,50 @@ void ServerManager::update() {
 #endif
 }
 
+bool ServerManager::ensureApKey() {
+#ifdef ESP32
+    auto& settings = SettingsManager::getInstance().getMutable();
+    if (settings.system.dashboardApPassword[0] != '\0') {
+        return true;  // already provisioned
+    }
+    // WPA2-protect the dashboard AP. Auto-generate a per-device key the first time:
+    // the operator's management plane is never brought up open, which would otherwise
+    // leak the Basic-auth header and reviewed captures over the air (slice-0036). The
+    // key is persisted so a client's saved network keeps working across reboots.
+    uint8_t entropy[utils::kDashboardApPasswordChars];
+    esp_fill_random(entropy, sizeof(entropy));
+    if (!utils::fillWifiPassword(settings.system.dashboardApPassword,
+                                 sizeof(settings.system.dashboardApPassword),
+                                 utils::kDashboardApPasswordChars,
+                                 entropy, sizeof(entropy))) {
+        return false;  // never fall through to an open AP
+    }
+    SettingsManager::getInstance().save();
+    return true;
+#else
+    return false;
+#endif
+}
+
 bool ServerManager::setupAP() {
 #ifdef ESP32
     auto& settings = SettingsManager::getInstance().get();
-    
+
     // Configure AP
     WiFi.mode(WIFI_AP);
-    
+
     // Explicit config for stability
-    IPAddress apIP(192, 168, 4, 1);
+    IPAddress apIP;
+    apIP.fromString(kDashboardIp);
     WiFi.softAPConfig(apIP, apIP, IPAddress(255, 255, 255, 0));
-    
-    // Use device name as SSID, no password for open AP
-    if (!WiFi.softAP(settings.system.deviceName, nullptr)) {
+
+    // Defensive: the UI provisions the key before purging the canvas, but guard here
+    // too so a server start from any path is never open (slice-0036).
+    if (!ensureApKey()) {
+        return false;
+    }
+
+    if (!WiFi.softAP(settings.system.deviceName, settings.system.dashboardApPassword)) {
         return false;
     }
 
