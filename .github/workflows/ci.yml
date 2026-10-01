@@ -75,19 +75,20 @@ jobs:
           --inline-suppr --suppress=missingIncludeSystem
           -I src src/
 
-  # Source lint for a doubled-backslash escape ("...\\n") that emits two characters
-  # instead of a newline and smears serial logs into run-on records. A source-level
-  # guard, not a mock-Serial test (which would assert a log string — fragile). Lives
-  # here beside cppcheck, not in the Stele pre-commit hook, which is scoped to the
-  # documentation method and never archives src/. See slices/0037.
-  serial-escapes:
-    name: serial-escapes
+  # Node-based checks that back the project tooling, kept here (not in the Stele
+  # pre-commit hook, which is scoped to the documentation method) alongside cppcheck:
+  #   - the serial-escape lint + its self-test ("...\\n" emits two characters instead
+  #     of a newline and smears serial logs into run-on records; slices/0037), and
+  #   - the read-set drift guard, holding the hook's archive list equal to the linter's
+  #     READ_SCOPE so a path read but not archived fails here, not silently (slices/0038).
+  node-checks:
+    name: node-checks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
 
-      - name: Self-test the lint
-        run: node --test scripts/lint-serial-escapes.test.mjs
+      - name: Run node unit tests
+        run: node --test scripts/lint-serial-escapes.test.mjs test/read-set.test.mjs
 
       - name: Lint src for literal escapes
         run: node scripts/lint-serial-escapes.mjs src
