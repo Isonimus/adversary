@@ -74,3 +74,20 @@ jobs:
           cppcheck --std=c++17 --language=c++ --error-exitcode=1
           --inline-suppr --suppress=missingIncludeSystem
           -I src src/
+
+  # Source lint for a doubled-backslash escape ("...\\n") that emits two characters
+  # instead of a newline and smears serial logs into run-on records. A source-level
+  # guard, not a mock-Serial test (which would assert a log string — fragile). Lives
+  # here beside cppcheck, not in the Stele pre-commit hook, which is scoped to the
+  # documentation method and never archives src/. See slices/0037.
+  serial-escapes:
+    name: serial-escapes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Self-test the lint
+        run: node --test scripts/lint-serial-escapes.test.mjs
+
+      - name: Lint src for literal escapes
+        run: node scripts/lint-serial-escapes.mjs src

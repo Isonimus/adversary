@@ -809,8 +809,7 @@ inline void SettingsManager::checkApiKeyFile() {
     
     // Check if key changed
     if (strcmp(settings_.apiKeys.wpasec, newKey) != 0) {
-        Serial.printf("[Settings] Importing WPA-SEC key: %s...\\n", 
-                      String(newKey).substring(0, 8).c_str());
+        Serial.printf("[Settings] Importing WPA-SEC key (%u chars)\n", (unsigned)strlen(newKey));
         setWpaSecKey(newKey);
         save();
     }
@@ -844,8 +843,7 @@ inline void SettingsManager::checkApiKeyFile() {
             }
             
             if (wlen > 0 && strcmp(settings_.apiKeys.wigle, wigleKey) != 0) {
-                Serial.printf("[Settings] Importing WiGLE key: %s...\\n",
-                              String(wigleKey).substring(0, 8).c_str());
+                Serial.printf("[Settings] Importing WiGLE key (%u chars)\n", (unsigned)strlen(wigleKey));
                 setWigleKey(wigleKey);
                 save();
             }
@@ -880,8 +878,7 @@ inline void SettingsManager::checkApiKeyFile() {
             }
 
             if (plen > 0 && strcmp(settings_.apiKeys.pwncrack, pwncrackKey) != 0) {
-                Serial.printf("[Settings] Importing pwncrack key: %s...\\n",
-                              String(pwncrackKey).substring(0, 8).c_str());
+                Serial.printf("[Settings] Importing pwncrack key (%u chars)\n", (unsigned)strlen(pwncrackKey));
                 setPwncrackKey(pwncrackKey);
                 save();
             }
