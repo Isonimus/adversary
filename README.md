@@ -129,7 +129,7 @@ Requires the CC1101/NRF24 expansion cap; the **Radio** entry is greyed out when 
 - All uploads go over a certificate-validated TLS connection (Mozilla root-CA bundle, no `setInsecure()`), heap-paced to avoid OOM on large uploads.
 
 ### Server / Dashboard Mode
-- Serves a web dashboard from the SD card for browser-based review of captures and status, with path-traversal protection and auth enabled by default.
+- Serves a web dashboard from the SD card for browser-based review of captures and status. The device's access point is WPA2-protected with an auto-generated per-device key (shown on the Server screen, overridable in Settings), and the dashboard itself adds path-traversal protection and HTTP auth enabled by default.
 
 <p align="center">
   <a href="docs/screenshots/dashboard-1.png"><img src="docs/screenshots/dashboard-1.png" alt="Web dashboard — system configuration" width="240"></a>
