@@ -51,7 +51,42 @@ jobs:
         run: pip install --upgrade platformio
 
       - name: ${{ matrix.cmd }}
-        run: ${{ matrix.cmd }}
+        # Tee to a log the size step parses. GitHub's bash runs with pipefail, so a
+        # failing pio still fails this step through the tee.
+        run: ${{ matrix.cmd }} 2>&1 | tee build.log
+
+      # Surface RAM/Flash per firmware target so growth toward the partition ceiling is
+      # visible on every run — the m5stick uses huge_app (3 MB, no OTA), where a full
+      # partition is a hard build failure, not a degraded update. Report-only for now; a
+      # deliberate ceiling gate follows once the trend is measured. See slices/0039.
+      - name: Build size
+        if: matrix.env != 'native'
+        shell: bash
+        run: |
+          flash_line=$(grep -E '^Flash:' build.log | tail -1 || true)
+          if [ -z "$flash_line" ]; then
+            echo "::error::No 'Flash:' line in the build output — PlatformIO's size format may have changed; the CI size report is broken."
+            exit 1
+          fi
+          {
+            echo "### Build size — ${{ matrix.env }}"
+            echo ""
+            echo "| Memory | Used | Capacity | Usage | Headroom |"
+            echo "| --- | ---: | ---: | ---: | ---: |"
+            for metric in RAM Flash; do
+              line=$(grep -E "^${metric}:" build.log | tail -1 || true)
+              if [ -z "$line" ]; then
+                echo "::warning::No '${metric}:' line in the build output for ${{ matrix.env }}."
+                continue
+              fi
+              used=$(sed -E 's/.*used ([0-9]+) bytes from ([0-9]+) bytes.*/\1/' <<<"$line")
+              total=$(sed -E 's/.*used ([0-9]+) bytes from ([0-9]+) bytes.*/\2/' <<<"$line")
+              pct=$(sed -E 's/.*\][[:space:]]*([0-9.]+)%.*/\1/' <<<"$line")
+              printf '| %s | %d B (%d KB) | %d B (%d KB) | %s%% | %d B (%d KB) |\n' \
+                "$metric" "$used" "$((used / 1024))" "$total" "$((total / 1024))" \
+                "$pct" "$((total - used))" "$(((total - used) / 1024))"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # cppcheck is a separate job, not a matrix leg: it needs an apt install and
   # different steps, which would contort the env->cmd matrix above. It gates on
