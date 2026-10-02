@@ -71,3 +71,38 @@ tooling, which raises the bar on what goes public:
   is the complete backup, and a fresh audit could re-derive any excluded file.
 - A later change to publish any currently-excluded material (e.g. opening `LEDGER.md` or the
   Stele tooling) is a normal commit, not a second squash.
+
+## Amendment — 2026-10-02: the three Stele doc-linters are tracked, by necessity
+
+An audit of the public tree (prompted while closing a PR whose test tried to read the local
+`.claude/hooks/pre-commit`) found one deviation from the curation table above:
+`scripts/lint-docs.mjs`, `scripts/build-index.mjs`, and `scripts/check-immutable.mjs` are
+**tracked and public** (present since the `e0225f8` "Initial public release" squash), whereas
+the table lists `scripts/*.mjs (Stele machinery)` under "kept local".
+
+This is **correct and intended**, and the table's wording was simply too broad:
+
+- **ADR-0018 requires these three to be tracked.** The pre-commit hook validates the *staged*
+  copies of exactly these checkers (`$staged/scripts/$checker`), because grading a commit with
+  a linter it does not contain is the very defect ADR-0018 removes. Keeping them untracked
+  would break the hook. So the "keep local" rule here conflicts with ADR-0018, and ADR-0018
+  wins — they must be in the commit.
+- **No security cost.** The 2026-10-02 audit confirmed: the public history is squashed to the
+  single initial-release root (no 378-commit leak); the maintainer's email/domain appears
+  nowhere in the public tree; and no secrets, API keys, or captured data are present. These
+  three files are generic, zero-dependency doc-linters — no secrets, no absolute paths.
+- **Inert in a public clone.** A public clone carries these scripts but not the hook
+  (`.claude/` stays local), and public CI never invokes them (`ci.yml`'s `node-checks` runs
+  only `scripts/lint-serial-escapes.*`). They are at worst harmless noise — the "broken-linter
+  trap" the original decision feared is not sprung, because nothing auto-runs them there.
+
+**Narrowed rule.** "Kept local" covers Stele machinery *not required tracked by another
+decision* — i.e. `.claude/` (the hook and Claude Code operator config) and the ADR/slice
+*workflow* as a process. The three doc-linters above are the recorded exception, tracked per
+ADR-0018. Project-specific scripts under `scripts/` that are not Stele machinery — e.g.
+`lint-serial-escapes.mjs` (a source lint, slice-0037) and the build-critical
+`weaken_deauth_*` — are legitimately public and were never in scope for this exclusion.
+
+Everything else in the original table is unchanged: `.claude/`, `LEDGER.md`, `EPIC.md`,
+`docs/` (beyond the four published design docs and the README screenshots), and `/adversary/`
+remain local.
