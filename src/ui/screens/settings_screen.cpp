@@ -141,7 +141,16 @@ void SettingsScreen::buildSettingsList() {
         snprintf(dashboardPassLabel_, sizeof(dashboardPassLabel_), "Password: (not set)");
     }
     items_[itemCount_++] = SettingItem::action(dashboardPassLabel_);
-    
+
+    // WPA2 key for the AP link itself (slice-0036). Shown masked; auto-generated on
+    // first AP start when empty, so "(auto)" means one will be created on next start.
+    if (strlen(sysSettings.system.dashboardApPassword) > 0) {
+        snprintf(dashboardApKeyLabel_, sizeof(dashboardApKeyLabel_), "AP Key: ******");
+    } else {
+        snprintf(dashboardApKeyLabel_, sizeof(dashboardApKeyLabel_), "AP Key: (auto)");
+    }
+    items_[itemCount_++] = SettingItem::action(dashboardApKeyLabel_);
+
     // API Keys section
     items_[itemCount_++] = SettingItem::header("-- API Keys --");
     
@@ -282,6 +291,9 @@ bool SettingsScreen::handleInput(char key) {
     }
     if (dashboardPassPopup_.isVisible()) {
         return dashboardPassPopup_.handleInput(key);
+    }
+    if (dashboardApPassPopup_.isVisible()) {
+        return dashboardApPassPopup_.handleInput(key);
     }
     if (wpaSecKeyPopup_.isVisible()) {
         return wpaSecKeyPopup_.handleInput(key);
@@ -525,8 +537,32 @@ bool SettingsScreen::handleInput(char key) {
                              ToastManager::getInstance().show("Username Updated", ToastType::SUCCESS);
                          });
                          dashboardUserPopup_.setOnCancel([this]() { needsRedraw_ = true; });
+                    } else if (strncmp(label, "AP Key:", 7) == 0) {
+                         // WPA2 link key for the dashboard AP. Masked entry; accept only
+                         // empty (= regenerate on next start) or a valid 8..63 char key.
+                         // A 1..7 char key would make the IDF silently open the AP, so it
+                         // is rejected rather than saved (slice-0036).
+                         dashboardApPassPopup_.show("AP WPA2 Key (8-63)", "", true, 63);
+                         dashboardApPassPopup_.setOnSubmit([this](const char* text) {
+                             size_t len = strlen(text);
+                             if (len > 0 && len < 8) {
+                                 ToastManager::getInstance().show("AP key: 8-63 chars", ToastType::ERROR);
+                                 needsRedraw_ = true;
+                                 return;
+                             }
+                             auto& settings = SettingsManager::getInstance().getMutable();
+                             strncpy(settings.system.dashboardApPassword, text, 63);
+                             settings.system.dashboardApPassword[63] = '\0';
+                             SettingsManager::getInstance().save();
+                             buildSettingsList();
+                             needsRedraw_ = true;
+                             ToastManager::getInstance().show(
+                                 len == 0 ? "AP key auto on restart" : "AP key set - restart server",
+                                 ToastType::SUCCESS);
+                         });
+                         dashboardApPassPopup_.setOnCancel([this]() { needsRedraw_ = true; });
                     } else if (strncmp(label, "Password:", 9) == 0) {
-                         dashboardPassPopup_.show("Dashboard Password", "", false, 31);
+                         dashboardPassPopup_.show("Dashboard Password", "", true, 31);
                          dashboardPassPopup_.setOnSubmit([this](const char* text) {
                              auto& settings = SettingsManager::getInstance().getMutable();
                              strncpy(settings.system.dashboardPassword, text, 32);
@@ -658,6 +694,7 @@ void SettingsScreen::render(Canvas& canvas) {
     bleNamePopup_.render(canvas);
     dashboardUserPopup_.render(canvas);
     dashboardPassPopup_.render(canvas);
+    dashboardApPassPopup_.render(canvas);
     wpaSecKeyPopup_.render(canvas);
     wigleKeyPopup_.render(canvas);
     pwncrackKeyPopup_.render(canvas);

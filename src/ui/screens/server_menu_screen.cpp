@@ -15,6 +15,7 @@
 // Canvas management for server mode (free 64KB for network operations)
 extern void adversary_ui_purge_canvas();
 extern void adversary_ui_restore_canvas();
+extern void adversary_ui_render_forced();
 
 namespace adversary {
 
@@ -117,13 +118,19 @@ void ServerMenuScreen::drawMenu(Canvas& canvas) {
     canvas.setCursor(8, startY);
     
     if (serverRunning_) {
-        canvas.printf("IP: %s", ServerManager::getInstance().getIPAddress());
-        canvas.setCursor(canvas.width() - 60, startY);
-        canvas.printf("Clients: %d", ServerManager::getInstance().getConnectedStations());
+        // Everything the operator needs to join: SSID + WPA2 key, and the fixed join URL.
+        // This frame is painted once before the canvas is purged, so it shows static info
+        // (the AP IP is always kDashboardIp); live counters can't update while purged.
+        canvas.printf("SSID: %s", settings.system.deviceName);
+        canvas.setCursor(canvas.width() - 72, startY);
+        canvas.printf("%s", ServerManager::kDashboardIp);
+        canvas.setCursor(8, startY + 11);
+        canvas.printf("Key: %s", settings.system.dashboardApPassword);
+        startY += 22;
     } else {
         canvas.printf("AP SSID: %s", settings.system.deviceName);
+        startY += 16;
     }
-    startY += 16;
     
     // Draw menu items
     for (int i = 0; i < MENU_ITEMS; i++) {
@@ -224,11 +231,21 @@ bool ServerMenuScreen::handleInput(char key) {
                         adversary_ui_restore_canvas();
                         ToastManager::getInstance().show("Server Stopped", ToastType::INFO);
                     } else {
-                        adversary_ui_purge_canvas();
-                        if (ServerManager::getInstance().start()) {
-                            serverRunning_ = true;
-                            ToastManager::getInstance().show("Server Started", ToastType::SUCCESS);
-                        } else {
+                        // Provision the AP key and paint the running screen (SSID + key +
+                        // join URL) to the LCD BEFORE purging the canvas: server mode frees
+                        // the canvas for heap headroom, after which nothing can redraw, so
+                        // the panel must already hold the connection info the operator needs
+                        // to join (slice-0036). Heap order is unchanged — purge still
+                        // precedes start().
+                        if (!ServerManager::getInstance().ensureApKey()) {
+                            ToastManager::getInstance().show("Key gen failed", ToastType::ERROR);
+                            return true;
+                        }
+                        serverRunning_ = true;
+                        adversary_ui_render_forced();   // draw + push the running frame
+                        adversary_ui_purge_canvas();    // free RAM; LCD keeps the frame
+                        if (!ServerManager::getInstance().start()) {
+                            serverRunning_ = false;
                             adversary_ui_restore_canvas();
                             ToastManager::getInstance().show("Server Failed", ToastType::ERROR);
                         }
