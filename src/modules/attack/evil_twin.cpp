@@ -70,7 +70,7 @@ bool EvilTwin::start() {
     }
     
 #ifndef UNIT_TEST
-    Serial.printf("[EvilTwin] Starting attack on SSID: %s, CH: %d\\n", 
+    Serial.printf("[EvilTwin] Starting attack on SSID: %s, CH: %d\n",
                   targetSSID_, targetChannel_);
 #endif
     

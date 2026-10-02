@@ -432,7 +432,7 @@ bool ArduinoCaptivePortal::start(const char* title) {
             dnsStarted = true;
             break;
         }
-        Serial.printf("[ArduinoCaptive] DNS start attempt %d failed, retrying...\\n", retry + 1);
+        Serial.printf("[ArduinoCaptive] DNS start attempt %d failed, retrying...\n", retry + 1);
         delay(200);
     }
     
@@ -530,7 +530,7 @@ void ArduinoCaptivePortal::setupRoutes() {
 void ArduinoCaptivePortal::handleRoot() {
     if (!webServer_) return;
     requestCount_++;
-    Serial.printf("[ArduinoCaptive] Serving portal page (request #%lu)\\n", requestCount_);
+    Serial.printf("[ArduinoCaptive] Serving portal page (request #%lu)\n", requestCount_);
     webServer_->send(200, "text/html", getPortalHTML());
 }
 
@@ -542,7 +542,7 @@ void ArduinoCaptivePortal::handleCaptiveRedirect() {
     IPAddress apIP = WiFi.softAPIP();
     String redirectUrl = "http://" + apIP.toString() + "/";
     
-    Serial.printf("[ArduinoCaptive] Captive redirect: %s -> %s\\n", 
+    Serial.printf("[ArduinoCaptive] Captive redirect: %s -> %s\n",
                   webServer_->uri().c_str(), redirectUrl.c_str());
     
     // Send 302 redirect to trigger captive portal popup
@@ -590,7 +590,7 @@ void ArduinoCaptivePortal::handleNotFound() {
     if (!webServer_) return;
     requestCount_++;
     // Redirect everything to the portal
-    Serial.printf("[ArduinoCaptive] Redirecting: %s\\n", webServer_->uri().c_str());
+    Serial.printf("[ArduinoCaptive] Redirecting: %s\n", webServer_->uri().c_str());
     webServer_->send(200, "text/html", getPortalHTML());
 }
 

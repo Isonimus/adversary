@@ -444,7 +444,7 @@ void HandshakeCapture::processEAPOL(const uint8_t* data, uint16_t length, int8_t
     uint16_t eapolLen = length - (eapolStart - data);
     
 #ifdef ESP32
-    Serial.printf("[Handshake] EAPOL from target BSSID, offset=%d, len=%d\\n",
+    Serial.printf("[Handshake] EAPOL from target BSSID, offset=%d, len=%d\n",
                   eapolOffset, eapolLen);
 #else
     (void)eapolOffset;
