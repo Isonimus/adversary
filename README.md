@@ -252,7 +252,7 @@ the latest tag:
 
 | Asset | Use it for |
 |-------|-----------|
-| `adversary-cardputer-<tag>-factory.bin` | A **fresh flash** of a blank or bricked device — a complete image (bootloader + partitions + app) written to offset `0x0`. Use with an ESP web flasher, **M5Burner** ("User Custom"), or `esptool`. |
+| `adversary-cardputer-<tag>-factory.bin` | A **fresh flash** of a blank or bricked device — a complete image (bootloader + partitions + app) written to offset `0x0`. Use with an ESP web flasher, **M5Burner** (search the catalog, or add as "User Custom"), or `esptool`. |
 | `adversary-cardputer-<tag>-app.bin` | An **over-the-air, app-only** install from **M5Launcher** (bmorcelli) via a direct URL — writes just the app to the OTA slot. |
 | `SHA256SUMS.txt` | Verify the download before flashing: `sha256sum -c SHA256SUMS.txt`. |
 
@@ -262,8 +262,9 @@ the latest tag:
 esptool --chip esp32s3 write-flash 0x0 adversary-cardputer-<tag>-factory.bin
 ```
 
-**With M5Burner**: add the `-factory.bin` as a *User Custom* firmware, then burn it to the
-device.
+**With M5Burner**: search for **Adversary** in the
+[M5Burner catalog](https://burner.m5stack.com/F6936P) and burn it directly — no manual file
+handling. (Or add the `-factory.bin` as a *User Custom* firmware, the pre-catalog path.)
 
 **With M5Launcher**: point it at the `-app.bin` release URL to install over OTA.
 
@@ -631,6 +632,14 @@ the card before reporting success.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, coding standards, and the PR
 workflow, and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community expectations.
+
+---
+
+## Community
+
+- **[r/Adversary](https://www.reddit.com/r/Adversary/)** - releases, build help, field reports, and feature discussion.
+- **[Issues](https://github.com/Isonimus/adversary/issues)** - bugs and feature requests.
+- **[Pull requests](https://github.com/Isonimus/adversary/pulls)** - contributions welcome (see [CONTRIBUTING.md](CONTRIBUTING.md)).
 
 ---
 
