@@ -193,12 +193,14 @@ bool PacketSniffer::init() {
     if (m_initialized) return true;
     
 #ifdef ARDUINO
-    // WiFi should already be initialized
-    // We just need to ensure we're in station mode
+    // Bring the driver up in station mode. start() re-ensures this on every run
+    // too: another screen (an attack's teardown) can WIFI_OFF the driver while
+    // we are stopped, so init() alone cannot be trusted to have left it up.
+    // See slices/0040.
     WiFi.mode(WIFI_STA);
     WiFi.disconnect();
 #endif
-    
+
     m_stats.reset();
     m_initialized = true;
     
@@ -220,23 +222,33 @@ bool PacketSniffer::start(PacketCallback callback) {
     m_stats.reset();
     
 #ifdef ARDUINO
-    // Disconnect from any network
+    // Ensure the WiFi driver is actually initialised in station mode before we
+    // arm promiscuous capture. An attack launched from the Sniffer (e.g.
+    // Handshake) tears the radio down with WiFi.mode(WIFI_OFF) on exit; the raw
+    // esp_wifi_set_mode() used before could not revive a deinitialised driver,
+    // so capture silently yielded zero packets. WiFi.mode(WIFI_STA) goes through
+    // the Arduino layer, which re-inits the driver when returning from WIFI_OFF.
+    // See slices/0040.
+    WiFi.mode(WIFI_STA);
     WiFi.disconnect();
     delay(10);
-    
-    // Set to station mode for promiscuous
-    esp_wifi_set_mode(WIFI_MODE_STA);
-    
+
     // Set initial channel
     uint8_t startChannel = m_filter.targetChannel > 0 ? m_filter.targetChannel : 1;
     wifi_utils::setChannel(startChannel);
     m_stats.currentChannel = startChannel;
-    
-    // Enable promiscuous mode with all frames filter
+
+    // Enable promiscuous mode with all frames filter. Fail loud: enable returns
+    // false on a driver that is not ready — surface it instead of claiming to
+    // run while capturing nothing.
     auto filter = wifi_utils::allFrameFilter();
-    wifi_utils::enablePromiscuous(promiscuousCallback, &filter);
+    if (!wifi_utils::enablePromiscuous(promiscuousCallback, &filter)) {
+        Serial.println("[Sniffer] ERROR: promiscuous enable failed (WiFi driver not ready)");
+        m_state = SnifferState::STOPPED;
+        return false;
+    }
 #endif
-    
+
     m_state = SnifferState::RUNNING;
     m_lastHopTime = millis();
     
@@ -255,7 +267,11 @@ void PacketSniffer::stop() {
     
     m_state = SnifferState::STOPPED;
     m_callback = nullptr;
-    
+    // Force re-initialisation on the next start(): external code (an attack
+    // screen's teardown) may WIFI_OFF the driver while we are stopped, so a
+    // cached "initialised" flag can no longer be trusted. See slices/0040.
+    m_initialized = false;
+
     Serial.printf("[Sniffer] Stopped. Captured %lu packets\n", m_stats.totalPackets);
 }
 
