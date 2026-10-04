@@ -129,7 +129,6 @@ enum class PacketAction : uint8_t {
     DEAUTH_ATTACK,
     EVIL_TWIN,
     KARMA_ATTACK,
-    COPY_BSSID,
     CANCEL
 };
 
