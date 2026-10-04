@@ -846,7 +846,6 @@ const char* SnifferScreen::getActionName(PacketAction action) const
         case PacketAction::DEAUTH_ATTACK:      return "Deauth Attack";
         case PacketAction::EVIL_TWIN:          return "Evil Twin";
         case PacketAction::KARMA_ATTACK:       return "Karma Attack";
-        case PacketAction::COPY_BSSID:         return "Copy BSSID";
         case PacketAction::CANCEL:             return "Cancel";
         default:                               return "???";
     }
@@ -862,14 +861,6 @@ void SnifferScreen::executeAction(PacketAction action)
     // Log action
     Serial.printf("[Sniffer] Executing action %s on %s\n",
                  getActionName(action), pkt.ssid[0] ? pkt.ssid : "<hidden>");
-
-    // COPY_BSSID is an in-screen convenience, not an attack launch.
-    if (action == PacketAction::COPY_BSSID) {
-        Serial.printf("[Sniffer] BSSID: %02X:%02X:%02X:%02X:%02X:%02X\n",
-                      pkt.srcMac[0], pkt.srcMac[1], pkt.srcMac[2],
-                      pkt.srcMac[3], pkt.srcMac[4], pkt.srcMac[5]);
-        return;
-    }
 
     // Map the chosen attack to its screen. The navigator (subscribed in main.cpp) tears down
     // this screen via hide() and launches the attack on the packet's source — the sniffer
