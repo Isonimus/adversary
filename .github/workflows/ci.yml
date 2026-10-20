@@ -127,6 +127,26 @@ jobs:
       - name: Lint src for literal escapes
         run: node scripts/lint-serial-escapes.mjs src
 
+  # Gate that keeps DEPENDENCIES.lock.md — our resolved-tree anti-drift snapshot — from
+  # silently falling behind a release: it fails when the lock's "Last verified" date
+  # predates the latest release tag, i.e. a release was cut without re-verifying the lock.
+  # See slices/0080.
+  dep-lock-staleness:
+    name: dep-lock-staleness
+    runs-on: ubuntu-latest
+    steps:
+      # fetch-depth: 0 so the tags are present — a shallow checkout carries none, which
+      # would leave the gate with nothing to compare against and pass as a false green.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Self-test the lint
+        run: node --test scripts/lint-dep-lock-staleness.test.mjs
+
+      - name: Check the lock against the latest release tag
+        run: node scripts/lint-dep-lock-staleness.mjs
+
   # Ratchet that forbids NEW raw Serial.print* outside the logging layer, so the raw-Serial
   # sprawl cannot grow while the legacy sites migrate behind LOG_E/W/I/D. The permitted
   # legacy files are listed in scripts/raw-serial-baseline.json, which may only shrink as

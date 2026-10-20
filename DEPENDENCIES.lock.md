@@ -16,8 +16,14 @@ listed here, that is drift — investigate before trusting the build.
   `pio test -e native`, then update this snapshot **in the same commit**.
 - **Platform / arduino-libs** are pinned by exact release-ZIP URL in `platformio.ini`
   (`[env:cardputer]` / `[env:m5stick]`); the resolved versions are recorded below.
+- **Gate:** CI's `dep-lock-staleness` job fails the build when the "Last verified" date
+  below predates the latest release tag, so a release can't be cut on an unverified
+  snapshot (slice-0080). Keeping this stamp current on every release keeps the gate green.
 
-Last verified: 2026-09-08 — native 706/706, cardputer + m5stick builds SUCCESS.
+Last verified: 2026-10-20 — native 844/844, cardputer + m5stick builds SUCCESS.
+Re-resolved all three envs: the trees below are unchanged since the previous stamp (no
+version drift), only the date and native count moved (706 → 844 over the 0.3.0 / 0.4.0
+cycles, which added the RFID-in-`hal/` and wardriving-BLE suites).
 
 ---
 
