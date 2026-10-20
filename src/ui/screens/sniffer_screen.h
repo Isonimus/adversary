@@ -176,8 +176,10 @@ private:
     void processFrame(const CapturedPacket& packet);
 
     void drawHeader(Canvas& canvas);
+    // STATS view: the selectable config block (channel/hopping/mode/save + start-stop action
+    // row) above a separator, then the live counter grid below it (slice-0079).
     void drawStats(Canvas& canvas);
-    void drawChannelIndicator(Canvas& canvas, int16_t x, int16_t y);
+    void drawStatsCounters(Canvas& canvas, int16_t top);
     void drawPacketLog(Canvas& canvas);
     void drawPacketLogEntry(Canvas& canvas, const PacketSummary& pkt, int16_t y);
 
@@ -199,6 +201,22 @@ private:
     const char* getModeName() const;
     void configureFilter();
     bool shouldCapturePacket(const CapturedPacket& packet) const;
+
+    // STATS-view config block (slice-0079). Rows, in order: Channel, Hopping, Mode, Save to SD,
+    // and a terminal Start/Stop Capture action row. Channel and Hopping are disabled (greyed, and
+    // skipped by the nav) in fixed-target mode, where the sniffer owns the channel.
+    enum ConfigRow : int { CFG_CHANNEL = 0, CFG_HOPPING, CFG_MODE, CFG_SAVE, CFG_ACTION };
+    static constexpr int CONFIG_ROW_COUNT = 5;
+    bool isConfigRowEnabled(int idx) const;
+    void moveConfigSelection(bool down);
+    void activateConfigRow();
+    // Channel/hopping controls shared by the config rows and the +/-/h accelerators, so the two
+    // entry points cannot drift. Both are live-capture controls: no-ops unless capturing and not
+    // targeting (esp_wifi_set_channel only works with WiFi up), which is exactly when the rows are
+    // enabled. stepChannel is additionally inert while hopping, since the sniffer auto-cycles then
+    // (slice-0079).
+    void stepChannel(bool up);
+    void toggleHopping();
 
     PacketSniffer& m_sniffer;
     PcapWriter m_pcapWriter;
@@ -234,6 +252,9 @@ private:
 #endif
     
     SnifferScreenState m_screenState;
+    // Selection + scroll state for the STATS-view config block (slice-0079), fed its item count
+    // and viewport by drawStats each frame, exactly like m_packetLogList below.
+    ListScrollModel m_configList;
     std::vector<PacketSummary> m_packetLog;
     size_t m_packetLogHead;
     // Owns the packet-log selection + scroll window + wrap; drawPacketLog feeds it the live item

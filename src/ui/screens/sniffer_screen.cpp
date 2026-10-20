@@ -185,7 +185,12 @@ void SnifferScreen::show()
     m_shouldExit = false;
     m_needsRedraw = true;
     m_screenState = SnifferScreenState::STATS;
-    
+
+    // Land the config selection on the Start/Stop action row so the primary action is one Enter
+    // away and the long-standing "Enter starts capture" reflex is preserved (slice-0079).
+    m_configList.setItemCount(CONFIG_ROW_COUNT);
+    m_configList.setSelectedIndex(CFG_ACTION);
+
     // Subscribe to EventBus for packet events
     if (packetHandlerId_ == 0) {
         packetHandlerId_ = EventBus::getInstance().subscribe(
@@ -270,7 +275,11 @@ bool SnifferScreen::handleInput(char key)
     switch (key) {
         case '\n':  // Enter - context-dependent action
         case '\r':
-            if (m_screenState == SnifferScreenState::PACKET_LOG && !m_packetLog.empty()) {
+            if (m_screenState == SnifferScreenState::STATS) {
+                // Activate the selected config row: cycle its value, or start/stop on the action
+                // row. This replaces the old blanket Enter=toggleCapture (slice-0079).
+                activateConfigRow();
+            } else if (!m_packetLog.empty()) {
                 // Snapshot the selected packet now: the ring mutates in place and auto-scroll can
                 // move the selection while the menu is open, so the action must act on this copy.
                 // The list holds an oldest-first display row; resolve it to its physical slot (slice-0070).
@@ -278,9 +287,6 @@ bool SnifferScreen::handleInput(char key)
                                                                        m_packetLogList.selectedIndex())];
                 buildActionList(m_selectedPacket);  // opens the overlay iff the frame type affords an action
                 m_needsRedraw = true;
-            } else {
-                // Default: toggle capture
-                toggleCapture();
             }
             return true;
             
@@ -313,16 +319,20 @@ bool SnifferScreen::handleInput(char key)
             }
             return true;
             
-        case ';':   // Up - navigate packet log (the overlay handles its own nav above)
-            if (m_screenState == SnifferScreenState::PACKET_LOG && !m_packetLog.empty()) {
+        case ';':   // Up - config rows in STATS, packet log in PACKET_LOG (overlay nav handled above)
+            if (m_screenState == SnifferScreenState::STATS) {
+                moveConfigSelection(false);  // skips disabled rows in fixed-target mode
+            } else if (!m_packetLog.empty()) {
                 m_packetLogList.setItemCount((int)m_packetLog.size());
                 m_packetLogList.moveUp();  // wraps to the last row at the top
                 m_needsRedraw = true;
             }
             return true;
 
-        case '.':   // Down - navigate packet log (the overlay handles its own nav above)
-            if (m_screenState == SnifferScreenState::PACKET_LOG && !m_packetLog.empty()) {
+        case '.':   // Down - config rows in STATS, packet log in PACKET_LOG (overlay nav handled above)
+            if (m_screenState == SnifferScreenState::STATS) {
+                moveConfigSelection(true);
+            } else if (!m_packetLog.empty()) {
                 m_packetLogList.setItemCount((int)m_packetLog.size());
                 m_packetLogList.moveDown();  // wraps to the first row at the bottom
                 m_needsRedraw = true;
@@ -345,33 +355,17 @@ bool SnifferScreen::handleInput(char key)
             m_needsRedraw = true;
             return true;
             
-        case '+':   // Channel up
-            if (!m_hasTarget) {
-                uint8_t ch = m_sniffer.getChannel();
-                m_sniffer.setChannel(ch < 13 ? ch + 1 : 1);
-                m_stats.currentChannel = m_sniffer.getChannel();
-                m_needsRedraw = true;
-            }
+        case '+':   // Channel up (accelerator for the Channel config row)
+            stepChannel(true);
             return true;
-            
+
         case '-':   // Channel down
-            if (!m_hasTarget) {
-                uint8_t ch = m_sniffer.getChannel();
-                m_sniffer.setChannel(ch > 1 ? ch - 1 : 13);
-                m_stats.currentChannel = m_sniffer.getChannel();
-                m_needsRedraw = true;
-            }
+            stepChannel(false);
             return true;
-            
-        case 'h':   // Toggle channel hopping
+
+        case 'h':   // Toggle channel hopping (accelerator for the Hopping config row)
         case 'H':
-            if (!m_hasTarget) {
-                if (m_sniffer.getState() == SnifferState::RUNNING) {
-                    // Check if hopping is active, toggle it
-                    m_sniffer.setChannelHopping(!m_sniffer.isChannelHopping(), 100);
-                    m_needsRedraw = true;
-                }
-            }
+            toggleHopping();
             return true;
             
         default:
@@ -543,6 +537,65 @@ void SnifferScreen::cycleCaptureMode()
     }
     
     configureFilter();
+    m_needsRedraw = true;
+}
+
+bool SnifferScreen::isConfigRowEnabled(int idx) const
+{
+    // Channel and Hopping are live-capture controls: they only affect the radio while it is
+    // actually capturing (esp_wifi_set_channel needs WiFi up), and are fixed by the target when
+    // one is set, so both are disabled (greyed + skipped) otherwise. Channel is additionally
+    // disabled while hopping, since the sniffer then auto-cycles channels and a manual pick has no
+    // effect. Mode/Save/Start stay actionable at all times (slice-0079).
+    if (idx == CFG_HOPPING) return m_capturing && !m_hasTarget;
+    if (idx == CFG_CHANNEL) return m_capturing && !m_hasTarget && !m_sniffer.isChannelHopping();
+    return true;
+}
+
+void SnifferScreen::moveConfigSelection(bool down)
+{
+    m_configList.setItemCount(CONFIG_ROW_COUNT);
+    // Move one row, then keep going in the same direction over any disabled row. Bounded by the
+    // row count; CFG_MODE/CFG_SAVE/CFG_ACTION are always enabled, so this always lands on one.
+    for (int i = 0; i < CONFIG_ROW_COUNT; ++i) {
+        if (down) m_configList.moveDown();
+        else      m_configList.moveUp();
+        if (isConfigRowEnabled(m_configList.selectedIndex())) break;
+    }
+    m_needsRedraw = true;
+}
+
+void SnifferScreen::activateConfigRow()
+{
+    switch (m_configList.selectedIndex()) {
+        case CFG_CHANNEL:  stepChannel(true); break;   // row is only reachable while editable
+        case CFG_HOPPING:  toggleHopping();   break;
+        case CFG_MODE:     cycleCaptureMode(); break;
+        case CFG_SAVE:     m_saveToFile = !m_saveToFile; break;
+        case CFG_ACTION:   toggleCapture();   break;
+    }
+    m_needsRedraw = true;
+}
+
+void SnifferScreen::stepChannel(bool up)
+{
+    // Shared by the Channel config row and the +/- keys. A no-op unless capturing and not
+    // targeting, and inert while hopping, matching when the Channel row is enabled. Guarding here
+    // too keeps the +/- accelerators honest even though the row nav already skips disabled states.
+    if (!m_capturing || m_hasTarget || m_sniffer.isChannelHopping()) return;
+    uint8_t ch = m_sniffer.getChannel();
+    ch = up ? (ch < 13 ? ch + 1 : 1) : (ch > 1 ? ch - 1 : 13);
+    m_sniffer.setChannel(ch);
+    m_stats.currentChannel = m_sniffer.getChannel();
+    m_needsRedraw = true;
+}
+
+void SnifferScreen::toggleHopping()
+{
+    // Shared by the Hopping config row and the 'h' key. Only while capturing and not targeting;
+    // setChannelHopping is a plain flag the capture loop reads, so toggling it live is all it takes.
+    if (!m_capturing || m_hasTarget) return;
+    m_sniffer.setChannelHopping(!m_sniffer.isChannelHopping(), 100);
     m_needsRedraw = true;
 }
 
@@ -1012,19 +1065,14 @@ void SnifferScreen::render(Canvas& canvas) {
             {'C', "Clear", true}
         });
     } else {
+        // STATS view: channel/hopping/mode/save/start all live in the config block now, so the
+        // footer carries only the two actions that are not config rows (slice-0079).
         footerHints_.setHints({
             {'L', "Log", true},
-            {'M', getModeName(), true},
-            {'S', m_saveToFile ? "Save:ON" : "Save:OFF", true},
             {'C', "Clear", true}
         });
     }
-    
-    // Add [REC] indicator to right content
-    static char recBuf[16];
-    snprintf(recBuf, sizeof(recBuf), "%s", m_capturing ? "[REC]" : "[STOP]");
-    footerHints_.setRightContent(recBuf);
-    
+
     footerHints_.render(canvas);
 #else
     (void)canvas;
@@ -1034,11 +1082,26 @@ void SnifferScreen::render(Canvas& canvas) {
 void SnifferScreen::drawHeader(Canvas& canvas) {
 #ifdef ESP32
     const char* title = m_hasTarget ? m_targetSsid : "Packet Sniffer";
-    const char* modeName = getModeName();
-    
-    ui::StatusBar::render(canvas, title, modeName);
-    
-    canvas.drawLine(0, ui::STATUS_BAR_HEIGHT - 1, canvas.width(), ui::STATUS_BAR_HEIGHT - 1, 
+
+    // Capture state shows once, as the status-bar center tag: a steady red "REC" while capturing,
+    // otherwise the capture-mode name in its usual colour so the mode stays glanceable in both
+    // views when idle (slice-0079). The old footer [REC]/[STOP] indicator is gone. When frames are
+    // being dropped under flood (queue full, slice-0078 telemetry), the tag carries the count so a
+    // lossy capture is visible instead of silently incomplete.
+    if (m_capturing) {
+        char recTag[16];
+        if (m_droppedFrames > 0) {
+            snprintf(recTag, sizeof(recTag), "REC !%u", (unsigned)m_droppedFrames);
+        } else {
+            snprintf(recTag, sizeof(recTag), "REC");
+        }
+        ui::StatusBar::render(canvas, title, recTag,
+                              theme::BG_SECONDARY(), theme::TEXT_PRIMARY(), theme::ERROR());
+    } else {
+        ui::StatusBar::render(canvas, title, getModeName());
+    }
+
+    canvas.drawLine(0, ui::STATUS_BAR_HEIGHT - 1, canvas.width(), ui::STATUS_BAR_HEIGHT - 1,
                      theme::BG_TERTIARY());
 #else
     (void)canvas;
@@ -1047,109 +1110,114 @@ void SnifferScreen::drawHeader(Canvas& canvas) {
 
 void SnifferScreen::drawStats(Canvas& canvas) {
 #ifdef ESP32
-    int16_t y = HEADER_HEIGHT + 4;
-    int16_t midX = canvas.width() / 2;
-    
-    canvas.setTextSize(1);
-    
-    canvas.setTextColor(theme::TEXT_SECONDARY());
-    canvas.setCursor(4, y);
-    canvas.print("Packets: ");
-    canvas.setTextColor(theme::TEXT_PRIMARY());
-    canvas.print(m_stats.totalPackets);
-    
-    y += 12;
-    canvas.setTextColor(theme::TEXT_SECONDARY());
-    canvas.setCursor(4, y);
-    canvas.print("Beacons: ");
-    canvas.setTextColor(theme::TEXT_PRIMARY());
-    canvas.print(m_stats.beacons);
-    
-    y += 12;
-    canvas.setTextColor(theme::TEXT_SECONDARY());
-    canvas.setCursor(4, y);
-    canvas.print("Probes:  ");
-    canvas.setTextColor(theme::TEXT_PRIMARY());
-    canvas.print(m_stats.probeRequests);
-    
-    y += 12;
-    canvas.setTextColor(theme::TEXT_SECONDARY());
-    canvas.setCursor(4, y);
-    canvas.print("EAPOL:   ");
-    canvas.setTextColor(m_stats.eapolFrames > 0 ? theme::SUCCESS() : theme::TEXT_PRIMARY());
-    canvas.print(m_stats.eapolFrames);
-    
-    // Right column
-    y = HEADER_HEIGHT + 4;
-    
-    canvas.setTextColor(theme::TEXT_SECONDARY());
-    canvas.setCursor(midX + 4, y);
-    canvas.print("Data:   ");
-    canvas.setTextColor(theme::TEXT_PRIMARY());
-    canvas.print(m_stats.dataFrames);
-    
-    y += 12;
-    canvas.setTextColor(theme::TEXT_SECONDARY());
-    canvas.setCursor(midX + 4, y);
-    canvas.print("Deauth: ");
-    canvas.setTextColor(m_stats.deauthFrames > 0 ? theme::WARNING() : theme::TEXT_PRIMARY());
-    canvas.print(m_stats.deauthFrames);
-    
-    y += 12;
-    if (m_saveToFile && (m_pcapWriter.isOpen() || m_pcapWriter.hasWrittenData())) {
-        canvas.setTextColor(theme::TEXT_SECONDARY());
-        canvas.setCursor(midX + 4, y);
-        canvas.print("File:   ");
-        
-        canvas.setTextColor(m_pcapWriter.hasError() ? theme::ERROR() : theme::TEXT_PRIMARY());
+    const int16_t lineHeight = theme::LIST_ROW_HEIGHT;  // 14px; same pitch as the deauth config list
+
+    // --- Config block: Channel / Hopping / Mode / Save / Start-Stop as selectable rows ---
+    char channelStr[12];
+    if (m_hasTarget) {
+        snprintf(channelStr, sizeof(channelStr), "%d", (int)m_targetChannel);
+    } else if (m_sniffer.isChannelHopping()) {
+        snprintf(channelStr, sizeof(channelStr), "auto");  // sniffer cycles channels; no fixed value
+    } else {
+        snprintf(channelStr, sizeof(channelStr), "%d", (int)m_sniffer.getChannel());
+    }
+
+    // Save row carries the live write status, not just on/off: the running pcap size while writing,
+    // or ERR on a write failure, so the operator can confirm the capture is actually landing on SD
+    // (slice-0079). This is the file-size readout the pre-redesign stats column had.
+    char saveStr[16];
+    if (!m_saveToFile) {
+        snprintf(saveStr, sizeof(saveStr), "off");
+    } else if (m_pcapWriter.hasError()) {
+        snprintf(saveStr, sizeof(saveStr), "on ERR");
+    } else if (m_pcapWriter.isOpen() || m_pcapWriter.hasWrittenData()) {
         uint32_t bytes = m_pcapWriter.getBytesWritten();
         if (bytes < 1024) {
-            canvas.printf("%luB", (unsigned long)bytes);
+            snprintf(saveStr, sizeof(saveStr), "on %luB", (unsigned long)bytes);
         } else if (bytes < 1024 * 1024) {
-            canvas.printf("%.1fKB", bytes / 1024.0f);
+            snprintf(saveStr, sizeof(saveStr), "on %.1fK", bytes / 1024.0f);
         } else {
-            canvas.printf("%.1fMB", bytes / (1024.0f * 1024.0f));
+            snprintf(saveStr, sizeof(saveStr), "on %.1fM", bytes / (1024.0f * 1024.0f));
         }
-        if (m_pcapWriter.hasError()) canvas.print("!");
+    } else {
+        snprintf(saveStr, sizeof(saveStr), "on");
     }
-    
-    y += 12;
-    drawChannelIndicator(canvas, midX + 4, y);
-#else
-    (void)canvas;
-#endif
-}
 
-void SnifferScreen::drawChannelIndicator(Canvas& canvas, int16_t x, int16_t y) {
-#ifdef ESP32
-    canvas.setTextColor(theme::TEXT_SECONDARY());
-    canvas.setCursor(x, y);
-    canvas.print("Ch: ");
-    
-    canvas.setTextColor(theme::ACCENT());
-    canvas.printf("%2d", m_stats.currentChannel);
-    
-    static uint32_t lastPacketTime = 0;
-    static bool blink = false;
-    
-    if (m_capturing) {
-        uint32_t now = millis();
-        if (now - lastPacketTime < 100) {
-            blink = !blink;
-            if (blink) {
-                canvas.fillCircle(x + 40, y + 3, 3, theme::SUCCESS());
+    struct ConfigRow {
+        const char* label;
+        const char* value;
+        bool enabled;
+    };
+    const ConfigRow rows[CONFIG_ROW_COUNT] = {
+        { "Channel",    channelStr,                                     isConfigRowEnabled(CFG_CHANNEL) },
+        { "Hopping",    m_hasTarget ? "fixed"
+                                    : (m_sniffer.isChannelHopping() ? "on" : "off"),
+                                                                        isConfigRowEnabled(CFG_HOPPING) },
+        { "Mode",       getModeName(),                                  true },
+        { "Save to SD", saveStr,                                        true },
+        { m_capturing ? "Stop Capture" : "Start Capture", "",           true },
+    };
+
+    const int16_t configTop = ui::STATUS_BAR_HEIGHT;            // y=20, directly under the status bar
+    const int16_t configH   = CONFIG_ROW_COUNT * lineHeight;    // 70px
+    m_configList.setItemCount(CONFIG_ROW_COUNT);
+    ScrollableList::render(canvas, m_configList, 0, configTop, canvas.width(), configH, lineHeight,
+        [&rows](Canvas& c, int idx, int16_t rowY, bool selected) {
+            const ConfigRow& row = rows[idx];
+            // Disabled rows (Channel/Hopping in fixed-target mode) render greyed; the selected row
+            // reddens to ACCENT like the deauth config idiom; others are primary text (slice-0079).
+            uint16_t color = !row.enabled ? theme::TEXT_DISABLED()
+                           : selected      ? theme::ACCENT()
+                                           : theme::TEXT_PRIMARY();
+            c.setTextColor(color);
+            c.setCursor(4, rowY + theme::LIST_ROW_TEXT_DY);
+            c.print(row.label);
+            if (row.value[0] != '\0') {
+                int16_t valueWidth = (int16_t)strlen(row.value) * 6;
+                c.setCursor(c.width() - valueWidth - 4, rowY + theme::LIST_ROW_TEXT_DY);
+                c.print(row.value);
             }
-        }
-        lastPacketTime = now;
-    }
+        },
+        !footerHints_.hasFocus());
+
+    // --- Separator, then the live counter grid below it ---
+    const int16_t sepY = configTop + configH;                  // y=90
+    canvas.drawLine(0, sepY, canvas.width(), sepY, theme::ACCENT_DARK());
+    drawStatsCounters(canvas, sepY + 4);                       // y=94
 #else
     (void)canvas;
-    (void)x;
-    (void)y;
 #endif
 }
 
+void SnifferScreen::drawStatsCounters(Canvas& canvas, int16_t top) {
+#ifdef ESP32
+    // Two rows x three columns holding all six traffic counts, with full type names on an ~80px
+    // column pitch (the names fit comfortably at typical counts) (slice-0079).
+    const int16_t col[3] = { 4, 84, 164 };
+    const int16_t row2Y  = top + 12;
 
+    canvas.setTextSize(1);
+    auto cell = [&canvas](int16_t x, int16_t y, const char* label, uint32_t n, uint16_t numColor) {
+        canvas.setTextColor(theme::TEXT_SECONDARY());
+        canvas.setCursor(x, y);
+        canvas.print(label);
+        canvas.setTextColor(numColor);
+        canvas.print(n);
+    };
+
+    cell(col[0], top,   "Packets ", m_stats.totalPackets,  theme::TEXT_PRIMARY());
+    cell(col[1], top,   "Beacons ", m_stats.beacons,       theme::TEXT_PRIMARY());
+    cell(col[2], top,   "Probes ",  m_stats.probeRequests, theme::TEXT_PRIMARY());
+    cell(col[0], row2Y, "Data ",    m_stats.dataFrames,    theme::TEXT_PRIMARY());
+    cell(col[1], row2Y, "EAPOL ",   m_stats.eapolFrames,
+         m_stats.eapolFrames > 0 ? theme::SUCCESS() : theme::TEXT_PRIMARY());
+    cell(col[2], row2Y, "Deauth ",  m_stats.deauthFrames,
+         m_stats.deauthFrames > 0 ? theme::WARNING() : theme::TEXT_PRIMARY());
+#else
+    (void)canvas;
+    (void)top;
+#endif
+}
 
 void SnifferScreen::drawPacketLog(Canvas& canvas) {
 #ifdef ESP32

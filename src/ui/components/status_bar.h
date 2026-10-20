@@ -326,7 +326,8 @@ public:
     static void render(Display& display, const char* title,
                        const char* centerContent = nullptr,
                        uint16_t bgColor = theme::BG_SECONDARY(),
-                       uint16_t textColor = theme::TEXT_PRIMARY()) {
+                       uint16_t textColor = theme::TEXT_PRIMARY(),
+                       uint16_t centerColor = theme::TEXT_SECONDARY()) {
         int16_t screenWidth = display.width();
         
         // Background
@@ -354,7 +355,7 @@ public:
             int16_t contentX = xPos - 8;
             int16_t contentLen = strlen(centerContent) * 6;
             
-            display.setTextColor(theme::TEXT_SECONDARY());
+            display.setTextColor(centerColor);
             display.setCursor(contentX - contentLen, TEXT_Y);
             display.print(centerContent);
         }
