@@ -118,8 +118,9 @@ private:
 
     // Config options
     static constexpr int CONFIG_OPTION_COUNT = 7;
-    int configSelection_ = 0;
-    int configScrollOffset_ = 0;
+    // Owns the config-row selection + scroll window + wrap; renderConfig feeds it the live viewport
+    // each frame, replacing the old manual configSelection_ + configScrollOffset_ (slice-0091).
+    ListScrollModel configList_;
     
     // Config values
     uint8_t configMode_ = 0;           // 0=Portal, 1=Sniffer

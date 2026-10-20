@@ -85,7 +85,8 @@ private:
     // Shared models own selection + scroll window + wrap; the draw fns feed them the live
     // viewport each frame so the two can't drift (slice-0062/0066).
     ListScrollModel m_actionList; // CONNECTED OS-command menu
-    int m_menuSelection; // For IDLE config menu (fixed 4 rows; not a scrolling list)
+    static constexpr int IDLE_OPTION_COUNT = 4; // IDLE config rows: Name, Type, Target, Start
+    ListScrollModel m_configList; // IDLE config-row selection + scroll window + wrap (slice-0091)
     TargetOS m_targetOs;
     
     char m_sessionName[33];

@@ -24,7 +24,6 @@ KarmaScreen::KarmaScreen()
     , probeScrollPos_(0)
     , credentialScrollPos_(0)
     , trafficScrollPos_(0)
-    , configSelection_(0)
     , configMode_(1)
     , configPortal_(0)
     , configLogSD_(true)
@@ -40,8 +39,8 @@ void KarmaScreen::show() {
     shouldExit_ = false;
     needsRedraw_ = true;
     screenState_ = KarmaScreenState::CONFIG;
-    configSelection_ = 0;
-    
+    configList_.setItemCount(0);  // reset selection + scroll to the top
+
     footerHints_.setHints({}); // Will be set dynamically in render
     footerHints_.setFocus(false);
     
@@ -266,7 +265,7 @@ bool KarmaScreen::handleInput(char key) {
         case ',':
         case '<':
             if (screenState_ == KarmaScreenState::CONFIG) {
-                switch (configSelection_) {
+                switch (configList_.selectedIndex()) {
                     case 0: if (configMode_ > 0) configMode_--; break;
                     case 1: configPortal_ = (configPortal_ == 0) ? 1 : 0; break;
                     case 2: configLogSD_ = false; break;
@@ -302,7 +301,7 @@ bool KarmaScreen::handleInput(char key) {
         case '/':
         case '>':
             if (screenState_ == KarmaScreenState::CONFIG) {
-                switch (configSelection_) {
+                switch (configList_.selectedIndex()) {
                     case 0: if (configMode_ < 2) configMode_++; break;
                     case 1: configPortal_ = (configPortal_ == 0) ? 1 : 0; break;
                     case 2: configLogSD_ = true; break;
@@ -330,7 +329,8 @@ bool KarmaScreen::handleInput(char key) {
             
         case ';':
             if (screenState_ == KarmaScreenState::CONFIG) {
-                if (configSelection_ > 0) configSelection_--;
+                configList_.setItemCount(CONFIG_OPTION_COUNT);
+                configList_.moveUp();  // wraps to last; model keeps the selection on screen
                 return true;
             }
             if (screenState_ == KarmaScreenState::PROBES && probeScrollPos_ > 0) {
@@ -357,7 +357,8 @@ bool KarmaScreen::handleInput(char key) {
             
         case '.':
             if (screenState_ == KarmaScreenState::CONFIG) {
-                if (configSelection_ < CONFIG_OPTION_COUNT - 1) configSelection_++;
+                configList_.setItemCount(CONFIG_OPTION_COUNT);
+                configList_.moveDown();  // wraps to first; model keeps the selection on screen
                 return true;
             }
             if (screenState_ == KarmaScreenState::PROBES) {
@@ -393,7 +394,7 @@ bool KarmaScreen::handleInput(char key) {
             
         case '\n':
         case '\r':
-            if (screenState_ == KarmaScreenState::CONFIG && configSelection_ == CONFIG_OPTION_COUNT - 1) {
+            if (screenState_ == KarmaScreenState::CONFIG && configList_.selectedIndex() == CONFIG_OPTION_COUNT - 1) {
                 return startWithConfig();
             }
             if (screenState_ == KarmaScreenState::CLIENTS) {
@@ -489,49 +490,39 @@ void KarmaScreen::renderConfig(Canvas& canvas) {
     
     ui::StatusBar::render(canvas, "Karma AP Config");
     
-    int16_t y = 28;
-    const int lineHeight = 16;
-    int16_t screenWidth = canvas.width();
-    
+    const int16_t listTop = 28;
+    const int16_t availableHeight = config::SCREEN_HEIGHT - listTop - ui::FOOTER_HEIGHT - 4;
+
     const char* optionLabels[] = {
         "Mode:",
         "Portal:",
         "Log SD:"
     };
 
-    for (int i = 0; i < CONFIG_OPTION_COUNT; i++) {
-        bool selected = (i == configSelection_);
+    // The shared component owns the viewport, the selection band and the thumb; this callback
+    // paints one config row (the terminal start row is the shared ActionButton, slice-0089).
+    configList_.setItemCount(CONFIG_OPTION_COUNT);
+    ScrollableList::render(canvas, configList_, 0, listTop, canvas.width(), availableHeight,
+        theme::LIST_ROW_HEIGHT, [this, &optionLabels](Canvas& c, int idx, int16_t rowY, bool selected) {
+            if (idx == CONFIG_OPTION_COUNT - 1) {
+                ui::ActionButton::render(c, rowY, "START KARMA", selected);
+                return;
+            }
+            c.setTextColor(selected ? theme::ACCENT() : theme::TEXT_PRIMARY());
+            c.setCursor(4, rowY + theme::LIST_ROW_TEXT_DY);
+            c.print(optionLabels[idx]);
 
-        if (i == CONFIG_OPTION_COUNT - 1) { // Terminal start row: shared green ActionButton (slice-0089)
-            ui::ActionButton::render(canvas, y - 2, "START KARMA", selected);
-            y += lineHeight;
-            continue;
-        }
+            char valueStr[24] = "";
+            switch (idx) {
+                case 0: strncpy(valueStr, getModeStr(), sizeof(valueStr)); break;
+                case 1: strncpy(valueStr, getPortalStr(), sizeof(valueStr)); break;
+                case 2: strncpy(valueStr, configLogSD_ ? "Yes" : "No", sizeof(valueStr)); break;
+            }
+            c.setCursor(75, rowY + theme::LIST_ROW_TEXT_DY);
+            c.print(valueStr);
+        },
+        !footerHints_.hasFocus());
 
-        if (selected) {
-            canvas.fillRect(0, y - 2, screenWidth, lineHeight, theme::BG_SECONDARY());
-            canvas.setTextColor(theme::ACCENT());
-        } else {
-            canvas.setTextColor(theme::TEXT_PRIMARY());
-        }
-
-        canvas.setCursor(4, y);
-        canvas.print(optionLabels[i]);
-
-        char valueStr[24] = "";
-        switch (i) {
-            case 0: strncpy(valueStr, getModeStr(), sizeof(valueStr)); break;
-            case 1: strncpy(valueStr, getPortalStr(), sizeof(valueStr)); break;
-            case 2: strncpy(valueStr, configLogSD_ ? "Yes" : "No", sizeof(valueStr)); break;
-        }
-
-        int valueX = 75;
-        canvas.setCursor(valueX, y);
-        canvas.print(valueStr);
-
-        y += lineHeight;
-    }
-    
     // Footer hints
     static char modeBuf[32];
     snprintf(modeBuf, sizeof(modeBuf), "Mode - %s", getModeStr());

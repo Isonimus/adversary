@@ -28,9 +28,8 @@ void EvilTwinScreen::show() {
     shouldExit_ = false;
     needsRedraw_ = true;
     screenState_ = EvilTwinScreenState::CONFIG;
-    configSelection_ = 0;
-    configScrollOffset_ = 0;
-    
+    configList_.setItemCount(0);  // reset selection + scroll to the top
+
     footerHints_.setHints({}); // Will be set dynamically in render
     footerHints_.setFocus(false);
     
@@ -279,7 +278,7 @@ bool EvilTwinScreen::handleInput(char key) {
         case ',':
         case '<':
             if (screenState_ == EvilTwinScreenState::CONFIG) {
-                switch (configSelection_) {
+                switch (configList_.selectedIndex()) {
                     case 0: if (configMode_ > 0) configMode_--; break;
                     case 1: configPortal_ = 0; break;
                     case 2: 
@@ -297,7 +296,7 @@ bool EvilTwinScreen::handleInput(char key) {
         case '/':
         case '>':
             if (screenState_ == EvilTwinScreenState::CONFIG) {
-                switch (configSelection_) {
+                switch (configList_.selectedIndex()) {
                     case 0: if (configMode_ < 1) configMode_++; break;
                     case 1: configPortal_ = (configPortal_ == 0) ? 1 : 0; break;
                     case 2: {
@@ -387,12 +386,8 @@ bool EvilTwinScreen::handleInput(char key) {
             
         case ';':  // Up
             if (screenState_ == EvilTwinScreenState::CONFIG) {
-                if (configSelection_ > 0) {
-                    configSelection_--;
-                    if (configSelection_ < configScrollOffset_) {
-                        configScrollOffset_ = configSelection_;
-                    }
-                }
+                configList_.setItemCount(CONFIG_OPTION_COUNT);
+                configList_.moveUp();  // wraps to last; model keeps the selection on screen
                 return true;
             }
             if (screenState_ == EvilTwinScreenState::CREDENTIALS && credentialScrollPos_ > 0) {
@@ -408,9 +403,8 @@ bool EvilTwinScreen::handleInput(char key) {
 
         case '.':  // Down
             if (screenState_ == EvilTwinScreenState::CONFIG) {
-                if (configSelection_ < CONFIG_OPTION_COUNT - 1) {
-                    configSelection_++;
-                }
+                configList_.setItemCount(CONFIG_OPTION_COUNT);
+                configList_.moveDown();  // wraps to first; model keeps the selection on screen
                 return true;
             }
             if (screenState_ == EvilTwinScreenState::CREDENTIALS) {
@@ -428,8 +422,8 @@ bool EvilTwinScreen::handleInput(char key) {
             
         case '\n':
         case '\r':
-            if (screenState_ == EvilTwinScreenState::CONFIG && 
-                configSelection_ == CONFIG_OPTION_COUNT - 1) {
+            if (screenState_ == EvilTwinScreenState::CONFIG &&
+                configList_.selectedIndex() == CONFIG_OPTION_COUNT - 1) {
                 return startWithConfig();
             }
             break;
@@ -481,8 +475,7 @@ void EvilTwinScreen::renderConfig(Canvas& canvas) {
     
     int16_t y = 26;
     const int lineHeight = 15;
-    int16_t screenWidth = canvas.width();
-    
+
     // Target info
     canvas.setTextColor(theme::TEXT_SECONDARY());
     canvas.setCursor(4, y);
@@ -499,85 +492,56 @@ void EvilTwinScreen::renderConfig(Canvas& canvas) {
     }
     y += lineHeight;
     
-    // Calculate visible items
-    const int16_t footerHeight = 20;
-    const int16_t headerHeight = 26 + lineHeight;
-    const int16_t availableHeight = config::SCREEN_HEIGHT - headerHeight - footerHeight - 4;
-    const int maxVisible = availableHeight / lineHeight;
-    
-    // Update scroll offset
-    if (configSelection_ >= configScrollOffset_ + maxVisible) {
-        configScrollOffset_ = configSelection_ - maxVisible + 1;
-    }
-    
+    const int16_t listTop = y;  // immediately below the Target: header line
+    const int16_t availableHeight = config::SCREEN_HEIGHT - listTop - ui::FOOTER_HEIGHT - 4;
+
     const char* optionLabels[] = {
         "Mode:", "Portal:", "Fixed SSID:", "Deauth:", "Interval:", "Log SD:"
     };
-    
-    // Draw scroll indicator if needed
-    if (configScrollOffset_ > 0) {
-        canvas.setTextColor(theme::ACCENT());
-        canvas.setCursor(config::SCREEN_WIDTH - 10, y - 2);
-        canvas.print("^");
-    }
-    
-    for (int i = configScrollOffset_; i < CONFIG_OPTION_COUNT && i < configScrollOffset_ + maxVisible; i++) {
-        bool selected = (i == configSelection_);
 
-        if (i == CONFIG_OPTION_COUNT - 1) { // Terminal start row: shared green ActionButton (slice-0089)
-            ui::ActionButton::render(canvas, y - 2, "START TWIN", selected);
-            y += lineHeight;
-            continue;
-        }
+    // The shared component owns scroll, the proportional thumb, the selection band and keeping the
+    // cursor on screen (replaces the hand-rolled offset + the ^/v glyphs); the callback paints one
+    // row (the terminal start row is the shared ActionButton, slice-0089).
+    configList_.setItemCount(CONFIG_OPTION_COUNT);
+    ScrollableList::render(canvas, configList_, 0, listTop, canvas.width(), availableHeight,
+        theme::LIST_ROW_HEIGHT, [this, &optionLabels](Canvas& c, int idx, int16_t rowY, bool selected) {
+            if (idx == CONFIG_OPTION_COUNT - 1) {
+                ui::ActionButton::render(c, rowY, "START TWIN", selected);
+                return;
+            }
+            c.setTextColor(selected ? theme::ACCENT() : theme::TEXT_PRIMARY());
+            c.setCursor(4, rowY + theme::LIST_ROW_TEXT_DY);
+            c.print(optionLabels[idx]);
 
-        if (selected) {
-            canvas.fillRect(0, y - 2, screenWidth, lineHeight, theme::BG_SECONDARY());
-            canvas.setTextColor(theme::ACCENT());
-        } else {
-            canvas.setTextColor(theme::TEXT_PRIMARY());
-        }
-
-        canvas.setCursor(4, y);
-        canvas.print(optionLabels[i]);
-
-        char valueStr[24] = "";
-        switch (i) {
-            case 0: strncpy(valueStr, getModeStr(), sizeof(valueStr)); break;
-            case 1: 
-                strncpy(valueStr, configMode_ == 0 ? getPortalStr() : "---", sizeof(valueStr));
-                break;
-            case 2: 
-                if (configUseFixedSSID_ && configFixedSSID_[0]) {
-                    if (strlen(configFixedSSID_) > 10) {
-                        strncpy(valueStr, configFixedSSID_, 7);
-                        strcpy(valueStr + 7, "...");
+            char valueStr[24] = "";
+            switch (idx) {
+                case 0: strncpy(valueStr, getModeStr(), sizeof(valueStr)); break;
+                case 1:
+                    strncpy(valueStr, configMode_ == 0 ? getPortalStr() : "---", sizeof(valueStr));
+                    break;
+                case 2:
+                    if (configUseFixedSSID_ && configFixedSSID_[0]) {
+                        if (strlen(configFixedSSID_) > 10) {
+                            strncpy(valueStr, configFixedSSID_, 7);
+                            strcpy(valueStr + 7, "...");
+                        } else {
+                            strncpy(valueStr, configFixedSSID_, sizeof(valueStr));
+                        }
                     } else {
-                        strncpy(valueStr, configFixedSSID_, sizeof(valueStr));
+                        strncpy(valueStr, configUseFixedSSID_ ? "[Edit]" : "OFF", sizeof(valueStr));
                     }
-                } else {
-                    strncpy(valueStr, configUseFixedSSID_ ? "[Edit]" : "OFF", sizeof(valueStr));
-                }
-                break;
-            case 3: strncpy(valueStr, configDeauth_ ? "ON" : "OFF", sizeof(valueStr)); break;
-            case 4: 
-                strncpy(valueStr, configDeauth_ ? getDeauthIntervalStr() : "---", sizeof(valueStr));
-                break;
-            case 5: strncpy(valueStr, configLogSD_ ? "Yes" : "No", sizeof(valueStr)); break;
-        }
-        
-        canvas.setCursor(80, y);
-        canvas.print(valueStr);
+                    break;
+                case 3: strncpy(valueStr, configDeauth_ ? "ON" : "OFF", sizeof(valueStr)); break;
+                case 4:
+                    strncpy(valueStr, configDeauth_ ? getDeauthIntervalStr() : "---", sizeof(valueStr));
+                    break;
+                case 5: strncpy(valueStr, configLogSD_ ? "Yes" : "No", sizeof(valueStr)); break;
+            }
+            c.setCursor(80, rowY + theme::LIST_ROW_TEXT_DY);
+            c.print(valueStr);
+        },
+        !footerHints_.hasFocus());
 
-        y += lineHeight;
-    }
-    
-    // Draw scroll down indicator
-    if (configScrollOffset_ + maxVisible < CONFIG_OPTION_COUNT) {
-        canvas.setTextColor(theme::ACCENT());
-        canvas.setCursor(config::SCREEN_WIDTH - 10, y - lineHeight + 2);
-        canvas.print("v");
-    }
-    
     // Footer hints
     static char modeBuf[32];
     snprintf(modeBuf, sizeof(modeBuf), "Mode - %s", getModeStr());
@@ -586,7 +550,7 @@ void EvilTwinScreen::renderConfig(Canvas& canvas) {
         {'M', modeBuf, true},
         {'P', "Portal", configMode_ == 0},
         {'S', "SSID", true},
-        {'\r', "Start", configSelection_ == CONFIG_OPTION_COUNT - 1}
+        {'\r', "Start", configList_.selectedIndex() == CONFIG_OPTION_COUNT - 1}
     });
     footerHints_.render(canvas);
 #else

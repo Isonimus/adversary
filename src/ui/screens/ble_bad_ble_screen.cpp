@@ -40,7 +40,7 @@ void BleBadBleScreen::show() {
     m_state = State::IDLE;
     m_actionList.setItemCount(ACTION_ITEM_COUNT); // Connected menu
     m_actionList.setSelectedIndex(0);
-    m_menuSelection = 0;   // For Idle Config
+    m_configList.setItemCount(0);   // For Idle Config: reset selection + scroll to the top
     
     // Load Defaults for Session
     auto& settings = SettingsManager::getInstance().get();
@@ -150,60 +150,55 @@ void BleBadBleScreen::render(Canvas& canvas) {
 void BleBadBleScreen::drawIdle(Canvas& canvas) {
     ui::StatusBar::render(canvas, "BadBLE", "CONFIG");
     
-    int y = 35;
-    int lineHeight = 20;
-    
+    const int16_t listTop = 35;
+    const int16_t availableHeight = config::SCREEN_HEIGHT - listTop - ui::FOOTER_HEIGHT - 4;
+
     const char* labels[] = {
         "Name:",
         "Type:",
         "Target:"
     };
 
-    for (int i = 0; i < 4; i++) {
-        if (i == 3) { // Terminal start row: shared green ActionButton (slice-0089)
-            ui::ActionButton::render(canvas, y - 2, "START ATTACK", i == m_menuSelection);
-            y += lineHeight;
-            continue;
-        }
+    // The shared component owns the viewport, the selection band and the thumb; this callback
+    // paints one config row, keeping this screen's value X and two-tone value colour verbatim
+    // (the terminal start row is the shared ActionButton, slice-0089).
+    m_configList.setItemCount(IDLE_OPTION_COUNT);
+    ScrollableList::render(canvas, m_configList, 0, listTop, canvas.width(), availableHeight,
+        theme::LIST_ROW_HEIGHT, [this, &labels](Canvas& c, int idx, int16_t rowY, bool selected) {
+            if (idx == IDLE_OPTION_COUNT - 1) {
+                ui::ActionButton::render(c, rowY, "START ATTACK", selected);
+                return;
+            }
+            c.setTextColor(selected ? theme::ACCENT() : theme::TEXT_PRIMARY());
+            c.setCursor(10, rowY + theme::LIST_ROW_TEXT_DY);
+            c.print(labels[idx]);
 
-        if (i == m_menuSelection) {
-            canvas.fillRect(0, y - 2, config::SCREEN_WIDTH, lineHeight, theme::BG_SECONDARY());
-            canvas.setTextColor(theme::ACCENT());
-        } else {
-            canvas.setTextColor(theme::TEXT_PRIMARY());
-        }
-
-        canvas.setCursor(10, y + 2);
-        canvas.print(labels[i]);
-
-        // Draw Value
-        canvas.setCursor(80, y + 2);
-        if (i == m_menuSelection) canvas.setTextColor(theme::TEXT_PRIMARY());
-        else canvas.setTextColor(theme::TEXT_SECONDARY());
-
-        switch(i) {
-            case 0: // Name
-                canvas.print(m_sessionName);
-                break;
-            case 1: // Type
-                switch(m_appearance) {
-                    case 0x03C1: canvas.print("< Keyboard >"); break;
-                    case 0x03C2: canvas.print("< Mouse >"); break;
-                    case 0x03C3: canvas.print("< Joystick >"); break;
-                    case 0x03C4: canvas.print("< Gamepad >"); break;
-                    default: canvas.print("< Unknown >"); break;
-                }
-                break;
-            case 2: // Target
-                switch(m_targetOs) {
-                    case TargetOS::LINUX:   canvas.print("< LINUX >"); break;
-                    case TargetOS::WINDOWS: canvas.print("< WINDOWS >"); break;
-                    case TargetOS::MACOS:   canvas.print("< MACOS >"); break;
-                }
-                break;
-        }
-        y += lineHeight;
-    }
+            // Value keeps this screen's two-tone colour: selected row -> primary, else secondary.
+            c.setCursor(80, rowY + theme::LIST_ROW_TEXT_DY);
+            c.setTextColor(selected ? theme::TEXT_PRIMARY() : theme::TEXT_SECONDARY());
+            switch (idx) {
+                case 0: // Name
+                    c.print(m_sessionName);
+                    break;
+                case 1: // Type
+                    switch (m_appearance) {
+                        case 0x03C1: c.print("< Keyboard >"); break;
+                        case 0x03C2: c.print("< Mouse >"); break;
+                        case 0x03C3: c.print("< Joystick >"); break;
+                        case 0x03C4: c.print("< Gamepad >"); break;
+                        default: c.print("< Unknown >"); break;
+                    }
+                    break;
+                case 2: // Target
+                    switch (m_targetOs) {
+                        case TargetOS::LINUX:   c.print("< LINUX >"); break;
+                        case TargetOS::WINDOWS: c.print("< WINDOWS >"); break;
+                        case TargetOS::MACOS:   c.print("< MACOS >"); break;
+                    }
+                    break;
+            }
+        },
+        !footerHints_.hasFocus());
 }
 
 // Reusing the "Standard" attack visualization from BleAppleAttackScreen
@@ -499,37 +494,39 @@ bool BleBadBleScreen::handleInput(char key) {
     if (m_state == State::IDLE) {
         switch (key) {
             case ';': // UP
-                if (m_menuSelection > 0) m_menuSelection--;
+                m_configList.setItemCount(IDLE_OPTION_COUNT);
+                m_configList.moveUp();  // wraps to last; model keeps the selection on screen
                 return true;
             case '.': // DOWN
-                if (m_menuSelection < 3) m_menuSelection++;
+                m_configList.setItemCount(IDLE_OPTION_COUNT);
+                m_configList.moveDown();  // wraps to first; model keeps the selection on screen
                 return true;
             case ',': // LEFT
-                if (m_menuSelection == 1) { // Appearance
+                if (m_configList.selectedIndex() == 1) { // Appearance
                     if (m_appearance == 0x03C1) m_appearance = 0x03C4; // Key -> Gamepad
                     else if (m_appearance == 0x03C4) m_appearance = 0x03C3;
                     else if (m_appearance == 0x03C3) m_appearance = 0x03C2;
                     else if (m_appearance == 0x03C2) m_appearance = 0x03C1;
-                } else if (m_menuSelection == 2) { // OS
+                } else if (m_configList.selectedIndex() == 2) { // OS
                     int os = (int)m_targetOs - 1;
                     if (os < 0) os = 2;
                     m_targetOs = (TargetOS)os;
                 }
                 return true;
             case '/': // RIGHT
-                if (m_menuSelection == 1) { // Appearance
+                if (m_configList.selectedIndex() == 1) { // Appearance
                     if (m_appearance == 0x03C1) m_appearance = 0x03C2; // Key -> Mouse
                     else if (m_appearance == 0x03C2) m_appearance = 0x03C3;
                     else if (m_appearance == 0x03C3) m_appearance = 0x03C4;
                     else if (m_appearance == 0x03C4) m_appearance = 0x03C1;
-                } else if (m_menuSelection == 2) { // OS
+                } else if (m_configList.selectedIndex() == 2) { // OS
                     int os = (int)m_targetOs + 1;
                     if (os > 2) os = 0;
                     m_targetOs = (TargetOS)os;
                 }
                 return true;
             case '\n': // ENTER
-                if (m_menuSelection == 0) { // Name
+                if (m_configList.selectedIndex() == 0) { // Name
                     m_namePopup.show("Session Name", m_sessionName, false, 31);
                     m_namePopup.setOnSubmit([this](const char* text) {
                         strncpy(m_sessionName, text, 32);
@@ -539,7 +536,7 @@ bool BleBadBleScreen::handleInput(char key) {
                     m_namePopup.setOnCancel([this]() {
                         m_needsRedraw = true; 
                     });
-                } else if (m_menuSelection == 3) { // Start
+                } else if (m_configList.selectedIndex() == 3) { // Start
                     startAdvertising();
                 }
                 return true;
