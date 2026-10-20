@@ -5,6 +5,7 @@
 
 #include "rfid_screen.h"
 #include "ui/theme.h"
+#include "ui/components/action_button.h"
 #include "ui/components/status_bar.h"
 #include "ui/components/toast_manager.h"
 #include "utils/log.h"
@@ -403,16 +404,9 @@ void RfidScreen::drawAuditPrompt(Canvas& canvas) {
     canvas.drawFastHLine(x, y, screenW - 16, theme::BG_SECONDARY());
     y += 8;
     
-    // Option 1: Start Audit button (selectable)
+    // Option 1: Start Audit button (selectable) - shared ActionButton (ADR-0087)
     bool opt1Selected = (m_promptSelection == 1);
-    if (opt1Selected) {
-        canvas.fillRect(0, y - 1, screenW, rowH, theme::SUCCESS());
-        canvas.setTextColor(theme::TEXT_PRIMARY());
-    } else {
-        canvas.setTextColor(theme::SUCCESS());
-    }
-    canvas.setCursor(x, y);
-    canvas.print(">> START AUDIT <<");
+    ui::ActionButton::render(canvas, y, "START AUDIT", opt1Selected);
     y += rowH + 4;
     
     // Estimated time at bottom
@@ -1392,16 +1386,9 @@ void RfidScreen::drawWritePrompt(Canvas& canvas) {
     canvas.print("Block 0; fails on normal cards");
     y += rowH + 4;
 
-    // Option 1: start.
+    // Option 1: start. Shared ActionButton (ADR-0087).
     bool startSelected = (m_writePromptSelection == 1);
-    if (startSelected) {
-        canvas.fillRect(0, y - 1, screenW, rowH, theme::SUCCESS());
-        canvas.setTextColor(theme::TEXT_PRIMARY());
-    } else {
-        canvas.setTextColor(theme::SUCCESS());
-    }
-    canvas.setCursor(x, y);
-    canvas.print(">> START WRITE <<");
+    ui::ActionButton::render(canvas, y, "START WRITE", startSelected);
 }
 
 void RfidScreen::drawWriting(Canvas& canvas) {

@@ -12,6 +12,7 @@
 #include "modules/wifi/station_scanner.h"
 #include "modules/gps/gps_manager.h"
 #include "hal/expansion/expansion_cap.h"
+#include "ui/components/action_button.h"
 #include "ui/components/status_bar.h"
 #include "ui/components/toast_manager.h"
 #include "ui/screen_manager.h"
@@ -1094,16 +1095,9 @@ void HandshakeScreen::drawConfig(Canvas& canvas) {
         canvas.print("handshakes automatically");
         y += 20;
         
-        // Start button
+        // Start button - shared ActionButton (ADR-0087)
         bool startSelected = (configSelection_ == 1);
-        if (startSelected) {
-            canvas.fillRect(0, y - 1, screenWidth, 14, theme::SUCCESS());
-            canvas.setTextColor(theme::TEXT_PRIMARY());
-        } else {
-            canvas.setTextColor(theme::SUCCESS());
-        }
-        canvas.setCursor(4, y);
-        canvas.print(">> START AUTO HUNT <<");
+        ui::ActionButton::render(canvas, y, "START AUTO HUNT", startSelected);
     } else {
         // Manual mode - show config options
         const char* labels[] = {

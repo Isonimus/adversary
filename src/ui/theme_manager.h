@@ -426,6 +426,10 @@ constexpr uint8_t LIST_ROW_HEIGHT = 14;  // single-line list row; see slice-0064
 // both dimensions so a change to either re-centres every single-line row with no call-site edit
 // (slice-0074).
 constexpr uint8_t FONT_CELL_HEIGHT = 8;
+// Horizontal twin of FONT_CELL_HEIGHT: the default 6x8 GFX glyph advances 6px per character at
+// text size 1, so a size-1 string is strlen * FONT_CELL_WIDTH wide. Use this to centre or
+// right-align text instead of a bare `* 6` (slice-0088).
+constexpr uint8_t FONT_CELL_WIDTH = 6;
 constexpr int16_t LIST_ROW_TEXT_DY = (LIST_ROW_HEIGHT - FONT_CELL_HEIGHT) / 2;
 constexpr uint8_t LIST_ITEM_HEIGHT = 20;
 constexpr uint8_t BUTTON_HEIGHT = 24;
