@@ -17,6 +17,7 @@ void SavedNetworksScreen::show() {
     visible_ = true;
     shouldExit_ = false;
     needsRedraw_ = true;
+    confirmDialog_.hide();
     list_.setItemCount((int)SettingsManager::getInstance().getSavedCredentials().size());
     list_.setSelectedIndex(0);
 }
@@ -93,10 +94,18 @@ void SavedNetworksScreen::render(Canvas& canvas) {
     if (actionMenu_.isVisible()) {
         actionMenu_.render(canvas);
     }
+    // Confirm overlay floats above everything (ADR-0085).
+    confirmDialog_.render(canvas);
 #endif
 }
 
 bool SavedNetworksScreen::handleInput(char key) {
+    // The confirm overlay, when up, owns all input (ADR-0085).
+    if (confirmDialog_.isVisible()) {
+        needsRedraw_ = true;
+        return confirmDialog_.handleInput(key);
+    }
+
     if (actionMenu_.isVisible()) {
         if (actionMenu_.handleInput(key)) {
             needsRedraw_ = true;
@@ -181,13 +190,33 @@ void SavedNetworksScreen::handleAction(char action) {
             break;
         case 'F':
         case 'f':
-            LOG_I("SAVEDNET", "Forgetting %s", selectedCred_.ssid);
-            SettingsManager::getInstance().removeWiFiCredential(list_.selectedIndex());
-            SettingsManager::getInstance().save();
-            // The model re-clamps the selection onto the now-shorter list.
-            list_.setItemCount((int)SettingsManager::getInstance().getSavedCredentials().size());
+            showForgetConfirm();  // gate the removal behind an explicit Confirm (ADR-0085)
             break;
     }
+    needsRedraw_ = true;
+}
+
+void SavedNetworksScreen::showForgetConfirm() {
+    const auto& creds = SettingsManager::getInstance().getSavedCredentials();
+    int sel = list_.selectedIndex();
+    if (sel < 0 || sel >= (int)creds.size()) return;
+
+    confirmDialog_.setQuestion("Forget this network?");
+    confirmDialog_.setSeverity(ui::ConfirmDialog::Severity::Destructive);
+    confirmDialog_.clearDetails();
+    confirmDialog_.addDetail(selectedCred_.ssid);
+    confirmDialog_.setOnConfirm([this]() { forgetSelected(); });
+    confirmDialog_.setOnCancel([this]() { needsRedraw_ = true; });
+    confirmDialog_.show();
+    needsRedraw_ = true;
+}
+
+void SavedNetworksScreen::forgetSelected() {
+    LOG_I("SAVEDNET", "Forgetting %s", selectedCred_.ssid);
+    SettingsManager::getInstance().removeWiFiCredential(list_.selectedIndex());
+    SettingsManager::getInstance().save();
+    // The model re-clamps the selection onto the now-shorter list.
+    list_.setItemCount((int)SettingsManager::getInstance().getSavedCredentials().size());
     needsRedraw_ = true;
 }
 

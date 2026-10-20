@@ -4,6 +4,7 @@
 #include "ui/components/footer_hints.h"
 #include "ui/components/list_scroll_model.h"
 #include "ui/components/scrollable_list.h"
+#include "ui/components/confirm_dialog.h"
 #include "modules/badusb/ducky_interpreter.h"
 #include "modules/badusb/script_entry.h"
 #include <vector>
@@ -44,6 +45,7 @@ private:
     };
 
     void drawConfirm(Canvas& canvas);
+    void showHidConfirm();  // configure + raise the shared confirm overlay (ADR-0085; Cardputer)
     void drawActivating(Canvas& canvas);
     void drawIdle(Canvas& canvas);
     void drawRunning(Canvas& canvas);
@@ -69,6 +71,7 @@ private:
     std::vector<ScriptEntry> m_scripts;
     DuckyInterpreter m_interp;
     ui::FooterHints  m_footer;
+    ui::ConfirmDialog m_confirmDialog;  // shared HID-enable confirm overlay (ADR-0085)
     uint32_t         m_lastUpdate;
 };
 

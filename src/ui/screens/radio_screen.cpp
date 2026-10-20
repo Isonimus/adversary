@@ -181,6 +181,7 @@ void RadioScreen::show() {
     radioSelection_ = 0;
     mainList_.setItemCount(0);
     captureStage_ = 0;
+    confirmDialog_.hide();
 
     available_ = (hal::resolvedExpansionCap() == hal::ExpansionCap::MultiRadio) &&
                  (SDManager::getInstance().spiBus() != nullptr);
@@ -212,10 +213,6 @@ void RadioScreen::updateFooterHints() {
         case MenuState::SIGNAL_ACTION:
             footerHints_.setHints({{' ', "Focus"}, {';', "Nav"}, {'\n', "Select"}, {'`', "Back"}});
             break;
-        case MenuState::REPLAY_CONFIRM:
-        case MenuState::DELETE_CONFIRM:
-            footerHints_.setHints({{'Y', "Yes"}, {'N', "No"}, {'`', "Cancel"}});
-            break;
         case MenuState::CAPTURE_REVIEW:
             footerHints_.setHints({{'S', "Save"}, {'`', "Discard"}});
             break;
@@ -227,9 +224,6 @@ void RadioScreen::updateFooterHints() {
             break;
         case MenuState::JAM_SELECT:
             footerHints_.setHints({{' ', "Focus"}, {';', "Nav"}, {'\n', "Select"}, {'`', "Back"}});
-            break;
-        case MenuState::JAM_CONFIRM:
-            footerHints_.setHints({{'Y', "Arm"}, {'N', "No"}, {'`', "Cancel"}});
             break;
         case MenuState::JAM_ACTIVE:
             footerHints_.setHints({});  // hold-to-jam owns the input; SPACE = emit
@@ -526,6 +520,56 @@ void RadioScreen::deleteSelected() {
 #endif
 }
 
+void RadioScreen::showReplayConfirm() {
+    const int sel = fileList_.selectedIndex();
+    if (sel < 0 || sel >= static_cast<int>(signals_.size())) return;
+    confirmDialog_.setQuestion("Transmit this signal?");
+    confirmDialog_.setSeverity(ui::ConfirmDialog::Severity::Warning);
+    confirmDialog_.clearDetails();
+    confirmDialog_.addDetail(signals_[sel].name);
+    confirmDialog_.setOnConfirm([this]() { replaySelected(); });
+    confirmDialog_.setOnCancel([this]() { needsRedraw_ = true; });
+    confirmDialog_.show();
+}
+
+void RadioScreen::showDeleteConfirm() {
+    const int sel = fileList_.selectedIndex();
+    if (sel < 0 || sel >= static_cast<int>(signals_.size())) return;
+    confirmDialog_.setQuestion("Delete this signal?");
+    confirmDialog_.setSeverity(ui::ConfirmDialog::Severity::Destructive);
+    confirmDialog_.clearDetails();
+    confirmDialog_.addDetail(signals_[sel].name);
+    confirmDialog_.setOnConfirm([this]() { deleteSelected(); });
+    confirmDialog_.setOnCancel([this]() { needsRedraw_ = true; });
+    confirmDialog_.show();
+}
+
+void RadioScreen::showJamConfirm() {
+    char modeLine[40];
+    snprintf(modeLine, sizeof(modeLine), "%s @ %s",
+             (jamModeSel_ == 0) ? "Carrier (CW)" : "Noise", PRESETS[presetIndex_].label);
+    confirmDialog_.setQuestion("Transmit a JAM signal?");
+    confirmDialog_.setSeverity(ui::ConfirmDialog::Severity::Warning);
+    confirmDialog_.clearDetails();
+    confirmDialog_.addDetail("Illegal on live bands.");
+    confirmDialog_.addDetail("Authorized tests only.");
+    confirmDialog_.addDetail(modeLine);
+    confirmDialog_.setOnConfirm([this]() {
+        if (jamArm()) {
+            state_ = MenuState::JAM_ACTIVE;
+        } else {
+            showErrorToast("Radio arm failed");
+            state_ = MenuState::MAIN;
+        }
+        needsRedraw_ = true;
+    });
+    confirmDialog_.setOnCancel([this]() {
+        state_ = MenuState::JAM_SELECT;  // back to mode select, as the old cancel did
+        needsRedraw_ = true;
+    });
+    confirmDialog_.show();
+}
+
 // --- NRF24 2.4 GHz analyzer (borrowed bus; remount on exit) ------------------
 
 // The analyzer's channel array and the NRF24 band must agree, or the sweep would
@@ -675,6 +719,12 @@ bool RadioScreen::handleInput(char key) {
         return true;
     }
 
+    // The confirm overlay, when up, owns all input (ADR-0085).
+    if (confirmDialog_.isVisible()) {
+        confirmDialog_.handleInput(key);
+        return true;
+    }
+
     if (key == 0x1B) key = '`';  // ESC is an alias for Back/Cancel
 
     if (!available_) {
@@ -772,21 +822,11 @@ bool RadioScreen::handleInput(char key) {
         case MenuState::SIGNAL_ACTION:
             if (listNav(key, actionSelection_, 2, unusedScroll, 2)) return true;
             if (key == '\n' || key == '\r') {
-                state_ = (actionSelection_ == 0) ? MenuState::REPLAY_CONFIRM
-                                                 : MenuState::DELETE_CONFIRM;
+                if (actionSelection_ == 0) showReplayConfirm();
+                else showDeleteConfirm();
             } else if (key == '`') {
                 state_ = MenuState::SIGNAL_LIST;
             }
-            return true;
-
-        case MenuState::REPLAY_CONFIRM:
-            if (key == 'y' || key == 'Y') replaySelected();
-            else if (key == 'n' || key == 'N' || key == '`') state_ = MenuState::SIGNAL_ACTION;
-            return true;
-
-        case MenuState::DELETE_CONFIRM:
-            if (key == 'y' || key == 'Y') deleteSelected();
-            else if (key == 'n' || key == 'N' || key == '`') state_ = MenuState::SIGNAL_ACTION;
             return true;
 
         case MenuState::FREQ_SELECT:
@@ -810,21 +850,8 @@ bool RadioScreen::handleInput(char key) {
 
         case MenuState::JAM_SELECT:
             if (listNav(key, jamModeSel_, 2, unusedScroll, 2)) return true;
-            if (key == '\n' || key == '\r') state_ = MenuState::JAM_CONFIRM;
+            if (key == '\n' || key == '\r') showJamConfirm();
             else if (key == '`') state_ = MenuState::MAIN;
-            return true;
-
-        case MenuState::JAM_CONFIRM:
-            if (key == 'y' || key == 'Y') {
-                if (jamArm()) {
-                    state_ = MenuState::JAM_ACTIVE;
-                } else {
-                    showErrorToast("Radio arm failed");
-                    state_ = MenuState::MAIN;
-                }
-            } else if (key == 'n' || key == 'N' || key == '`') {
-                state_ = MenuState::JAM_SELECT;
-            }
             return true;
 
         case MenuState::JAM_ACTIVE:
@@ -886,21 +913,15 @@ void RadioScreen::render(Canvas& canvas) {
         case MenuState::CAPTURE_REVIEW: drawCaptureReview(canvas); break;
         case MenuState::SIGNAL_LIST: drawSignalList(canvas); break;
         case MenuState::SIGNAL_ACTION: drawSignalAction(canvas); break;
-        case MenuState::REPLAY_CONFIRM:
-            drawConfirm(canvas, "Transmit this signal?", theme::WARNING());
-            break;
-        case MenuState::DELETE_CONFIRM:
-            drawConfirm(canvas, "Delete this signal?", theme::WARNING());
-            break;
         case MenuState::FREQ_SELECT:  drawFreqSelect(canvas); break;
         case MenuState::FSK_SELECT:   drawFskSelect(canvas); break;
         case MenuState::JAM_SELECT:
-        case MenuState::JAM_CONFIRM:
         case MenuState::JAM_ACTIVE:   drawJam(canvas); break;
     }
 
     footerHints_.render(canvas);
     if (namePopup_.isVisible()) namePopup_.render(canvas);
+    confirmDialog_.render(canvas);  // confirm overlay floats above everything (ADR-0085)
 #else
     (void)canvas;
 #endif
@@ -1190,20 +1211,6 @@ void RadioScreen::drawSignalAction(Canvas& canvas) {
     }
 }
 
-void RadioScreen::drawConfirm(Canvas& canvas, const char* question, uint16_t accent) {
-    int16_t x = theme::PADDING_MD;
-    int16_t y = HEADER_HEIGHT + 10;
-    canvas.setTextSize(1);
-    canvas.setTextColor(accent);
-    canvas.setCursor(x, y);
-    canvas.print(question);
-    y += LINE_HEIGHT + 2;
-    canvas.setTextColor(theme::TEXT_PRIMARY());
-    canvas.setCursor(x, y);
-    canvas.printf("%.26s", signals_[fileList_.selectedIndex()].name);
-    // The Yes/No/Cancel actions live in the footer hints (updateFooterHints).
-}
-
 void RadioScreen::drawJam(Canvas& canvas) {
     int16_t x = theme::PADDING_MD;
     int16_t y = HEADER_HEIGHT + 6;
@@ -1230,24 +1237,6 @@ void RadioScreen::drawJam(Canvas& canvas) {
     }
 
     const char* modeName = (jamModeSel_ == 0) ? "Carrier (CW)" : "Noise";
-
-    if (state_ == MenuState::JAM_CONFIRM) {
-        canvas.setTextColor(theme::WARNING());
-        canvas.setCursor(x, y);
-        canvas.print("Transmit a JAM signal?");
-        y += LINE_HEIGHT;
-        canvas.setTextColor(theme::TEXT_SECONDARY());
-        canvas.setCursor(x, y);
-        canvas.print("Illegal to operate on live");
-        y += LINE_HEIGHT;
-        canvas.setCursor(x, y);
-        canvas.print("bands. Authorized tests only.");
-        y += LINE_HEIGHT + 2;
-        canvas.setTextColor(theme::TEXT_PRIMARY());
-        canvas.setCursor(x, y);
-        canvas.printf("%s @ %s", modeName, PRESETS[presetIndex_].label);
-        return;
-    }
 
     // JAM_ACTIVE
     if (jamEmitting_) {

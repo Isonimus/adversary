@@ -2,6 +2,7 @@
 #include "ui/screens/screen_interface.h"
 #include "ui/components/status_bar.h"
 #include "ui/components/footer_hints.h"
+#include "ui/components/confirm_dialog.h"
 
 #if defined(TARGET_CARDPUTER)
 #include "modules/badusb/usb_hid_devices.h"
@@ -38,6 +39,7 @@ private:
     };
 
     void drawConfirm(Canvas& canvas);
+    void showHidConfirm();  // configure + raise the shared confirm overlay (ADR-0085; Cardputer)
     void drawActivating(Canvas& canvas);
     void drawRunning(Canvas& canvas);
 
@@ -55,6 +57,7 @@ private:
     uint8_t  m_patternIdx;
 
     ui::FooterHints m_footer;
+    ui::ConfirmDialog m_confirmDialog;  // shared HID-enable confirm overlay (ADR-0085)
 };
 
 } // namespace adversary

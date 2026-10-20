@@ -119,6 +119,7 @@ void CapturesScreen::show() {
     needsRedraw_ = true;
     screenState_ = CapturesScreenState::CATEGORY_SELECT;
     categorySelection_ = 0;
+    confirmDialog_.hide();
     init();
 }
 
@@ -380,6 +381,12 @@ bool CapturesScreen::handleInput(char key) {
         return uploadMenu_.handleInput(key);
     }
 
+    // The confirm overlay, when up, owns all input (ADR-0085).
+    if (confirmDialog_.isVisible()) {
+        needsRedraw_ = true;
+        return confirmDialog_.handleInput(key);
+    }
+
     switch (screenState_) {
         case CapturesScreenState::CATEGORY_SELECT:
             switch (key) {
@@ -428,9 +435,7 @@ bool CapturesScreen::handleInput(char key) {
                 }
                 case 'd':
                 case 'D':
-                    if (getListSize() > 0) {
-                        screenState_ = CapturesScreenState::DELETE_CONFIRM;
-                    }
+                    showDeleteConfirm();
                     return true;
                 case 'i':
                 case 'I':
@@ -479,28 +484,6 @@ bool CapturesScreen::handleInput(char key) {
                 case '`':
                     screenState_ = CapturesScreenState::CATEGORY_SELECT;
                     init();  // Refresh counts
-                    return true;
-            }
-            break;
-            
-        case CapturesScreenState::DELETE_CONFIRM:
-            switch (key) {
-                case 'y':
-                case 'Y':
-                    deleteSelectedFile();
-                    loadFileList();
-                    if (getListSize() == 0) {
-                        screenState_ = CapturesScreenState::CATEGORY_SELECT;
-                        init();
-                    } else {
-                        screenState_ = CapturesScreenState::FILE_LIST;
-                        fileList_.setItemCount((int)getListSize());  // Clamps selection onto the shrunk list
-                    }
-                    return true;
-                case 'n':
-                case 'N':
-                case '`':
-                    screenState_ = CapturesScreenState::FILE_LIST;
                     return true;
             }
             break;
@@ -643,6 +626,32 @@ void CapturesScreen::loadFileList() {
     LOG_D("CAPTURES", "Loaded %zu files from SD (%lums)", files_.size(),
           (unsigned long)(millis() - startTime));
 #endif
+}
+
+void CapturesScreen::showDeleteConfirm() {
+    if (getListSize() == 0) return;
+    const char* filename = getSelectedFilename();
+    if (!filename) return;
+
+    confirmDialog_.setQuestion("Delete this file?");
+    confirmDialog_.setSeverity(ui::ConfirmDialog::Severity::Destructive);
+    confirmDialog_.clearDetails();
+    confirmDialog_.addDetail(filename);
+    confirmDialog_.addDetail(formatSize(getSelectedSize()).c_str());
+    confirmDialog_.setOnConfirm([this]() {
+        deleteSelectedFile();
+        loadFileList();
+        if (getListSize() == 0) {
+            screenState_ = CapturesScreenState::CATEGORY_SELECT;
+            init();
+        } else {
+            screenState_ = CapturesScreenState::FILE_LIST;
+            fileList_.setItemCount((int)getListSize());  // Clamps selection onto the shrunk list
+        }
+        needsRedraw_ = true;
+    });
+    confirmDialog_.setOnCancel([this]() { needsRedraw_ = true; });
+    confirmDialog_.show();
 }
 
 void CapturesScreen::deleteSelectedFile() {
@@ -1156,12 +1165,6 @@ void CapturesScreen::render(Canvas& canvas) {
             break;
         }
             
-        case CapturesScreenState::DELETE_CONFIRM:
-            drawHeader(canvas, "DELETE?");
-            drawDeleteConfirm(canvas);
-            drawFooter(canvas, "Y:Yes  N:No");
-            break;
-            
         case CapturesScreenState::FILE_INFO:
             drawHeader(canvas, "FILE INFO");
             drawFileInfo(canvas);
@@ -1200,6 +1203,8 @@ void CapturesScreen::render(Canvas& canvas) {
     if (uploadMenu_.isVisible()) {
         uploadMenu_.render(canvas);
     }
+    // Confirm overlay floats above everything (ADR-0085).
+    confirmDialog_.render(canvas);
 #else
     (void)canvas;
 #endif
@@ -1375,30 +1380,6 @@ void CapturesScreen::drawFileList(Canvas& canvas) {
             // Type badge moved to FILE INFO screen to avoid metadata loading in list
         },
         !footerHints_.hasFocus());  // list focus dims to BG_SECONDARY when footer holds focus
-}
-
-void CapturesScreen::drawDeleteConfirm(Canvas& canvas) {
-    int16_t y = HEADER_HEIGHT + 16;
-    int16_t screenWidth = canvas.width();
-    
-    canvas.setTextSize(1);
-    canvas.setTextColor(theme::WARNING());
-    canvas.setCursor(screenWidth / 2 - 60, y);
-    canvas.print("Delete this file?");
-    
-    y += 20;
-    canvas.setTextColor(theme::TEXT_PRIMARY());
-    canvas.setCursor(8, y);
-    
-    const char* filename = getSelectedFilename();
-    uint32_t fileSize = getSelectedSize();
-    if (filename) {
-        canvas.print(filename);
-        y += 12;
-        canvas.setTextColor(theme::TEXT_SECONDARY());
-        canvas.setCursor(8, y);
-        canvas.print(formatSize(fileSize));
-    }
 }
 
 void CapturesScreen::drawFileInfo(Canvas& canvas) {

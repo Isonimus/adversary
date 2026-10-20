@@ -15,8 +15,6 @@ WhitelistScreen::WhitelistScreen()
     : visible_(false)
     , needsRedraw_(true)
     , shouldExit_(false)
-    , state_(WhitelistScreenState::LIST)
-    , deleteConfirmYes_(false)
 {
 }
 
@@ -32,7 +30,7 @@ void WhitelistScreen::show() {
     visible_ = true;
     shouldExit_ = false;
     needsRedraw_ = true;
-    state_ = WhitelistScreenState::LIST;
+    confirmDialog_.hide();
     loadWhitelist();
 }
 
@@ -64,16 +62,49 @@ void WhitelistScreen::deleteSelectedEntry() {
     // Remove from SettingsManager
     SettingsManager::getInstance().removeFromWhitelist(selected);
     SettingsManager::getInstance().saveWhitelist();
-    
+
     // Reload list
     loadWhitelist();
 }
 
+void WhitelistScreen::showDeleteConfirm() {
+    int selected = entryList_.selectedIndex();
+    if (entries_.empty() || selected < 0 || selected >= static_cast<int16_t>(entries_.size())) {
+        return;
+    }
+
+    const auto& entry = entries_[selected];
+    char detail[64] = {0};
+    if (entry.hasSsid && strlen(entry.ssid) > 0) {
+        snprintf(detail, sizeof(detail), "%s", entry.ssid);
+    } else if (entry.hasBssid) {
+        utils::formatMacBytes(entry.bssid, detail, sizeof(detail));
+    } else {
+        snprintf(detail, sizeof(detail), "(invalid entry)");
+    }
+
+    confirmDialog_.setQuestion("Delete whitelist entry?");
+    confirmDialog_.setSeverity(ui::ConfirmDialog::Severity::Destructive);
+    confirmDialog_.clearDetails();
+    confirmDialog_.addDetail(detail);
+    confirmDialog_.setOnConfirm([this]() {
+        deleteSelectedEntry();
+        needsRedraw_ = true;
+    });
+    confirmDialog_.setOnCancel([this]() { needsRedraw_ = true; });
+    confirmDialog_.show();
+}
+
 bool WhitelistScreen::handleInput(char key) {
     if (!visible_) return false;
-    
+
     needsRedraw_ = true;
-    
+
+    // The confirm overlay, when up, owns all input (ADR-0085).
+    if (confirmDialog_.isVisible()) {
+        return confirmDialog_.handleInput(key);
+    }
+
     // Footer hints: focus navigation + action dispatch
     {
         char footerAction = 0;
@@ -83,82 +114,43 @@ bool WhitelistScreen::handleInput(char key) {
             return true;  // Consumed (navigation/toggle)
         }
     }
-    
-    switch (state_) {
-        case WhitelistScreenState::LIST:
-            switch (key) {
-                case '`':  // Back
-                    shouldExit_ = true;
-                    return true;
-                    
-                case ';':  // Up
-                    entryList_.setItemCount((int)entries_.size());
-                    entryList_.moveUp();  // wraps to last; model keeps the selection on screen
-                    return true;
 
-                case '.':  // Down
-                    entryList_.setItemCount((int)entries_.size());
-                    entryList_.moveDown();  // wraps to first; model keeps the selection on screen
-                    return true;
+    switch (key) {
+        case '`':  // Back
+            shouldExit_ = true;
+            return true;
 
-                case 'd':
-                case 'D':
-                    if (!entries_.empty() && entryList_.selectedIndex() < static_cast<int16_t>(entries_.size())) {
-                        state_ = WhitelistScreenState::DELETE_CONFIRM;
-                        deleteConfirmYes_ = false;
-                    }
-                    return true;
-            }
-            break;
-            
-        case WhitelistScreenState::DELETE_CONFIRM:
-            switch (key) {
-                case '`':  // Cancel
-                    state_ = WhitelistScreenState::LIST;
-                    return true;
-                    
-                case ',':  // Left
-                case ';':
-                    deleteConfirmYes_ = true;
-                    return true;
-                    
-                case '/':  // Right
-                case '.':
-                    deleteConfirmYes_ = false;
-                    return true;
-                    
-                case '\n':
-                case '\r':
-                    if (deleteConfirmYes_) {
-                        deleteSelectedEntry();
-                    }
-                    state_ = WhitelistScreenState::LIST;
-                    return true;
-            }
-            break;
+        case ';':  // Up
+            entryList_.setItemCount((int)entries_.size());
+            entryList_.moveUp();  // wraps to last; model keeps the selection on screen
+            return true;
+
+        case '.':  // Down
+            entryList_.setItemCount((int)entries_.size());
+            entryList_.moveDown();  // wraps to first; model keeps the selection on screen
+            return true;
+
+        case 'd':
+        case 'D':
+            showDeleteConfirm();
+            return true;
     }
-    
+
     return false;
 }
 
 void WhitelistScreen::render(Canvas& canvas) {
     if (!visible_) return;
-    
+
     canvas.fillScreen(theme::BG_PRIMARY());
-    
-    switch (state_) {
-        case WhitelistScreenState::LIST:
-            drawHeader(canvas, "WHITELIST");
-            drawList(canvas);
-            drawFooter(canvas);
-            break;
-            
-        case WhitelistScreenState::DELETE_CONFIRM:
-            drawHeader(canvas, "DELETE ENTRY?");
-            drawDeleteConfirm(canvas);
-            break;
-    }
-    
+
+    drawHeader(canvas, "WHITELIST");
+    drawList(canvas);
+    drawFooter(canvas);
+
+    // Confirm overlay floats above the list (ADR-0085).
+    confirmDialog_.render(canvas);
+
     needsRedraw_ = false;
 }
 
@@ -167,13 +159,9 @@ void WhitelistScreen::drawHeader(Canvas& canvas, const char* title) {
 }
 
 void WhitelistScreen::drawFooter(Canvas& canvas) {
-    if (state_ == WhitelistScreenState::LIST) {
-        footerHints_.setHints({
-            {'d', "Delete", !entries_.empty()}
-        });
-    } else {
-        footerHints_.setHints({});
-    }
+    footerHints_.setHints({
+        {'d', "Delete", !entries_.empty()}
+    });
     footerHints_.render(canvas);
 }
 
@@ -225,62 +213,6 @@ void WhitelistScreen::drawList(Canvas& canvas) {
     static char countBuf[24];  // sized for the format's worst case
     snprintf(countBuf, sizeof(countBuf), "%d/%d", entryList_.selectedIndex() + 1, (int)entries_.size());
     footerHints_.setRightContent(countBuf);
-}
-
-void WhitelistScreen::drawDeleteConfirm(Canvas& canvas) {
-    int16_t y = HEADER_HEIGHT + 20;
-    int16_t centerX = canvas.width() / 2;
-    
-    canvas.setTextSize(1);
-    canvas.setTextColor(theme::TEXT_PRIMARY());
-    
-    // Show entry to delete
-    int selected = entryList_.selectedIndex();
-    if (selected >= 0 && selected < static_cast<int16_t>(entries_.size())) {
-        const auto& entry = entries_[selected];
-        
-        canvas.setCursor(8, y);
-        canvas.print("Remove from whitelist:");
-        y += 16;
-        
-        canvas.setTextColor(theme::WARNING());
-        canvas.setCursor(8, y);
-        if (entry.hasSsid && strlen(entry.ssid) > 0) {
-            canvas.print(entry.ssid);
-        } else if (entry.hasBssid) {
-            char bssidStr[18];
-            utils::formatMacBytes(entry.bssid, bssidStr, sizeof(bssidStr));
-            canvas.print(bssidStr);
-        }
-    }
-    
-    y += 30;
-    
-    // Draw Yes/No buttons
-    int16_t btnWidth = 50;
-    int16_t btnHeight = 20;
-    int16_t spacing = 20;
-    int16_t yesX = centerX - btnWidth - spacing / 2;
-    int16_t noX = centerX + spacing / 2;
-    
-    // Yes button
-    uint16_t yesBg = deleteConfirmYes_ ? theme::ACCENT() : theme::BG_SECONDARY();
-    uint16_t yesText = deleteConfirmYes_ ? theme::BG_PRIMARY() : theme::TEXT_SECONDARY();
-    canvas.fillRoundRect(yesX, y, btnWidth, btnHeight, 4, yesBg);
-    canvas.setTextColor(yesText);
-    canvas.setCursor(yesX + 15, y + 6);
-    canvas.print("Yes");
-    
-    // No button
-    uint16_t noBg = !deleteConfirmYes_ ? theme::ACCENT() : theme::BG_SECONDARY();
-    uint16_t noText = !deleteConfirmYes_ ? theme::BG_PRIMARY() : theme::TEXT_SECONDARY();
-    canvas.fillRoundRect(noX, y, btnWidth, btnHeight, 4, noBg);
-    canvas.setTextColor(noText);
-    canvas.setCursor(noX + 18, y + 6);
-    canvas.print("No");
-    
-    // Footer for confirm screen
-    drawFooter(canvas);
 }
 
 } // namespace adversary

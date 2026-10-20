@@ -94,6 +94,7 @@ void IrRecordScreen::show() {
     needsRedraw_ = true;
     state_ = MenuState::MAIN;
     captureStage_ = 0;
+    confirmDialog_.hide();
 
     captureAvailable_ = ir::hasIrRx();
     // Start past the Learn row when it is disabled (no IR RX module), so the selection never
@@ -122,10 +123,6 @@ void IrRecordScreen::updateFooterHints() {
         case MenuState::CODE_ACTION:
         case MenuState::TX_SOURCE_SELECT:
             footerHints_.setHints({{' ', "Focus"}, {';', "Nav"}, {'\n', "Select"}, {'`', "Back"}});
-            break;
-        case MenuState::REPLAY_CONFIRM:
-        case MenuState::DELETE_CONFIRM:
-            footerHints_.setHints({{'Y', "Yes"}, {'N', "No"}, {'`', "Cancel"}});
             break;
         case MenuState::CAPTURE_REVIEW:
             footerHints_.setHints({{'S', "Save"}, {'`', "Discard"}});
@@ -357,6 +354,30 @@ void IrRecordScreen::deleteSelected() {
 #endif
 }
 
+void IrRecordScreen::showReplayConfirm() {
+    const int sel = codeList_.selectedIndex();
+    if (sel < 0 || sel >= static_cast<int>(codes_.size())) return;
+    confirmDialog_.setQuestion("Transmit this code?");
+    confirmDialog_.setSeverity(ui::ConfirmDialog::Severity::Warning);
+    confirmDialog_.clearDetails();
+    confirmDialog_.addDetail(codes_[sel].name);
+    confirmDialog_.setOnConfirm([this]() { replaySelected(); });
+    confirmDialog_.setOnCancel([this]() { needsRedraw_ = true; });
+    confirmDialog_.show();
+}
+
+void IrRecordScreen::showDeleteConfirm() {
+    const int sel = codeList_.selectedIndex();
+    if (sel < 0 || sel >= static_cast<int>(codes_.size())) return;
+    confirmDialog_.setQuestion("Delete this code?");
+    confirmDialog_.setSeverity(ui::ConfirmDialog::Severity::Destructive);
+    confirmDialog_.clearDetails();
+    confirmDialog_.addDetail(codes_[sel].name);
+    confirmDialog_.setOnConfirm([this]() { deleteSelected(); });
+    confirmDialog_.setOnCancel([this]() { needsRedraw_ = true; });
+    confirmDialog_.show();
+}
+
 // --- Frame update ------------------------------------------------------------
 
 void IrRecordScreen::update() {
@@ -379,6 +400,12 @@ bool IrRecordScreen::handleInput(char key) {
 
     if (namePopup_.isVisible()) {
         namePopup_.handleInput(key);  // its callbacks move state_
+        return true;
+    }
+
+    // The confirm overlay, when up, owns all input (ADR-0085).
+    if (confirmDialog_.isVisible()) {
+        confirmDialog_.handleInput(key);
         return true;
     }
 
@@ -443,21 +470,11 @@ bool IrRecordScreen::handleInput(char key) {
         case MenuState::CODE_ACTION:
             if (listNav(key, actionSelection_, 2, unusedScroll, 2)) return true;
             if (key == '\n' || key == '\r') {
-                state_ = (actionSelection_ == 0) ? MenuState::REPLAY_CONFIRM
-                                                 : MenuState::DELETE_CONFIRM;
+                if (actionSelection_ == 0) showReplayConfirm();
+                else showDeleteConfirm();
             } else if (key == '`') {
                 state_ = MenuState::CODE_LIST;
             }
-            return true;
-
-        case MenuState::REPLAY_CONFIRM:
-            if (key == 'y' || key == 'Y') replaySelected();
-            else if (key == 'n' || key == 'N' || key == '`') state_ = MenuState::CODE_ACTION;
-            return true;
-
-        case MenuState::DELETE_CONFIRM:
-            if (key == 'y' || key == 'Y') deleteSelected();
-            else if (key == 'n' || key == 'N' || key == '`') state_ = MenuState::CODE_ACTION;
             return true;
 
         case MenuState::TX_SOURCE_SELECT:
@@ -515,17 +532,12 @@ void IrRecordScreen::render(Canvas& canvas) {
         case MenuState::CAPTURE_REVIEW: drawCaptureReview(canvas); break;
         case MenuState::CODE_LIST:   drawCodeList(canvas); break;
         case MenuState::CODE_ACTION: drawCodeAction(canvas); break;
-        case MenuState::REPLAY_CONFIRM:
-            drawConfirm(canvas, "Transmit this code?");
-            break;
-        case MenuState::DELETE_CONFIRM:
-            drawConfirm(canvas, "Delete this code?");
-            break;
         case MenuState::TX_SOURCE_SELECT: drawTxSourceSelect(canvas); break;
     }
 
     footerHints_.render(canvas);
     if (namePopup_.isVisible()) namePopup_.render(canvas);
+    confirmDialog_.render(canvas);  // confirm overlay floats above everything (ADR-0085)
 #else
     (void)canvas;
 #endif
@@ -679,20 +691,6 @@ void IrRecordScreen::drawCodeAction(Canvas& canvas) {
     }
 }
 
-void IrRecordScreen::drawConfirm(Canvas& canvas, const char* question) {
-    int16_t x = theme::PADDING_MD;
-    int16_t y = HEADER_HEIGHT + 10;
-    canvas.setTextSize(1);
-    canvas.setTextColor(theme::WARNING());
-    canvas.setCursor(x, y);
-    canvas.print(question);
-    y += ROW_HEIGHT;
-    canvas.setTextColor(theme::TEXT_PRIMARY());
-    canvas.setCursor(x, y);
-    canvas.printf("%.26s", codes_[codeList_.selectedIndex()].name);
-    // The Yes/No/Cancel actions live in the footer hints (updateFooterHints).
-}
-
 void IrRecordScreen::drawTxSourceSelect(Canvas& canvas) {
     const int16_t x = theme::PADDING_MD;
     int16_t rowTop = HEADER_HEIGHT + 3;
@@ -722,7 +720,6 @@ void IrRecordScreen::drawEncodingAndStrip(Canvas&, const ir::IrSignal&, int16_t,
                                           int16_t, int16_t) {}
 void IrRecordScreen::drawCodeList(Canvas&) {}
 void IrRecordScreen::drawCodeAction(Canvas&) {}
-void IrRecordScreen::drawConfirm(Canvas&, const char*) {}
 void IrRecordScreen::drawTxSourceSelect(Canvas&) {}
 
 #endif  // ESP32

@@ -159,6 +159,22 @@ enum class AppState {
 | Private members | m_ prefix | `m_isRunning`, `m_packetCount` |
 | Pointers | p prefix | `pBuffer`, `pDisplay` |
 
+### UI copy: destructive-action verbs
+
+User-facing labels for removing things use **one verb per action type**, so the UI reads the
+same everywhere (chosen 2026-10-20; applied in slice-0086, dialogs standardized by ADR-0085):
+
+| Verb | Action | Examples |
+|------|--------|----------|
+| **Delete** | Permanently destroy a *stored* item (file, record, saved entry) | captures, handshakes, IR codes, SubGHz signals, whitelist entries |
+| **Clear** | Empty a *transient/in-memory* collection that is not persisted | scan results, sniffer buffer |
+| **Discard** | Abandon *unsaved/in-progress* data that was never persisted | an un-kept capture |
+| **Forget** | Drop a *saved WiFi network* credential | saved networks |
+
+"Forget" is the single deliberate exception to "Delete": it is the universal OS idiom for WiFi
+networks (iOS/Android/Windows/macOS), so it stays. Do **not** use "Remove", "Erase", "Wipe",
+or "Drop" in user-facing copy for these actions.
+
 ### File Organization
 
 ```cpp

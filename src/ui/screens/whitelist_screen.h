@@ -16,19 +16,12 @@
 #include "../components/footer_hints.h"
 #include "../components/list_scroll_model.h"
 #include "../components/scrollable_list.h"
+#include "../components/confirm_dialog.h"
 #include "modules/storage/settings_manager.h"
 #include "utils/mac_utils.h"
 #include "screen_interface.h"
 
 namespace adversary {
-
-/**
- * @brief Screen states
- */
-enum class WhitelistScreenState : uint8_t {
-    LIST,               // Show whitelist entries
-    DELETE_CONFIRM      // Confirm deletion dialog
-};
 
 /**
  * @brief Whitelist management screen
@@ -70,24 +63,23 @@ private:
     void drawHeader(Canvas& canvas, const char* title);
     void drawFooter(Canvas& canvas);
     void drawList(Canvas& canvas);
-    void drawDeleteConfirm(Canvas& canvas);
+    void showDeleteConfirm();
     void loadWhitelist();
     void deleteSelectedEntry();
-    
+
     // State
     bool visible_;
     bool needsRedraw_;
     bool shouldExit_;
-    WhitelistScreenState state_;
-    
+
     // List state. The shared model owns selection + scroll window + wrap; drawList feeds it the
     // live viewport each frame so the two can't drift (slice-0062).
     std::vector<WhitelistEntry> entries_;
     ListScrollModel entryList_;
-    
-    // Delete confirm state
-    bool deleteConfirmYes_;
-    
+
+    // Shared confirm overlay for entry deletion (ADR-0085); replaces the bespoke Yes/No buttons.
+    ui::ConfirmDialog confirmDialog_;
+
     // UI Components
     ui::FooterHints footerHints_;
     

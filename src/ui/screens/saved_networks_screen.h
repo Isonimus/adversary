@@ -11,6 +11,7 @@
 #include "ui/theme.h"
 #include "ui/components/status_bar.h"
 #include "ui/components/action_menu.h"
+#include "ui/components/confirm_dialog.h"
 #include "ui/components/footer_hints.h"
 #include "ui/components/list_scroll_model.h"
 #include "ui/components/scrollable_list.h"
@@ -49,6 +50,8 @@ private:
     void selectCurrent();
     void handleAction(char action);
     void setupActionMenu();
+    void showForgetConfirm();  // raise the shared confirm overlay before forgetting (ADR-0085)
+    void forgetSelected();     // the actual credential removal, run only on Confirm
 
     bool visible_ = false;
     bool shouldExit_ = false;
@@ -59,6 +62,7 @@ private:
     ListScrollModel list_;
 
     ui::ActionMenu actionMenu_;
+    ui::ConfirmDialog confirmDialog_;  // confirm overlay for Forget Network (ADR-0085)
     ui::FooterHints footerHints_;
     WiFiCredential selectedCred_;
     

@@ -111,6 +111,7 @@ void HandshakeScreen::show() {
     // Always reset to CONFIG on show to clear stale capture screens
     screenState_ = HandshakeScreenState::CONFIG;
     handshakeSaved_ = false;
+    confirmDialog_.hide();
     
     // If GPS not detected, start non-blocking background detection
     // This avoids the 3-second blocking delay that causes UI lag
@@ -179,7 +180,12 @@ void HandshakeScreen::update() {
 
 bool HandshakeScreen::handleInput(char key) {
     needsRedraw_ = true;
-    
+
+    // The confirm overlay, when up, owns all input (ADR-0085).
+    if (confirmDialog_.isVisible()) {
+        return confirmDialog_.handleInput(key);
+    }
+
     // Footer hints: focus navigation + action dispatch
     {
         char footerAction = 0;
@@ -368,24 +374,8 @@ bool HandshakeScreen::handleInput(char key) {
             }
             break;
             
-        case HandshakeScreenState::CONFIRM_DELETE:
-            switch (key) {
-                case 'y':
-                case 'Y':  // Confirm deletion
-                    executeDeletion();
-                    screenState_ = HandshakeScreenState::HANDSHAKE_LIST;
-                    return true;
-                    
-                case 'n':
-                case 'N':  // Cancel deletion
-                case '`':
-                    deletionCandidateIndex_ = -1;
-                    screenState_ = HandshakeScreenState::HANDSHAKE_LIST;
-                    return true;
-            }
-            break;
     }
-    
+
     return false;
 }
 
@@ -867,11 +857,30 @@ void HandshakeScreen::loadSessionHandshakes() {
 
 void HandshakeScreen::startDeletionConfirm() {
     int selected = handshakeList_.selectedIndex();
-    if (selected >= 0 && selected < (int)sessionHandshakes_.size()) {
-        deletionCandidateIndex_ = selected;
-        screenState_ = HandshakeScreenState::CONFIRM_DELETE;
+    if (selected < 0 || selected >= (int)sessionHandshakes_.size()) return;
+
+    deletionCandidateIndex_ = selected;
+    const auto& hs = sessionHandshakes_[selected];
+    char ssidLine[36];
+    snprintf(ssidLine, sizeof(ssidLine), "SSID: %.16s", hs.ssid);
+    char typeLine[24];
+    snprintf(typeLine, sizeof(typeLine), "Type: %s", utils::getHandshakeTypeString(hs));
+
+    confirmDialog_.setQuestion("Delete handshake?");
+    confirmDialog_.setSeverity(ui::ConfirmDialog::Severity::Destructive);
+    confirmDialog_.clearDetails();
+    confirmDialog_.addDetail(ssidLine);
+    confirmDialog_.addDetail(typeLine);
+    confirmDialog_.setOnConfirm([this]() {
+        executeDeletion();
         needsRedraw_ = true;
-    }
+    });
+    confirmDialog_.setOnCancel([this]() {
+        deletionCandidateIndex_ = -1;
+        needsRedraw_ = true;
+    });
+    confirmDialog_.show();
+    needsRedraw_ = true;
 }
 
 void HandshakeScreen::executeDeletion() {
@@ -971,11 +980,6 @@ void HandshakeScreen::render(Canvas& canvas) {
             drawHeader(canvas, "Captured Handshakes");
             drawHandshakeList(canvas);
             break;
-            
-        case HandshakeScreenState::CONFIRM_DELETE:
-            drawHeader(canvas, "Confirm Delete");
-            drawDeleteConfirm(canvas);
-            break;
     }
 
     // Set dynamic hints based on state
@@ -1010,12 +1014,6 @@ void HandshakeScreen::render(Canvas& canvas) {
                 {'d', "Delete", !sessionHandshakes_.empty()}
             });
             break;
-        case HandshakeScreenState::CONFIRM_DELETE:
-            footerHints_.setHints({
-                {'y', "Yes", true},
-                {'n', "No", true}
-            });
-            break;
     }
     
     // Add captures count to right content in Auto Hunt
@@ -1028,6 +1026,7 @@ void HandshakeScreen::render(Canvas& canvas) {
     }
     
     footerHints_.render(canvas);
+    confirmDialog_.render(canvas);  // confirm overlay floats above everything (ADR-0085)
 #else
     (void)canvas;
 #endif
@@ -1483,50 +1482,5 @@ void HandshakeScreen::drawHandshakeList(Canvas& canvas) {
         });
 }
 
-
-void HandshakeScreen::drawDeleteConfirm(Canvas& canvas) {
-    if (deletionCandidateIndex_ < 0 || deletionCandidateIndex_ >= (int)sessionHandshakes_.size()) {
-        return;
-    }
-    
-    const auto& hs = sessionHandshakes_[deletionCandidateIndex_];
-    
-    int16_t y = HEADER_HEIGHT + 20;
-    
-    // Warning icon/text
-    canvas.setTextColor(theme::WARNING());
-    canvas.setTextSize(2);
-    canvas.setCursor((canvas.width() - canvas.textWidth("!")) / 2, y);
-    canvas.print("!");
-    
-    y += 20;
-    canvas.setTextColor(theme::TEXT_PRIMARY());
-    canvas.setTextSize(1);
-    const char* msg = "Delete handshake?";
-    canvas.setCursor((canvas.width() - canvas.textWidth(msg)) / 2, y);
-    canvas.print(msg);
-    
-    y += 16;
-    canvas.setTextColor(theme::ACCENT());
-    char ssidLine[30];
-    snprintf(ssidLine, sizeof(ssidLine), "SSID: %.16s", hs.ssid);
-    canvas.setCursor((canvas.width() - canvas.textWidth(ssidLine)) / 2, y);
-    canvas.print(ssidLine);
-    
-    y += 12;
-    canvas.setTextColor(theme::TEXT_SECONDARY());
-    canvas.setTextSize(1);
-    const char* type = utils::getHandshakeTypeString(hs);
-    char typeLine[20];
-    snprintf(typeLine, sizeof(typeLine), "Type: %s", type);
-    canvas.setCursor((canvas.width() - canvas.textWidth(typeLine)) / 2, y);
-    canvas.print(typeLine);
-    
-    y += 16;
-    canvas.setTextColor(theme::ERROR());
-    const char* warn = "This cannot be undone!";
-    canvas.setCursor((canvas.width() - canvas.textWidth(warn)) / 2, y);
-    canvas.print(warn);
-}
 
 } // namespace adversary

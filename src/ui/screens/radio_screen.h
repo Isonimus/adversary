@@ -23,6 +23,7 @@
 #include "../components/text_input_popup.h"
 #include "../components/list_scroll_model.h"
 #include "../components/scrollable_list.h"
+#include "../components/confirm_dialog.h"
 #include "../../modules/rf/ook_signal.h"
 #include "../../modules/rf/spectrum_scan.h"
 #include "../../modules/rf/band_sweep.h"
@@ -64,12 +65,9 @@ private:
         NAMING,          // TextInputPopup collecting a name for the capture
         SIGNAL_LIST,     // saved .sub files
         SIGNAL_ACTION,   // Replay / Delete for the selected file
-        REPLAY_CONFIRM,  // "transmit?" gate (replay emits RF)
-        DELETE_CONFIRM,  // "delete?" gate
         FREQ_SELECT,     // pick a frequency preset
         FSK_SELECT,      // CC1101: pick an FSK modem preset to capture on (slice-0019)
         JAM_SELECT,      // CC1101 jammer: pick emission mode (slice-0017)
-        JAM_CONFIRM,     // jammer: interference warning gate before arming
         JAM_ACTIVE,      // jammer: armed; emits while the hold key is held
         NRF_SCAN,        // NRF24: live 2.4 GHz occupancy sweep (slice-0006)
         BAND_SWEEP,      // CC1101: live RSSI sweep across the band presets (slice-0019)
@@ -90,7 +88,6 @@ private:
     void drawCaptureReview(Canvas& canvas);
     void drawSignalList(Canvas& canvas);
     void drawSignalAction(Canvas& canvas);
-    void drawConfirm(Canvas& canvas, const char* question, uint16_t accent);
     void drawFreqSelect(Canvas& canvas);
     void drawFskSelect(Canvas& canvas);  // FSK modem preset picker (slice-0019)
     void drawJam(Canvas& canvas);  // mode-select / confirm / active (slice-0017)
@@ -135,6 +132,13 @@ private:
     void jamDisarm();  // cc1101Idle + remount; safe to call when not armed
     void stepJam();    // per-frame: emit a burst if the hold key is held
 
+    // Configure and raise the shared confirm overlay (ADR-0085). Replay is a Warning one-shot;
+    // Delete is Destructive; Jam is a Warning arming gate (legal-use notice in the detail slots).
+    // Each runs its action only on an explicit Confirm.
+    void showReplayConfirm();
+    void showDeleteConfirm();
+    void showJamConfirm();
+
     bool visible_;
     bool shouldExit_;
     bool needsRedraw_;
@@ -162,6 +166,7 @@ private:
     rf::OokSignal actionSignal_;   // selected saved signal, loaded for the detail view
     bool actionSignalValid_;       // false when the selected file failed to load
     TextInputPopup namePopup_;
+    ui::ConfirmDialog confirmDialog_;  // shared confirm overlay: Replay / Delete / Jam (ADR-0085)
 
     // NRF24 2.4 GHz analyzer state.
     rf::SpectrumScan spectrumScan_;  // per-channel occupancy tally

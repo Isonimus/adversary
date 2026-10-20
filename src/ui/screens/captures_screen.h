@@ -17,6 +17,7 @@
 #include "../components/toast_manager.h"
 #include "../components/footer_hints.h"
 #include "../components/action_menu.h"
+#include "../components/confirm_dialog.h"
 #include "../components/list_scroll_model.h"
 #include "../components/scrollable_list.h"
 #include "modules/network/wpasec_service.h"
@@ -52,7 +53,6 @@ enum class CapturesScreenState : uint8_t {
     CATEGORY_SELECT,    // Show Packets/Handshakes/Credentials
     FILE_LIST,          // Show files in selected category
     FILE_INFO,          // Show detailed file info
-    DELETE_CONFIRM,     // Confirm deletion dialog
     CREDENTIAL_VIEW     // Preview credential JSON content
 };
 
@@ -138,12 +138,12 @@ private:
     void drawFooter(Canvas& canvas, const char* text);
     void drawCategorySelect(Canvas& canvas);
     void drawFileList(Canvas& canvas);
-    void drawDeleteConfirm(Canvas& canvas);
     void drawFileInfo(Canvas& canvas);
     void drawCredentialView(Canvas& canvas);
-    
+
     // Business logic methods
     void loadFileList();
+    void showDeleteConfirm();   // configure + raise the shared confirm overlay (ADR-0085)
     void deleteSelectedFile();
     size_t getFileCount(const char* path);
     const char* getCategoryPath(CaptureCategory cat) const;
@@ -207,6 +207,7 @@ private:
     // Interactive UI components
     ui::FooterHints footerHints_;
     ui::ActionMenu uploadMenu_;  // "Sync this / Sync all new" popup (handshakes)
+    ui::ConfirmDialog confirmDialog_;  // shared delete-file confirm overlay (ADR-0085)
 
     // Unified sync to every keyed cracking service. The atom of work is ONE TLS
     // upload of ONE file to ONE service (WPA-SEC <- {ssid}.pcap, pwncrack <-

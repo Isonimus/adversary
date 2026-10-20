@@ -108,13 +108,15 @@ void BadUsbScreen::show() {
     m_scriptList.setItemCount((int)m_scripts.size());
     m_scriptList.setSelectedIndex(0);
 
+    m_confirmDialog.hide();
 #if defined(TARGET_CARDPUTER)
     if (UsbHidKeyboard::getInstance().isReady()) {
         m_state = State::IDLE;
         m_footer.setHints({{'\n', "Run", true}, {'`', "Back", true}});
     } else {
         m_state = State::CONFIRM;
-        m_footer.setHints({{'\n', "Activate", true}, {'`', "Back", true}});
+        m_footer.setHints({{'`', "Back", true}});
+        showHidConfirm();  // the Cardputer confirm is the shared ConfirmDialog overlay (ADR-0085)
     }
 #else
     m_state = State::CONFIRM;
@@ -190,26 +192,14 @@ void BadUsbScreen::render(Canvas& canvas) {
         case State::DONE:       drawDone(canvas);       break;
     }
     m_footer.render(canvas);
+    m_confirmDialog.render(canvas);  // confirm overlay floats above everything (ADR-0085)
 }
 
 void BadUsbScreen::drawConfirm(Canvas& canvas) {
 #if defined(TARGET_CARDPUTER)
-    ui::StatusBar::render(canvas, "BadUSB", "WARNING");
-
-    int cx = config::SCREEN_WIDTH / 2;
-    canvas.setTextDatum(top_center);
-
-    canvas.setTextColor(theme::ACCENT());
-    canvas.drawString("USB HID Mode", cx, 28);
-
-    canvas.setTextColor(theme::TEXT_PRIMARY());
-    canvas.drawString("Serial console will be", cx, 50);
-    canvas.drawString("disabled until reboot.", cx, 66);
-
-    canvas.setTextColor(theme::TEXT_SECONDARY());
-    canvas.drawString("All other features work.", cx, 84);
-
-    canvas.setTextDatum(top_left);
+    // The Cardputer confirm is the shared ConfirmDialog overlay (ADR-0085), rendered after the
+    // footer in render(); nothing to draw as the base here.
+    (void)canvas;
 #else
     ui::StatusBar::render(canvas, "BadUSB", "N/A");
     canvas.setTextDatum(top_center);
@@ -217,6 +207,20 @@ void BadUsbScreen::drawConfirm(Canvas& canvas) {
     canvas.drawString("USB HID not available", config::SCREEN_WIDTH/2, 50);
     canvas.drawString("on this device.", config::SCREEN_WIDTH/2, 66);
     canvas.setTextDatum(top_left);
+#endif
+}
+
+void BadUsbScreen::showHidConfirm() {
+#if defined(TARGET_CARDPUTER)
+    m_confirmDialog.setQuestion("Enable USB HID mode?");
+    m_confirmDialog.setSeverity(ui::ConfirmDialog::Severity::Warning);
+    m_confirmDialog.clearDetails();
+    m_confirmDialog.addDetail("Serial console off to reboot.");
+    m_confirmDialog.addDetail("All other features work.");
+    m_confirmDialog.setOnConfirm([this]() { activateHid(); });
+    m_confirmDialog.setOnCancel([this]() { m_shouldExit = true; });
+    m_confirmDialog.show();
+    m_needsRedraw = true;
 #endif
 }
 
@@ -325,6 +329,11 @@ bool BadUsbScreen::handleInput(char key) {
 
     if (m_state == State::ACTIVATING) return true;
 
+    // The confirm overlay, when up, owns all input (ADR-0085; Cardputer HID-enable).
+    if (m_confirmDialog.isVisible()) {
+        return m_confirmDialog.handleInput(key);
+    }
+
     // Footer focus, screen-wide: SPACE toggles focus, ;/. cycle the hints, Enter fires the
     // selected one. Placed before the per-state handling so every interactive state (the CONFIRM
     // decision, the IDLE list, RUNNING/DONE) honors SPACE the same way; the band only exists in
@@ -339,18 +348,13 @@ bool BadUsbScreen::handleInput(char key) {
         }
     }
 
+#if !defined(TARGET_CARDPUTER)
+    // Non-Cardputer: CONFIRM is the "USB HID not available" notice; any key leaves.
     if (m_state == State::CONFIRM) {
-        if (key == '\n') {
-#if defined(TARGET_CARDPUTER)
-            activateHid();
-#else
-            m_shouldExit = true;
-#endif
-        } else if (key == '`') {
-            m_shouldExit = true;
-        }
+        if (key == '\n' || key == '`') m_shouldExit = true;
         return true;
     }
+#endif
 
     if (m_state == State::RUNNING) {
         if (key == '`') m_interp.requestAbort();

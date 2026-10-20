@@ -15,6 +15,7 @@
 #include "ui/components/footer_hints.h"
 #include "ui/components/list_scroll_model.h"
 #include "ui/components/scrollable_list.h"
+#include "ui/components/confirm_dialog.h"
 #include "utils/handshake_utils.h"
 #include "utils/mac_utils.h"
 #include "screen_interface.h"
@@ -52,8 +53,7 @@ enum class HandshakeScreenState : uint8_t {
     SUCCESS,
     TIMEOUT,
     ERROR,
-    HANDSHAKE_LIST,
-    CONFIRM_DELETE
+    HANDSHAKE_LIST
 };
 
 /**
@@ -121,8 +121,7 @@ private:
     void drawTimeout(Canvas& canvas);
     void drawProgressRing(Canvas& canvas, int x, int y, int radius, float progress);
     void drawHandshakeList(Canvas& canvas);
-    void drawDeleteConfirm(Canvas& canvas);
-    
+
     // Capture control
     void startCapture();
     void stopCapture();
@@ -220,6 +219,7 @@ private:
     static constexpr uint32_t AUTO_IDLE_TIME = 10000;
     
     ui::FooterHints footerHints_;
+    ui::ConfirmDialog confirmDialog_;  // shared delete-handshake confirm overlay (ADR-0085)
 };
 
 } // namespace adversary

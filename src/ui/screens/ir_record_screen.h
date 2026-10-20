@@ -25,6 +25,7 @@
 #include "../components/text_input_popup.h"
 #include "../components/list_scroll_model.h"
 #include "../components/scrollable_list.h"
+#include "../components/confirm_dialog.h"
 #include "../../modules/ir/ir_signal.h"
 #include "screen_interface.h"
 
@@ -64,8 +65,6 @@ private:
         NAMING,           // TextInputPopup collecting a name for the capture
         CODE_LIST,        // saved .ir files
         CODE_ACTION,      // Replay / Delete for the selected file
-        REPLAY_CONFIRM,   // "transmit?" gate (replay emits IR)
-        DELETE_CONFIRM,   // "delete?" gate
         TX_SOURCE_SELECT, // Built-in emitter / cap array
     };
 
@@ -80,8 +79,13 @@ private:
     void drawCaptureReview(Canvas& canvas);
     void drawCodeList(Canvas& canvas);
     void drawCodeAction(Canvas& canvas);
-    void drawConfirm(Canvas& canvas, const char* question);
     void drawTxSourceSelect(Canvas& canvas);
+
+    // Configure and raise the shared confirm overlay for the selected code (ADR-0085). Replay is
+    // a Warning one-shot (reboot-reversible); Delete is Destructive. Both run their action only
+    // on an explicit Confirm.
+    void showReplayConfirm();
+    void showDeleteConfirm();
 
     // First selectable main-menu index: the Learn row (0) is unselectable while IR RX is absent,
     // so the selection starts and stays on an enabled row (slice-0072).
@@ -127,6 +131,7 @@ private:
     ir::IrSignal actionSignal_;   // selected saved code, loaded for the detail view
     bool actionSignalValid_;      // false when the selected file failed to load
     TextInputPopup namePopup_;
+    ui::ConfirmDialog confirmDialog_;  // shared confirm overlay for Replay / Delete (ADR-0085)
 
     ui::FooterHints footerHints_;
 
