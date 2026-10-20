@@ -10,7 +10,7 @@
  * detection globals. setup() calls it at boot; the Modules dashboard's Re-scan
  * calls the same function so the two paths never drift.
  *
- * The definition lives in main.cpp, not a core/*.cpp: the native build compiles
+ * The definition lives in main.cpp, not a core/ TU: the native build compiles
  * all of core/ but excludes hal/expansion/expansion_cap.cpp, so a core TU calling
  * detectExpansionCap() would fail to link natively. main.cpp is native-excluded
  * and already owns the detection globals and the SD/GPS/RFID singletons — the

@@ -222,7 +222,7 @@ void WhitelistScreen::drawList(Canvas& canvas) {
         });
 
     // Draw entry count on right
-    static char countBuf[16];
+    static char countBuf[24];  // sized for the format's worst case
     snprintf(countBuf, sizeof(countBuf), "%d/%d", entryList_.selectedIndex() + 1, (int)entries_.size());
     footerHints_.setRightContent(countBuf);
 }

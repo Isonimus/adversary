@@ -121,7 +121,7 @@ bool TimeManager::syncFromGPS(uint8_t hour, uint8_t min, uint8_t sec,
     // Calculate UTC epoch WITHOUT using mktime (which applies local timezone)
     // mktime() interprets struct tm as local time, but GPS gives pure UTC
     // Using timegm() equivalent to avoid timezone corruption
-    struct tm gpsTime = {0};
+    struct tm gpsTime = {};
     gpsTime.tm_year = year - 1900;
     gpsTime.tm_mon = month - 1;
     gpsTime.tm_mday = day;

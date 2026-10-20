@@ -82,7 +82,7 @@ void SavedNetworksScreen::render(Canvas& canvas) {
         {'`', "Back", true}
     });
     
-    char countBuf[16];
+    char countBuf[24];  // sized for the format's worst case
     snprintf(countBuf, sizeof(countBuf), "%d/%d",
              creds.empty() ? 0 : list_.selectedIndex() + 1,
              (int)creds.size());

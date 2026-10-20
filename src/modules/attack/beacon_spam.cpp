@@ -215,7 +215,7 @@ void BeaconSpam::stop() {
     WiFi.mode(WIFI_OFF);
     delay(50);
     
-    LOG_I("BEACON", "Stopped. Sent %u beacons", stats_.beaconsSent);
+    LOG_I("BEACON", "Stopped. Sent %lu beacons", (unsigned long)stats_.beaconsSent);
 #endif
     
     setState(BeaconSpamState::IDLE);

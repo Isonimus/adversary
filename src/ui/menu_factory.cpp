@@ -113,12 +113,12 @@ std::vector<CarouselItem> buildCarouselItems() {
     // boot-frozen bool so the Modules dashboard's hot-swap Re-scan un-greys them
     // without a reboot (slice-0018); always-on tiles keep the plain bool.
     std::vector<adversary::CarouselItem> carouselItems = {
-        {"WIRELESS", adversary::assets::ICON_WIRELESS, -1, true, ""}, // -1 = navigate to submenu in mainMenu
-        {"BLE", adversary::assets::ICON_BLE, -2, true, ""},
-        {"INFRARED", adversary::assets::ICON_INFRARED, -3, true, ""},
+        {"WIRELESS", adversary::assets::ICON_WIRELESS, -1, true, "", nullptr}, // -1 = navigate to submenu in mainMenu
+        {"BLE", adversary::assets::ICON_BLE, -2, true, "", nullptr},
+        {"INFRARED", adversary::assets::ICON_INFRARED, -3, true, "", nullptr},
         {"RFID", adversary::assets::ICON_RFID, -4, false, "RFID module not found",
          []{ return adversary::ui::g_rfidDetected; }},
-        {"HID", adversary::assets::ICON_HID, -5, true, ""}
+        {"HID", adversary::assets::ICON_HID, -5, true, "", nullptr}
     };
 
     // Radio entry — always present, greyed out when the multi-radio cap is not
@@ -130,7 +130,7 @@ std::vector<CarouselItem> buildCarouselItems() {
 
     // Modules entry — live peripheral inventory + hot-swap Re-scan (slice-0018).
     carouselItems.push_back({"MODULES", adversary::assets::ICON_MODULES, ACTION_MODULES,
-                             true, ""});
+                             true, "", nullptr});
 
     // Server entry - serves the dashboard straight off SD, so it needs both a
     // mounted card and the dashboard files. Distinguish the two so the greyed-tile
@@ -142,10 +142,10 @@ std::vector<CarouselItem> buildCarouselItems() {
         sdManager.fileExists("/adversary/dashboard/index.html");
     const char* serverDisabledReason = sdReadyForServer ? "Dashboard index missing"
                                                         : "No SD card";
-    carouselItems.push_back({"SERVER", adversary::assets::ICON_SERVER, ACTION_SERVER, serverEnabled, serverDisabledReason});
+    carouselItems.push_back({"SERVER", adversary::assets::ICON_SERVER, ACTION_SERVER, serverEnabled, serverDisabledReason, nullptr});
 
-    carouselItems.push_back({"SETTINGS", adversary::assets::ICON_SETTINGS, ACTION_SETTINGS, true, ""});
-    carouselItems.push_back({"ABOUT", adversary::assets::ICON_ABOUT, ACTION_ABOUT, true, ""});
+    carouselItems.push_back({"SETTINGS", adversary::assets::ICON_SETTINGS, ACTION_SETTINGS, true, "", nullptr});
+    carouselItems.push_back({"ABOUT", adversary::assets::ICON_ABOUT, ACTION_ABOUT, true, "", nullptr});
 
     return carouselItems;
 }

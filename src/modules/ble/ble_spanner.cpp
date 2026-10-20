@@ -50,11 +50,11 @@ BLESpanner::BLESpanner() :
     m_connectedCount(0),
     m_pps(0), 
     m_lastUpdate(0),
+    m_layout(KeyboardLayout::US),
     m_pAdvertising(nullptr),
     m_pServer(nullptr),
     m_taskHandle(nullptr),
-    m_lastModelIdx(0),
-    m_layout(KeyboardLayout::US)
+    m_lastModelIdx(0)
 {
     esp_read_mac(m_originalMac, ESP_MAC_BT);
 }
@@ -496,7 +496,7 @@ void BLESpanner::update() {
 }
 
 void BLESpanner::onConnect(NimBLEServer* pServer) {
-    m_connectedCount++;
+    m_connectedCount = m_connectedCount + 1;
     m_interactionCount = m_interactionCount + 1;
     m_lastPayload = "> CONNECTED [!]";
     LOG_I("BLE", "Device connected!");
@@ -507,7 +507,7 @@ void BLESpanner::onConnect(NimBLEServer* pServer) {
 }
 
 void BLESpanner::onDisconnect(NimBLEServer* pServer) {
-    if (m_connectedCount > 0) m_connectedCount--;
+    if (m_connectedCount > 0) m_connectedCount = m_connectedCount - 1;
     LOG_I("BLE", "Device disconnected");
 }
 

@@ -31,19 +31,19 @@ bool UsbHidKeyboard::isReady() const {
 
 void UsbHidKeyboard::pressKey(uint8_t hidUsage, uint8_t modifiers) {
     if (!isReady()) return;
-    KeyReport report = {0};
+    KeyReport report = {};
     report.modifiers = modifiers;
     report.keys[0]   = hidUsage;
     UsbHidDevices::getInstance().keyboard().sendReport(&report);
     delay(60);
-    KeyReport release = {0};
+    KeyReport release = {};
     UsbHidDevices::getInstance().keyboard().sendReport(&release);
     delay(30);
 }
 
 void UsbHidKeyboard::releaseAll() {
     if (!isReady()) return;
-    KeyReport release = {0};
+    KeyReport release = {};
     UsbHidDevices::getInstance().keyboard().sendReport(&release);
 }
 

@@ -734,7 +734,7 @@ inline int CaptureRegistry::loadFromManifest() {
         summaries_.push_back(s);
         loaded++;
     });
-    LOG_I("CAPREG", "Hydrated %d records from manifest.bin (%u total)", loaded, n);
+    LOG_I("CAPREG", "Hydrated %d records from manifest.bin (%lu total)", loaded, (unsigned long)n);
     return loaded;
 #else
     return 0;
@@ -752,8 +752,8 @@ inline void CaptureRegistry::hydrateAndReconcile() {
     uint32_t total = manifest_.count();
     uint32_t dead = (total > (uint32_t)loaded) ? total - (uint32_t)loaded : 0;
     if (dead >= COMPACT_DEAD_THRESHOLD && manifest_.compact()) {
-        LOG_I("CAPREG", "Compacted manifest: dropped %u dead (%u -> %u records)",
-              dead, total, manifest_.count());
+        LOG_I("CAPREG", "Compacted manifest: dropped %lu dead (%lu -> %lu records)",
+              (unsigned long)dead, (unsigned long)total, (unsigned long)manifest_.count());
         summaries_.clear();
         loaded = loadFromManifest();
     }

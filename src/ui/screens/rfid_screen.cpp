@@ -1098,7 +1098,7 @@ void RfidScreen::drawAuditSummary(Canvas& canvas) {
         });
 
     // Scroll indicator
-    char rightContent[8];
+    char rightContent[24];  // sized for the format's worst case
     snprintf(rightContent, sizeof(rightContent), "%d/%d",
              summaryList_.selectedIndex() + 1, MIFARE_1K_SECTORS);
     footerHints_.setRightContent(rightContent);

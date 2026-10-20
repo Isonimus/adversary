@@ -58,11 +58,11 @@ public:
      */
     void clearForSSL() {
 #ifdef ESP32
-        size_t heapBefore = ESP.getFreeHeap();
+        [[maybe_unused]] size_t heapBefore = ESP.getFreeHeap();
         cache_.clear();
         // Force std::map to release memory
         std::map<String, WpaSecCacheEntry>().swap(cache_);
-        size_t heapAfter = ESP.getFreeHeap();
+        [[maybe_unused]] size_t heapAfter = ESP.getFreeHeap();
         LOG_D("WPACACHE", "Cleared for SSL: freed %d bytes", (int)(heapAfter - heapBefore));
 #endif
     }

@@ -89,7 +89,7 @@ bool PcapWriter::open(const char* filename, PcapLinkType linkType, uint32_t snap
     m_linkType = linkType;
     m_state = PcapWriterState::OPEN;
     
-    LOG_I("PCAP", "Opened file: %s (link type %u)", filename, static_cast<uint32_t>(linkType));
+    LOG_I("PCAP", "Opened file: %s (link type %lu)", filename, (unsigned long)static_cast<uint32_t>(linkType));
     return true;
 }
 
@@ -100,8 +100,8 @@ void PcapWriter::close()
     }
     
     if (m_state == PcapWriterState::OPEN) {
-        LOG_I("PCAP", "Closed file: %s (%u packets, %u bytes)",
-              m_filename.c_str(), m_packetCount, m_bytesWritten);
+        LOG_I("PCAP", "Closed file: %s (%lu packets, %lu bytes)",
+              m_filename.c_str(), (unsigned long)m_packetCount, (unsigned long)m_bytesWritten);
     }
     
     m_state = PcapWriterState::CLOSED;
@@ -272,8 +272,8 @@ std::string PcapWriter::generateFilename(const char* prefix, const char* directo
     } else {
         // No RTC, use millis
         uint32_t ms = millis();
-        snprintf(buffer, sizeof(buffer), "%s%s_%u.pcap",
-                 dir.c_str(), prefix, ms);
+        snprintf(buffer, sizeof(buffer), "%s%s_%lu.pcap",
+                 dir.c_str(), prefix, (unsigned long)ms);
     }
     
     return std::string(buffer);

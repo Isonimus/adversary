@@ -871,7 +871,7 @@ void CapturesScreen::kickNextSync() {
     uploadAllPos_++;
     if (uploadAllPos_ < (int)syncQueue_.size()) {
         pendingUpload_ = 2;  // next single-upload cycle (toast renders first)
-        char msg[40];
+        char msg[48];  // sized for the format's worst case
         snprintf(msg, sizeof(msg), "Syncing %d/%d (ESC=stop)",
                  uploadAllPos_ + 1, (int)syncQueue_.size());
         showToast(msg);

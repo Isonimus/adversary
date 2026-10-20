@@ -125,7 +125,7 @@ void ServerStatusScreen::drawStats(Canvas& canvas) {
     canvas.print("REQUESTS:");
     canvas.setCursor(xValue, y);
     canvas.setTextColor(theme::TEXT_PRIMARY());
-    canvas.printf("%u hits", server.getRequestCount());
+    canvas.printf("%lu hits", (unsigned long)server.getRequestCount());
     y += ROW_HEIGHT;
     
     // 6. Uptime
@@ -139,7 +139,7 @@ void ServerStatusScreen::drawStats(Canvas& canvas) {
     uint32_t hours = totalSecs / 3600;
     uint32_t minutes = (totalSecs % 3600) / 60;
     uint32_t seconds = totalSecs % 60;
-    canvas.printf("%02u:%02u:%02u", hours, minutes, seconds);
+    canvas.printf("%02lu:%02lu:%02lu", (unsigned long)hours, (unsigned long)minutes, (unsigned long)seconds);
     
 #else
     (void)canvas;

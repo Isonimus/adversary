@@ -1021,7 +1021,7 @@ void HandshakeScreen::render(Canvas& canvas) {
     // Add captures count to right content in Auto Hunt
     if (autoHuntMode_ && screenState_ == HandshakeScreenState::CAPTURING) {
         static char countBuf[16];
-        snprintf(countBuf, sizeof(countBuf), "%u/%u", handshakesCaptured_, pmkidsCaptured_);
+        snprintf(countBuf, sizeof(countBuf), "%lu/%lu", (unsigned long)handshakesCaptured_, (unsigned long)pmkidsCaptured_);
         footerHints_.setRightContent(countBuf);
     } else {
         footerHints_.setRightContent("");
