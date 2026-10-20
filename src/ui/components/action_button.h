@@ -42,19 +42,22 @@ inline void formatActionLabel(char* out, std::size_t cap, const char* label) {
 class ActionButton {
 public:
     /// Draws a full-width start-action row with its top at `y`. When `selected`, fills a
-    /// theme::SUCCESS() band and draws the label in theme::BG_PRIMARY() for guaranteed
-    /// contrast in every theme; otherwise draws theme::SUCCESS() text on no band. The band is
-    /// theme::LIST_ROW_HEIGHT tall; the framed label is centred both ways (horizontally across
-    /// the full width like a button, vertically by theme::LIST_ROW_TEXT_DY), so the row
-    /// re-centres if the tokens change and the symmetric ">> <<" frame reads as deliberate.
+    /// theme::ACCENT() band and draws the label in theme::BG_PRIMARY() for guaranteed contrast
+    /// in every theme (BG_PRIMARY is near-black in all of them, accent is always bright);
+    /// otherwise draws theme::ACCENT() text on no band. The accent is the active theme's
+    /// primary colour, so the row matches the theme instead of the fixed out-of-theme green the
+    /// first cut used (ADR-0090 supersedes ADR-0087). The band is theme::LIST_ROW_HEIGHT tall;
+    /// the framed label is centred both ways (horizontally across the full width like a button,
+    /// vertically by theme::LIST_ROW_TEXT_DY), so the row re-centres if the tokens change and
+    /// the symmetric ">> <<" frame reads as deliberate.
     template <typename Canvas>
     static void render(Canvas& canvas, int16_t y, const char* label, bool selected) {
         const int16_t screenWidth = canvas.width();
         if (selected) {
-            canvas.fillRect(0, y, screenWidth, theme::LIST_ROW_HEIGHT, theme::SUCCESS());
+            canvas.fillRect(0, y, screenWidth, theme::LIST_ROW_HEIGHT, theme::ACCENT());
             canvas.setTextColor(theme::BG_PRIMARY());
         } else {
-            canvas.setTextColor(theme::SUCCESS());
+            canvas.setTextColor(theme::ACCENT());
         }
 
         char framed[ACTION_LABEL_MAX];

@@ -7,6 +7,7 @@
 #include "ui/theme.h"
 #include "config/config.h"
 #include "ui/components/toast_manager.h"
+#include "ui/components/action_button.h"
 #include "modules/system/system_manager.h"
 #include "modules/ble/ble_scanner.h"
 #include "modules/wifi/wifi_scanner.h"
@@ -71,7 +72,7 @@ void BleSpamScreen::drawConfig(Canvas& canvas) {
     const int16_t footerHeight = ui::FOOTER_HEIGHT;
     const int16_t availableHeight = config::SCREEN_HEIGHT - FIRST_LINE_Y - footerHeight - 4;
 
-    const char* optionLabels[] = {"Provider:", "Prompt:", "Intensity:", ">> START <<"};
+    const char* optionLabels[] = {"Provider:", "Prompt:", "Intensity:"};
     const char* providers[] = {"Apple", "Android", "Windows", "Samsung", "Carousel"};
     const char* prompts[] = {"Pairing", "Action", "Battery", "Link"};
     char intStr[8];
@@ -83,6 +84,10 @@ void BleSpamScreen::drawConfig(Canvas& canvas) {
     m_configList.setItemCount(CONFIG_OPTION_COUNT);
     ScrollableList::render(canvas, m_configList, 0, FIRST_LINE_Y, canvas.width(), availableHeight,
         theme::LIST_ROW_HEIGHT, [this, &optionLabels, &providers, &prompts, &intStr](Canvas& c, int idx, int16_t rowY, bool selected) {
+            if (idx == CONFIG_OPTION_COUNT - 1) { // Terminal start row: shared green ActionButton (slice-0089)
+                ui::ActionButton::render(c, rowY, "START SPAM", selected);
+                return;
+            }
             // Config field: selected field reddens to ACCENT (the edit cue); band drawn by the
             // component (BG_SELECTED, dimmed on footer focus via the flag below) (slice-0063).
             c.setTextColor(selected ? theme::ACCENT() : theme::TEXT_PRIMARY());

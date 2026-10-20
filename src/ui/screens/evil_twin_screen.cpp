@@ -4,6 +4,7 @@
  */
 
 #include "evil_twin_screen.h"
+#include "ui/components/action_button.h"
 #include "core/event_bus.h"
 
 #ifdef ESP32
@@ -510,7 +511,7 @@ void EvilTwinScreen::renderConfig(Canvas& canvas) {
     }
     
     const char* optionLabels[] = {
-        "Mode:", "Portal:", "Fixed SSID:", "Deauth:", "Interval:", "Log SD:", ">> START <<"
+        "Mode:", "Portal:", "Fixed SSID:", "Deauth:", "Interval:", "Log SD:"
     };
     
     // Draw scroll indicator if needed
@@ -522,17 +523,23 @@ void EvilTwinScreen::renderConfig(Canvas& canvas) {
     
     for (int i = configScrollOffset_; i < CONFIG_OPTION_COUNT && i < configScrollOffset_ + maxVisible; i++) {
         bool selected = (i == configSelection_);
-        
+
+        if (i == CONFIG_OPTION_COUNT - 1) { // Terminal start row: shared green ActionButton (slice-0089)
+            ui::ActionButton::render(canvas, y - 2, "START TWIN", selected);
+            y += lineHeight;
+            continue;
+        }
+
         if (selected) {
             canvas.fillRect(0, y - 2, screenWidth, lineHeight, theme::BG_SECONDARY());
             canvas.setTextColor(theme::ACCENT());
         } else {
             canvas.setTextColor(theme::TEXT_PRIMARY());
         }
-        
+
         canvas.setCursor(4, y);
         canvas.print(optionLabels[i]);
-        
+
         char valueStr[24] = "";
         switch (i) {
             case 0: strncpy(valueStr, getModeStr(), sizeof(valueStr)); break;
@@ -558,11 +565,9 @@ void EvilTwinScreen::renderConfig(Canvas& canvas) {
             case 5: strncpy(valueStr, configLogSD_ ? "Yes" : "No", sizeof(valueStr)); break;
         }
         
-        if (i < CONFIG_OPTION_COUNT - 1) {
-            canvas.setCursor(80, y);
-            canvas.print(valueStr);
-        }
-        
+        canvas.setCursor(80, y);
+        canvas.print(valueStr);
+
         y += lineHeight;
     }
     

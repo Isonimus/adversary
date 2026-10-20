@@ -2,10 +2,10 @@
 id: '0087'
 title: "A shared ActionButton for the green start-operation rows"
 type: architecture
-status: accepted
+status: superseded
 date: 2026-10-20
 supersedes: []
-superseded_by: []
+superseded_by: ['0090']
 ---
 
 ## Context

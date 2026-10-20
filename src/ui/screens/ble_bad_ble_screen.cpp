@@ -7,6 +7,7 @@
 #include "modules/ble/ble_hid_keyboard.h"
 #include "ui/theme.h"
 #include "ui/components/status_bar.h"
+#include "ui/components/action_button.h"
 #include "modules/storage/settings_manager.h"
 #include "modules/ble/ble_scanner.h"
 #include "config/config.h"
@@ -155,53 +156,51 @@ void BleBadBleScreen::drawIdle(Canvas& canvas) {
     const char* labels[] = {
         "Name:",
         "Type:",
-        "Target:",
-        "[ START ATTACK ]"
+        "Target:"
     };
-    
+
     for (int i = 0; i < 4; i++) {
+        if (i == 3) { // Terminal start row: shared green ActionButton (slice-0089)
+            ui::ActionButton::render(canvas, y - 2, "START ATTACK", i == m_menuSelection);
+            y += lineHeight;
+            continue;
+        }
+
         if (i == m_menuSelection) {
             canvas.fillRect(0, y - 2, config::SCREEN_WIDTH, lineHeight, theme::BG_SECONDARY());
             canvas.setTextColor(theme::ACCENT());
         } else {
             canvas.setTextColor(theme::TEXT_PRIMARY());
         }
-        
+
         canvas.setCursor(10, y + 2);
-        
-        if (i == 3) { // Start Button
-            canvas.setTextDatum(top_center);
-            canvas.drawString(labels[i], config::SCREEN_WIDTH / 2, y + 2);
-            canvas.setTextDatum(top_left);
-        } else {
-            canvas.print(labels[i]);
-            
-            // Draw Value
-            canvas.setCursor(80, y + 2);
-            if (i == m_menuSelection) canvas.setTextColor(theme::TEXT_PRIMARY());
-            else canvas.setTextColor(theme::TEXT_SECONDARY());
-            
-            switch(i) {
-                case 0: // Name
-                    canvas.print(m_sessionName);
-                    break;
-                case 1: // Type
-                    switch(m_appearance) {
-                        case 0x03C1: canvas.print("< Keyboard >"); break;
-                        case 0x03C2: canvas.print("< Mouse >"); break;
-                        case 0x03C3: canvas.print("< Joystick >"); break;
-                        case 0x03C4: canvas.print("< Gamepad >"); break;
-                        default: canvas.print("< Unknown >"); break;
-                    }
-                    break;
-                case 2: // Target
-                    switch(m_targetOs) {
-                        case TargetOS::LINUX:   canvas.print("< LINUX >"); break;
-                        case TargetOS::WINDOWS: canvas.print("< WINDOWS >"); break;
-                        case TargetOS::MACOS:   canvas.print("< MACOS >"); break;
-                    }
-                    break;
-            }
+        canvas.print(labels[i]);
+
+        // Draw Value
+        canvas.setCursor(80, y + 2);
+        if (i == m_menuSelection) canvas.setTextColor(theme::TEXT_PRIMARY());
+        else canvas.setTextColor(theme::TEXT_SECONDARY());
+
+        switch(i) {
+            case 0: // Name
+                canvas.print(m_sessionName);
+                break;
+            case 1: // Type
+                switch(m_appearance) {
+                    case 0x03C1: canvas.print("< Keyboard >"); break;
+                    case 0x03C2: canvas.print("< Mouse >"); break;
+                    case 0x03C3: canvas.print("< Joystick >"); break;
+                    case 0x03C4: canvas.print("< Gamepad >"); break;
+                    default: canvas.print("< Unknown >"); break;
+                }
+                break;
+            case 2: // Target
+                switch(m_targetOs) {
+                    case TargetOS::LINUX:   canvas.print("< LINUX >"); break;
+                    case TargetOS::WINDOWS: canvas.print("< WINDOWS >"); break;
+                    case TargetOS::MACOS:   canvas.print("< MACOS >"); break;
+                }
+                break;
         }
         y += lineHeight;
     }

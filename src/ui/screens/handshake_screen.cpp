@@ -1103,37 +1103,40 @@ void HandshakeScreen::drawConfig(Canvas& canvas) {
         const char* labels[] = {
             "Auto Deauth:",
             "Deauth Count:",
-            "Timeout:",
-            ">> START CAPTURE <<"
+            "Timeout:"
         };
-        
+
         for (int i = 0; i < 4; i++) {
             bool selected = ((i + 1) == configSelection_);
-            
+
+            if (i == 3) { // Terminal start row: shared green ActionButton (slice-0089)
+                ui::ActionButton::render(canvas, y - 1, "START CAPTURE", selected);
+                y += 14;
+                continue;
+            }
+
             if (selected) {
                 canvas.fillRect(0, y - 1, screenWidth, 12, theme::ACCENT());
                 canvas.setTextColor(theme::TEXT_PRIMARY());
             } else {
                 canvas.setTextColor(theme::TEXT_PRIMARY());
             }
-            
+
             canvas.setCursor(4, y);
             canvas.print(labels[i]);
-            
+
             // Draw value for first 3 items
-            if (i < 3) {
-                char valueStr[16];
-                switch (i) {
-                    case 0: snprintf(valueStr, sizeof(valueStr), "%s", autoDeauth_ ? "ON" : "OFF"); break;
-                    case 1: snprintf(valueStr, sizeof(valueStr), "%d", deauthCount_); break;
-                    case 2: snprintf(valueStr, sizeof(valueStr), "%lus", timeoutSecs_); break;
-                }
-                
-                int16_t valueX = screenWidth - strlen(valueStr) * theme::FONT_CELL_WIDTH - 8;
-                canvas.setCursor(valueX, y);
-                canvas.print(valueStr);
+            char valueStr[16];
+            switch (i) {
+                case 0: snprintf(valueStr, sizeof(valueStr), "%s", autoDeauth_ ? "ON" : "OFF"); break;
+                case 1: snprintf(valueStr, sizeof(valueStr), "%d", deauthCount_); break;
+                case 2: snprintf(valueStr, sizeof(valueStr), "%lus", timeoutSecs_); break;
             }
-            
+
+            int16_t valueX = screenWidth - strlen(valueStr) * theme::FONT_CELL_WIDTH - 8;
+            canvas.setCursor(valueX, y);
+            canvas.print(valueStr);
+
             y += 14;
         }
     }

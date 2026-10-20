@@ -4,6 +4,7 @@
  */
 
 #include "karma_screen.h"
+#include "ui/components/action_button.h"
 
 #ifdef ESP32
 #include <WiFi.h>
@@ -495,36 +496,39 @@ void KarmaScreen::renderConfig(Canvas& canvas) {
     const char* optionLabels[] = {
         "Mode:",
         "Portal:",
-        "Log SD:",
-        ">> START <<"
+        "Log SD:"
     };
-    
+
     for (int i = 0; i < CONFIG_OPTION_COUNT; i++) {
         bool selected = (i == configSelection_);
-        
+
+        if (i == CONFIG_OPTION_COUNT - 1) { // Terminal start row: shared green ActionButton (slice-0089)
+            ui::ActionButton::render(canvas, y - 2, "START KARMA", selected);
+            y += lineHeight;
+            continue;
+        }
+
         if (selected) {
             canvas.fillRect(0, y - 2, screenWidth, lineHeight, theme::BG_SECONDARY());
             canvas.setTextColor(theme::ACCENT());
         } else {
             canvas.setTextColor(theme::TEXT_PRIMARY());
         }
-        
+
         canvas.setCursor(4, y);
         canvas.print(optionLabels[i]);
-        
+
         char valueStr[24] = "";
         switch (i) {
             case 0: strncpy(valueStr, getModeStr(), sizeof(valueStr)); break;
             case 1: strncpy(valueStr, getPortalStr(), sizeof(valueStr)); break;
             case 2: strncpy(valueStr, configLogSD_ ? "Yes" : "No", sizeof(valueStr)); break;
         }
-        
-        if (i < CONFIG_OPTION_COUNT - 1) {
-            int valueX = 75;
-            canvas.setCursor(valueX, y);
-            canvas.print(valueStr);
-        }
-        
+
+        int valueX = 75;
+        canvas.setCursor(valueX, y);
+        canvas.print(valueStr);
+
         y += lineHeight;
     }
     

@@ -4,6 +4,7 @@
  */
 
 #include "probe_flood_screen.h"
+#include "ui/components/action_button.h"
 
 #ifdef ESP32
 #include <Arduino.h>
@@ -243,9 +244,9 @@ void ProbeFloodScreen::drawConfig(Canvas& canvas)
     strncpy(options[4].value, channelHopEnabled_ ? "Yes" : "No", 19);
     options[4].value[19] = '\0';
     
-    options[5].label = "[START]";
-    options[5].value[0] = '\0';
-    
+    // The start row (index CONFIG_OPTION_COUNT - 1) carries no label/value: the shared
+    // ActionButton below supplies its own framed text (slice-0089).
+
     // The shared component derives the visible-row count from the list rect (below any target
     // line, down to the footer), keeps the selection on screen, and draws the unified thumb in
     // place of the old ^/v markers; this callback paints one option row.
@@ -253,21 +254,17 @@ void ProbeFloodScreen::drawConfig(Canvas& canvas)
     configList_.setItemCount(CONFIG_OPTION_COUNT);
     ScrollableList::render(canvas, configList_, 0, y, screenWidth, footerY - y, lineHeight,
         [&options, labelX, valueX](Canvas& c, int idx, int16_t rowY, bool selected) {
+            if (idx == CONFIG_OPTION_COUNT - 1) { // Terminal start row: shared green ActionButton (slice-0089)
+                ui::ActionButton::render(c, rowY, "START FLOOD", selected);
+                return;
+            }
             // Config field: selected field reddens to ACCENT (the edit cue); band drawn by the
             // component and dimmed on footer focus via the focused flag below (slice-0063).
             c.setTextColor(selected ? theme::ACCENT() : theme::TEXT_PRIMARY());
-
-            if (idx == CONFIG_OPTION_COUNT - 1) {
-                // Start button - centered
-                int textWidth = strlen(options[idx].label) * theme::FONT_CELL_WIDTH;
-                c.setCursor((c.width() - textWidth) / 2, rowY + theme::LIST_ROW_TEXT_DY);
-                c.print(options[idx].label);
-            } else {
-                c.setCursor(labelX, rowY + theme::LIST_ROW_TEXT_DY);
-                c.print(options[idx].label);
-                c.setCursor(valueX, rowY + theme::LIST_ROW_TEXT_DY);
-                c.print(options[idx].value);
-            }
+            c.setCursor(labelX, rowY + theme::LIST_ROW_TEXT_DY);
+            c.print(options[idx].label);
+            c.setCursor(valueX, rowY + theme::LIST_ROW_TEXT_DY);
+            c.print(options[idx].value);
         },
         !footerHints_.hasFocus());
 #else
