@@ -14,6 +14,7 @@
 #include <ArduinoJson.h>
 #include <esp_wifi.h>
 #include <esp_ota_ops.h>
+#include <esp_app_desc.h>
 #include "utils/log.h"
 #endif
 
@@ -386,7 +387,7 @@ void ServerManager::handleApiInfo() {
 
 #ifdef ESP32
     JsonDocument doc;
-    doc["version"] = esp_ota_get_app_description()->version;
+    doc["version"] = esp_app_get_description()->version;
     doc["uptime"] = millis() / 1000;
     doc["heap"] = ESP.getFreeHeap();
     doc["psram"] = ESP.getFreePsram();
@@ -451,48 +452,48 @@ void ServerManager::handleApiSettings() {
 
             auto& settings = SettingsManager::getInstance().getMutable();
             
-            if (doc.containsKey("system")) {
+            if (doc["system"].is<JsonObject>()) {
                 JsonObject system = doc["system"];
-                if (system.containsKey("deviceName")) {
+                if (system["deviceName"].is<const char*>()) {
                     strncpy(settings.system.deviceName, system["deviceName"], 32);
                     settings.system.deviceName[32] = '\0';
                 }
-                if (system.containsKey("dashboardAuthEnabled")) {
+                if (system["dashboardAuthEnabled"].is<bool>()) {
                     settings.system.dashboardAuthEnabled = system["dashboardAuthEnabled"];
                 }
-                if (system.containsKey("dashboardUsername")) {
+                if (system["dashboardUsername"].is<const char*>()) {
                     strncpy(settings.system.dashboardUsername, system["dashboardUsername"], 32);
                     settings.system.dashboardUsername[32] = '\0';
                 }
-                if (system.containsKey("dashboardPassword")) {
+                if (system["dashboardPassword"].is<const char*>()) {
                     strncpy(settings.system.dashboardPassword, system["dashboardPassword"], 32);
                     settings.system.dashboardPassword[32] = '\0';
                 }
-                if (system.containsKey("theme")) {
+                if (system["theme"].is<int>()) {
                     settings.display.themePreset = system["theme"].as<uint8_t>();
                 }
             }
 
-            if (doc.containsKey("wireless")) {
+            if (doc["wireless"].is<JsonObject>()) {
                 JsonObject wireless = doc["wireless"];
-                if (wireless.containsKey("karmaChannel")) {
+                if (wireless["karmaChannel"].is<int>()) {
                     settings.wireless.karmaChannel = wireless["karmaChannel"];
                 }
-                if (wireless.containsKey("bleName")) {
+                if (wireless["bleName"].is<const char*>()) {
                     strncpy(settings.wireless.bleName, wireless["bleName"], 32);
                     settings.wireless.bleName[32] = '\0';
                 }
             }
 
-            if (doc.containsKey("api")) {
+            if (doc["api"].is<JsonObject>()) {
                 JsonObject api = doc["api"];
-                if (api.containsKey("wpasec")) {
+                if (api["wpasec"].is<const char*>()) {
                     SettingsManager::getInstance().setWpaSecKey(api["wpasec"]);
                 }
-                if (api.containsKey("wigle")) {
+                if (api["wigle"].is<const char*>()) {
                     SettingsManager::getInstance().setWigleKey(api["wigle"]);
                 }
-                if (api.containsKey("pwncrack")) {
+                if (api["pwncrack"].is<const char*>()) {
                     SettingsManager::getInstance().setPwncrackKey(api["pwncrack"]);
                 }
             }

@@ -220,13 +220,13 @@ inline bool loadHandshakeMetadata(const char* pcapPath, HandshakeMetadata& metad
     metadata.wpaSecUploadedAt = doc["wpaSecUploadedAt"] | 0;
     metadata.wpaSecCrackedAt = doc["wpaSecCrackedAt"] | 0;
     
-    if (doc.containsKey("wpaSecPassword")) {
+    if (doc["wpaSecPassword"].is<const char*>()) {
         strncpy(metadata.wpaSecPassword, doc["wpaSecPassword"] | "", 
                 sizeof(metadata.wpaSecPassword) - 1);
     }
     
     // GPS geolocation (optional)
-    if (doc.containsKey("gps")) {
+    if (doc["gps"].is<JsonObject>()) {
         JsonObject gps = doc["gps"];
         metadata.hasGPS = true;
         metadata.latitude = gps["latitude"] | 0.0;
