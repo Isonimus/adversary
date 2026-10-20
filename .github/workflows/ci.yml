@@ -51,9 +51,21 @@ jobs:
         run: pip install --upgrade platformio
 
       - name: ${{ matrix.cmd }}
-        # Tee to a log the size step parses. GitHub's bash runs with pipefail, so a
-        # failing pio still fails this step through the tee.
+        # Tee to a log the size step and the warnings gate parse. GitHub's bash runs with
+        # pipefail, so a failing pio still fails this step through the tee.
         run: ${{ matrix.cmd }} 2>&1 | tee build.log
+
+      # Keep our own src/ warning-clean: slices 0081/0082 brought it to zero compiler
+      # warnings, and this scans the build log above to stop a new one creeping back in.
+      # Scoped by path (vendored trees excluded), not -Werror — the device TUs pull NimBLE's
+      # nimconfig.h, whose macro-redefinitions are unsuppressable under -Werror. See ADR-0083
+      # / slices/0084. Runs here, in the matrix, because it reuses the compile above rather
+      # than paying ~150s to recompile in a standalone job like the other lint gates.
+      - name: Self-test the warnings lint
+        run: node --test scripts/lint-build-warnings.test.mjs
+
+      - name: 'Gate: no new warnings in our own src/'
+        run: node scripts/lint-build-warnings.mjs build.log
 
       # Surface RAM/Flash per firmware target so growth toward the partition ceiling is
       # visible on every run — the m5stick uses huge_app (3 MB, no OTA), where a full
