@@ -125,7 +125,7 @@ public:
         int16_t screenHeight = canvas.height();
         
         // Calculate toast dimensions
-        int16_t textWidth = strlen(currentMessage_) * 6;
+        int16_t textWidth = strlen(currentMessage_) * theme::FONT_CELL_WIDTH;
         int16_t toastWidth = textWidth + 24;  // Padding
         int16_t toastHeight = 20;
         

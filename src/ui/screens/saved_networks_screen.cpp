@@ -48,7 +48,7 @@ void SavedNetworksScreen::render(Canvas& canvas) {
         canvas.setTextColor(theme::TEXT_DISABLED());
         canvas.setTextSize(1);
         const char* msg = "No saved networks";
-        canvas.setCursor((canvas.width() - strlen(msg) * 6) / 2, canvas.height() / 2);
+        canvas.setCursor((canvas.width() - strlen(msg) * theme::FONT_CELL_WIDTH) / 2, canvas.height() / 2);
         canvas.print(msg);
     } else {
         // The shared component paints the selected-row band (dimmed when the footer holds focus)

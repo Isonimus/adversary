@@ -1460,7 +1460,7 @@ void CapturesScreen::drawFileInfo(Canvas& canvas) {
     
     // Right-aligned size
     String sizeStr = formatSize(fileSize);
-    int16_t sizeW = sizeStr.length() * 6;
+    int16_t sizeW = sizeStr.length() * theme::FONT_CELL_WIDTH;
     canvas.setTextColor(theme::TEXT_SECONDARY());
     canvas.setCursor(screenWidth - sizeW - 4, y);
     canvas.print(sizeStr);

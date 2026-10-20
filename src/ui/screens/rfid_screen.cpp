@@ -139,7 +139,7 @@ void RfidScreen::render(Canvas& canvas) {
                 canvas.setTextColor(theme::TEXT_SECONDARY());
                 canvas.setTextSize(1);
                 const char* msg = (m_state == State::READING) ? "BRING TAG CLOSER..." : "READY TO READ";
-                int msgW = strlen(msg) * 6;
+                int msgW = strlen(msg) * theme::FONT_CELL_WIDTH;
                 canvas.setCursor(centerX - (msgW / 2), centerY + 35);
                 canvas.print(msg);
                 break;

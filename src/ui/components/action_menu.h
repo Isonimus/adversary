@@ -188,7 +188,7 @@ void ActionMenu::render(Canvas& canvas) {
     canvas.setTextSize(1);
     
     // Center title
-    int16_t titleWidth = strlen(title_) * 6;
+    int16_t titleWidth = strlen(title_) * theme::FONT_CELL_WIDTH;
     int16_t titleX = menuX + (menuWidth - titleWidth) / 2;
     canvas.setCursor(titleX, y);
     canvas.print(title_);
@@ -197,7 +197,7 @@ void ActionMenu::render(Canvas& canvas) {
     // Draw subtitle if present
     if (subtitle_[0]) {
         canvas.setTextColor(theme::TEXT_SECONDARY());
-        int16_t subWidth = strlen(subtitle_) * 6;
+        int16_t subWidth = strlen(subtitle_) * theme::FONT_CELL_WIDTH;
         int16_t subX = menuX + (menuWidth - subWidth) / 2;
         canvas.setCursor(subX, y);
         canvas.print(subtitle_);

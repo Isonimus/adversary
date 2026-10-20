@@ -286,7 +286,7 @@ void DeauthScreen::drawConfig(Canvas& canvas)
             c.print(options[idx].label);
 
             // Right-align value
-            int16_t valueWidth = strlen(options[idx].value) * 6;
+            int16_t valueWidth = strlen(options[idx].value) * theme::FONT_CELL_WIDTH;
             c.setCursor(c.width() - valueWidth - 4, rowY + theme::LIST_ROW_TEXT_DY);
             c.print(options[idx].value);
         },

@@ -305,7 +305,7 @@ public:
         
         // Right-side content (e.g., item count "1/10")
         if (rightContent_[0] != '\0') {
-            int16_t rightWidth = strlen(rightContent_) * 6;
+            int16_t rightWidth = strlen(rightContent_) * theme::FONT_CELL_WIDTH;
             canvas.setTextColor(theme::TEXT_SECONDARY());
             canvas.setCursor(screenWidth - rightWidth - 4, y + 4);
             canvas.print(rightContent_);
@@ -324,10 +324,10 @@ private:
     int16_t getHintWidth(const FooterHint& hint) const {
 #if defined(TARGET_M5STICK)
         // Label only
-        return strlen(hint.label) * 6;
+        return strlen(hint.label) * theme::FONT_CELL_WIDTH;
 #else
         // Key:Label format - use formatted key label length
-        return (strlen(getKeyLabel(hint.key)) + 1 + strlen(hint.label)) * 6;
+        return (strlen(getKeyLabel(hint.key)) + 1 + strlen(hint.label)) * theme::FONT_CELL_WIDTH;
 #endif
     }
     

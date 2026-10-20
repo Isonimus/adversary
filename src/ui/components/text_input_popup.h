@@ -171,7 +171,7 @@ public:
         // Title
         canvas.setTextColor(theme::ACCENT());
         canvas.setTextSize(1);
-        int16_t titleWidth = strlen(title_) * 6;
+        int16_t titleWidth = strlen(title_) * theme::FONT_CELL_WIDTH;
         canvas.setCursor(x + (boxWidth - titleWidth) / 2, y + 10);
         canvas.print(title_);
         

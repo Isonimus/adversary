@@ -101,12 +101,11 @@ private:
     void selectCurrent() { if (selectedIndex_ == CONFIRM_INDEX) confirm(); else cancel(); }
 
     // size-1 glyphs are 6 px wide on this display stack; used to center text as ActionMenu does.
-    static constexpr int16_t GLYPH_WIDTH = 6;
 
     template <typename Canvas>
     static void drawCentered(Canvas& canvas, const char* text, int16_t boxX, int16_t boxWidth,
                              int16_t y) {
-        const int16_t textWidth = static_cast<int16_t>(strlen(text)) * GLYPH_WIDTH;
+        const int16_t textWidth = static_cast<int16_t>(strlen(text)) * theme::FONT_CELL_WIDTH;
         canvas.setCursor(boxX + (boxWidth - textWidth) / 2, y);
         canvas.print(text);
     }
@@ -184,7 +183,7 @@ void ConfirmDialog::render(Canvas& canvas) {
     int16_t widths[2];
     int16_t totalWidth = BUTTON_GAP;
     for (int i = 0; i < 2; ++i) {
-        widths[i] = static_cast<int16_t>(strlen(labels[i])) * GLYPH_WIDTH + BUTTON_TEXT_PAD;
+        widths[i] = static_cast<int16_t>(strlen(labels[i])) * theme::FONT_CELL_WIDTH + BUTTON_TEXT_PAD;
         totalWidth += widths[i];
     }
     int16_t bx = menuX + (menuWidth - totalWidth) / 2;
@@ -196,7 +195,7 @@ void ConfirmDialog::render(Canvas& canvas) {
         } else {
             canvas.setTextColor(theme::TEXT_SECONDARY());
         }
-        const int16_t labelWidth = static_cast<int16_t>(strlen(labels[i])) * GLYPH_WIDTH;
+        const int16_t labelWidth = static_cast<int16_t>(strlen(labels[i])) * theme::FONT_CELL_WIDTH;
         canvas.setCursor(bx + (widths[i] - labelWidth) / 2, y + BUTTON_TEXT_DY);
         canvas.print(labels[i]);
         bx += widths[i] + BUTTON_GAP;

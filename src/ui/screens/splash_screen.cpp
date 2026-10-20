@@ -65,7 +65,7 @@ void SplashScreen::show() {
     
     M5.Display.setTextColor(theme::TEXT_SECONDARY());
     M5.Display.setTextSize(1);
-    int16_t subWidth = strlen(subtitle) * 6;
+    int16_t subWidth = strlen(subtitle) * theme::FONT_CELL_WIDTH;
     int16_t subX = (config::SCREEN_WIDTH - subWidth) / 2;
     M5.Display.setCursor(subX, 55);
     M5.Display.print(subtitle);
@@ -74,7 +74,7 @@ void SplashScreen::show() {
     M5.Display.setTextColor(theme::TEXT_DISABLED());
     char versionStr[32];
     snprintf(versionStr, sizeof(versionStr), "v%s", config::VERSION);
-    int16_t verWidth = strlen(versionStr) * 6;
+    int16_t verWidth = strlen(versionStr) * theme::FONT_CELL_WIDTH;
     int16_t verX = (config::SCREEN_WIDTH - verWidth) / 2;
     M5.Display.setCursor(verX, 70);
     M5.Display.print(versionStr);

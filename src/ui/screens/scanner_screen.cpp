@@ -475,7 +475,7 @@ void ScannerScreen::render(Canvas& canvas) {
         canvas.setTextSize(1);
         
         const char* msg = m_scanning ? "Scanning..." : "No networks found";
-        int16_t textWidth = static_cast<int16_t>(strlen(msg) * 6);
+        int16_t textWidth = static_cast<int16_t>(strlen(msg) * theme::FONT_CELL_WIDTH);
         canvas.setCursor((screenWidth - textWidth) / 2, contentY + contentHeight / 2 - 4);
         canvas.print(msg);
         

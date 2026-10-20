@@ -187,7 +187,7 @@ void BleScannerScreen::drawList(Canvas& canvas) {
 
             // Fast Pair Badge
             if (dev.isFastPair) {
-                int nameW = strlen(dev.name.c_str()) * 6;
+                int nameW = strlen(dev.name.c_str()) * theme::FONT_CELL_WIDTH;
                 int badgeX = 20 + nameW + 8;
                 c.fillRoundRect(badgeX, y + 2, 20, 9, 2, theme::SUCCESS());
                 c.setTextColor(theme::BG_PRIMARY());

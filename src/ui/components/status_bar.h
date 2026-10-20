@@ -211,7 +211,7 @@ private:
         if (!g_rfidDetected) return rightEdge;
 
         const char* badge = "RFID";
-        int16_t badgeWidth = strlen(badge) * 6;
+        int16_t badgeWidth = strlen(badge) * theme::FONT_CELL_WIDTH;
         int16_t x = rightEdge - badgeWidth;
 
         display.fillRoundRect(x - 2, 3, badgeWidth + 4, 14, 2, theme::BG_PRIMARY());
@@ -237,7 +237,7 @@ private:
         if (hal::resolvedExpansionCap() != hal::ExpansionCap::MultiRadio) return rightEdge;
 
         const char* badge = "RF";
-        int16_t badgeWidth = strlen(badge) * 6;
+        int16_t badgeWidth = strlen(badge) * theme::FONT_CELL_WIDTH;
         int16_t x = rightEdge - badgeWidth;
 
         display.fillRoundRect(x - 2, 3, badgeWidth + 4, 14, 2, theme::BG_PRIMARY());
@@ -268,7 +268,7 @@ private:
         char badge[12];
         snprintf(badge, sizeof(badge), "H%u", (unsigned)freeHeap);
         
-        int16_t badgeWidth = strlen(badge) * 6;
+        int16_t badgeWidth = strlen(badge) * theme::FONT_CELL_WIDTH;
         int16_t x = rightEdge - badgeWidth;
         
         // Color by health: green >100KB, yellow >50KB, red ≤50KB
@@ -353,7 +353,7 @@ public:
         // Custom center content
         if (centerContent && centerContent[0] != '\0') {
             int16_t contentX = xPos - 8;
-            int16_t contentLen = strlen(centerContent) * 6;
+            int16_t contentLen = strlen(centerContent) * theme::FONT_CELL_WIDTH;
             
             display.setTextColor(centerColor);
             display.setCursor(contentX - contentLen, TEXT_Y);

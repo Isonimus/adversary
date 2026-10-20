@@ -1129,7 +1129,7 @@ void HandshakeScreen::drawConfig(Canvas& canvas) {
                     case 2: snprintf(valueStr, sizeof(valueStr), "%lus", timeoutSecs_); break;
                 }
                 
-                int16_t valueX = screenWidth - strlen(valueStr) * 6 - 8;
+                int16_t valueX = screenWidth - strlen(valueStr) * theme::FONT_CELL_WIDTH - 8;
                 canvas.setCursor(valueX, y);
                 canvas.print(valueStr);
             }
@@ -1162,7 +1162,7 @@ void HandshakeScreen::drawCapturing(Canvas& canvas) {
     canvas.setTextColor(theme::TEXT_PRIMARY());
     canvas.setTextSize(1);
     const char* stateStr = HandshakeCapture::getStateString(capture_.getState());
-    int16_t stateLen = strlen(stateStr) * 6;
+    int16_t stateLen = strlen(stateStr) * theme::FONT_CELL_WIDTH;
     canvas.setCursor(centerX - stateLen / 2, centerY - 5);
     canvas.print(stateStr);
     

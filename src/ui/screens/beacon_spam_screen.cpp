@@ -265,7 +265,7 @@ void BeaconSpamScreen::drawConfig(Canvas& canvas)
 
             if (idx == CONFIG_OPTION_COUNT - 1) {
                 // Start button - centered
-                int textWidth = strlen(options[idx].label) * 6;
+                int textWidth = strlen(options[idx].label) * theme::FONT_CELL_WIDTH;
                 c.setCursor((c.width() - textWidth) / 2, rowY + theme::LIST_ROW_TEXT_DY);
                 c.print(options[idx].label);
             } else {

@@ -32,7 +32,6 @@ namespace {
 constexpr int16_t ROW_TEXT_X = 8;          // x of a normal row's label
 constexpr int16_t HEADER_TEXT_X = 4;       // x of a section-header label (indented less)
 constexpr int16_t ROW_TEXT_DY = 3;         // text baseline offset within a 14px row
-constexpr int16_t CHAR_WIDTH_PX = 6;       // width of one size-1 glyph, for right-align
 constexpr int16_t VALUE_RIGHT_MARGIN = 8;  // gap from the right edge; wider than the scrollbar
 }  // namespace
 
@@ -794,7 +793,7 @@ void SettingsScreen::drawSettingRow(Canvas& canvas, const SettingItem& item, int
 
             char valStr[20];
             formatNumberValue(item, valStr, sizeof(valStr));
-            const int16_t valWidth = static_cast<int16_t>(strlen(valStr)) * CHAR_WIDTH_PX;
+            const int16_t valWidth = static_cast<int16_t>(strlen(valStr)) * theme::FONT_CELL_WIDTH;
             canvas.setCursor(screenWidth - VALUE_RIGHT_MARGIN - valWidth, textY);
             canvas.setTextColor(rowEditing ? theme::BG_PRIMARY() : theme::TEXT_SECONDARY());
             canvas.print(valStr);
@@ -808,7 +807,7 @@ void SettingsScreen::drawSettingRow(Canvas& canvas, const SettingItem& item, int
 
             const bool isOn = item.valuePtr && (*item.valuePtr != 0);
             const char* valStr = isOn ? "ON" : "OFF";
-            const int16_t valWidth = static_cast<int16_t>(strlen(valStr)) * CHAR_WIDTH_PX;
+            const int16_t valWidth = static_cast<int16_t>(strlen(valStr)) * theme::FONT_CELL_WIDTH;
             canvas.setCursor(screenWidth - VALUE_RIGHT_MARGIN - valWidth, textY);
             canvas.setTextColor(isOn ? theme::SUCCESS() : theme::TEXT_DISABLED());
             canvas.print(valStr);
