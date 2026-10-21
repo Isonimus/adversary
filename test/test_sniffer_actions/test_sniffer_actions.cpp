@@ -38,7 +38,8 @@ void test_handshake_routes_to_handshake_screen() {
     PacketSummary pkt = makePacket(PacketFrameType::EAPOL, mac, "Net", 6);
     AttackTargetEventData out;
     TEST_ASSERT_TRUE(makeSnifferAttackTarget(pkt, PacketAction::HANDSHAKE_CAPTURE, out));
-    TEST_ASSERT_EQUAL_INT16((int16_t)ScreenId::HANDSHAKE, out.targetScreen);
+    // A sniffer-picked target goes to Manual capture; Auto Hunt self-targets (ADR-0094).
+    TEST_ASSERT_EQUAL_INT16((int16_t)ScreenId::HANDSHAKE_MANUAL, out.targetScreen);
 }
 
 void test_deauth_routes_to_deauth_screen() {

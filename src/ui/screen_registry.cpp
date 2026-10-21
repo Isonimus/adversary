@@ -59,8 +59,10 @@ void registerAllScreens(ScreenManager& manager) {
     // Attack screens (setParams override for cross-screen target hand-off).
     manager.registerFactory(ScreenId::DEAUTH,
         []() -> IScreen* { return new DeauthScreen(); });
-    manager.registerFactory(ScreenId::HANDSHAKE,
-        []() -> IScreen* { return new HandshakeScreen(); });
+    manager.registerFactory(ScreenId::HANDSHAKE_AUTO,
+        []() -> IScreen* { return new HandshakeScreen(HandshakeMode::AutoHunt); });
+    manager.registerFactory(ScreenId::HANDSHAKE_MANUAL,
+        []() -> IScreen* { return new HandshakeScreen(HandshakeMode::Manual); });
     manager.registerFactory(ScreenId::EVIL_TWIN,
         []() -> IScreen* { return new EvilTwinScreen(); });
     manager.registerFactory(ScreenId::PROBE_FLOOD,

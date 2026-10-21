@@ -69,13 +69,26 @@ enum class AutoHuntState : uint8_t {
 };
 
 /**
+ * @brief Launch mode, fixed at construction (ADR-0094).
+ *
+ * Auto Hunt and Manual are peer screens reached from the Wireless -> Handshake
+ * submenu, not a runtime toggle. One HandshakeScreen class backs both; the mode
+ * selects which config layout and capture flow it presents and never changes
+ * after construction.
+ */
+enum class HandshakeMode : uint8_t {
+    AutoHunt,
+    Manual
+};
+
+/**
  * @brief Handshake capture screen
  * 
  * Implements IScreen for ScreenManager compatibility.
  */
 class HandshakeScreen : public IScreen {
 public:
-    HandshakeScreen();
+    explicit HandshakeScreen(HandshakeMode mode);
     ~HandshakeScreen() override;
     
     // =========================================================================
@@ -96,7 +109,9 @@ public:
     void resetExitFlag() override { shouldExit_ = false; }
     
     const char* getName() const override { return "Handshake"; }
-    ScreenId getId() const override { return ScreenId::HANDSHAKE; }
+    ScreenId getId() const override {
+        return isAutoHunt() ? ScreenId::HANDSHAKE_AUTO : ScreenId::HANDSHAKE_MANUAL;
+    }
     
     // =========================================================================
     // Screen-specific methods
@@ -112,6 +127,14 @@ public:
     }
 
 private:
+    // Launch mode is fixed at construction (ADR-0094), not toggled at runtime.
+    bool isAutoHunt() const { return mode_ == HandshakeMode::AutoHunt; }
+    // Selectable CONFIG rows: Auto Hunt has only START; Manual has Target + 3 options + START.
+    int configItemCount() const { return isAutoHunt() ? 1 : CONFIG_ITEMS; }
+    // Step a Manual value row (rows 1-3) forward (delta>0) or backward (delta<0),
+    // the canonical config-form edit shared with the other forms (ADR-0092).
+    void handleConfigEdit(int delta);
+
     // Drawing methods
     void drawHeader(Canvas& canvas, const char* title);
     void drawConfig(Canvas& canvas);
@@ -173,8 +196,8 @@ private:
     bool handshakeSaved_;
     char savedFilename_[128];
     
-    // Auto Hunt mode
-    bool autoHuntMode_ = false;
+    // Launch mode, fixed at construction (ADR-0094).
+    const HandshakeMode mode_;
     AutoHuntState autoState_;
     uint32_t autoStateStart_ = 0;
     uint32_t handshakesCaptured_ = 0;

@@ -292,7 +292,7 @@ void ScannerScreen::handleAction(char action) {
         case 'H':  // Handshake Capture
         case 'h':
             LOG_I("SCANNER", "Handshake capture selected for %s", m_selectedNetwork.ssid.c_str());
-            publishAttackTarget(ScreenId::HANDSHAKE, m_selectedNetwork);
+            publishAttackTarget(ScreenId::HANDSHAKE_MANUAL, m_selectedNetwork);
             break;
             
         case 'T':  // Evil Twin

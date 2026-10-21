@@ -15,7 +15,7 @@ bool makeSnifferAttackTarget(const PacketSummary& packet, PacketAction action,
 {
     ScreenId target;
     switch (action) {
-        case PacketAction::HANDSHAKE_CAPTURE: target = ScreenId::HANDSHAKE; break;
+        case PacketAction::HANDSHAKE_CAPTURE: target = ScreenId::HANDSHAKE_MANUAL; break;
         case PacketAction::DEAUTH_ATTACK:     target = ScreenId::DEAUTH;    break;
         case PacketAction::EVIL_TWIN:         target = ScreenId::EVIL_TWIN; break;
         case PacketAction::KARMA_ATTACK:      target = ScreenId::KARMA;     break;

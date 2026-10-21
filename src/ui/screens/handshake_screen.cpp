@@ -29,7 +29,7 @@
 
 namespace adversary {
 
-HandshakeScreen::HandshakeScreen()
+HandshakeScreen::HandshakeScreen(HandshakeMode mode)
     : capture_(HandshakeCapture::getInstance())
     , screenState_(HandshakeScreenState::CONFIG)
     , visible_(false)
@@ -45,6 +45,7 @@ HandshakeScreen::HandshakeScreen()
     , timeoutSecs_(60)
     , capturing_(false)
     , handshakeSaved_(false)
+    , mode_(mode)
 {
     memset(targetBssid_, 0, 6);
     memset(targetSsid_, 0, sizeof(targetSsid_));
@@ -170,7 +171,7 @@ void HandshakeScreen::update() {
     if (!visible_) return;
     
     if (capturing_) {
-        if (autoHuntMode_) {
+        if (isAutoHunt()) {
             updateAutoHunt();
         } else {
             capture_.update();
@@ -199,65 +200,49 @@ bool HandshakeScreen::handleInput(char key) {
     switch (screenState_) {
         case HandshakeScreenState::CONFIG:
             switch (key) {
-                case 'M':
-                case 'm':
-                    autoHuntMode_ = !autoHuntMode_;
-                    configSelection_ = autoHuntMode_ ? 1 : 4;
-                    return true;
-                    
                 case ';':  // Up
                     if (configSelection_ > 0) configSelection_--;
                     return true;
-                    
+
                 case '.':  // Down
-                    {
-                        // Max items depends on mode: AutoHunt=2 (target, start), Manual=5 (target, 3 options, start)
-                        int maxItems = autoHuntMode_ ? 2 : 5;
-                        if (configSelection_ < maxItems - 1) configSelection_++;
-                    }
+                    if (configSelection_ < configItemCount() - 1) configSelection_++;
                     return true;
-                    
+
+                // Left/right step a value row, identical to the other config forms
+                // (ADR-0092). Manual value rows are 1-3; inert in Auto Hunt and on the
+                // Target (0) and START (4) rows.
+                case ',':
+                case '<':
+                    if (!isAutoHunt()) handleConfigEdit(-1);
+                    return true;
+                case '/':
+                case '>':
+                    if (!isAutoHunt()) handleConfigEdit(+1);
+                    return true;
+
                 case '\n':
                 case '\r':
-                    if (configSelection_ == 0) {
-                        if (!autoHuntMode_) {
-                            // Manual mode: take user to scanner to select target
+                    if (isAutoHunt()) {
+                        startCapture();  // Auto Hunt: START is the only row
+                        return true;
+                    }
+                    // Manual: ENTER dispatches by row kind (ADR-0092)
+                    switch (configSelection_) {
+                        case 0:  // Target (navigation): open the WiFi scanner to pick one
                             ScreenManager::getInstance().navigateTo(ScreenId::SCANNER);
-                            return true;
-                        }
-                        // Target row in Auto Hunt - toggle mode back to manual
-                        autoHuntMode_ = !autoHuntMode_;
-                        // Reset selection to start button position
-                        configSelection_ = autoHuntMode_ ? 1 : 4;
-                    } else if (autoHuntMode_) {
-                        // Auto hunt mode - only start button at position 1
-                        if (configSelection_ == 1) {
-                            startCapture();  // Will start auto hunt
-                        }
-                    } else {
-                        // Manual mode - handle options (offset by 1 due to target row)
-                        switch (configSelection_) {
-                            case 1:  // Auto deauth toggle
-                                autoDeauth_ = !autoDeauth_;
-                                break;
-                            case 2:  // Deauth count
-                                deauthCount_ = (deauthCount_ % 20) + 1;
-                                break;
-                            case 3:  // Timeout
-                                timeoutSecs_ = (timeoutSecs_ == 30) ? 60 :
-                                              (timeoutSecs_ == 60) ? 120 :
-                                              (timeoutSecs_ == 120) ? 180 : 30;
-                                break;
-                            case 4:  // Start capture
-                                if (hasTarget_) {
-                                    startCapture();
-                                }
-                                break;
-                        }
+                            break;
+                        case 1:  // Auto Deauth
+                        case 2:  // Deauth Count
+                        case 3:  // Timeout
+                            handleConfigEdit(+1);  // value row: ENTER advances, same as '/'
+                            break;
+                        case 4:  // START CAPTURE (terminal)
+                            if (hasTarget_) startCapture();
+                            break;
                     }
                     return true;
-                    
-                case '`':  // Back - exit to menu
+
+                case '`':  // Back - return to the Handshake submenu
                     shouldExit_ = true;
                     hide();
                     return true;
@@ -280,7 +265,7 @@ bool HandshakeScreen::handleInput(char key) {
                 case 'w':
                 case 'W':
                     // Add current target to whitelist and skip to next (Auto Hunt only)
-                    if (autoHuntMode_ && hasTarget_) {
+                    if (isAutoHunt() && hasTarget_) {
                         WhitelistEntry entry;
                         memcpy(entry.bssid, targetBssid_, 6);
                         entry.hasBssid = true;
@@ -302,7 +287,7 @@ bool HandshakeScreen::handleInput(char key) {
                 case 'h':
                 case 'H':
                     // View handshake list (Auto Hunt only)
-                    if (autoHuntMode_) {
+                    if (isAutoHunt()) {
                         loadSessionHandshakes();
                         handshakeList_.setSelectedIndex(0);  // Start at the top of the freshly loaded list
                         returnState_ = HandshakeScreenState::CAPTURING;
@@ -380,9 +365,33 @@ bool HandshakeScreen::handleInput(char key) {
     return false;
 }
 
+void HandshakeScreen::handleConfigEdit(int delta) {
+    // Only Manual value rows (1-3) are editable; Target (0) and START (4) have nothing
+    // to step. delta>0 advances (ENTER / '/' / '>'), delta<0 steps back (',' / '<').
+    switch (configSelection_) {
+        case 1:  // Auto Deauth: a toggle flips either direction
+            autoDeauth_ = !autoDeauth_;
+            break;
+        case 2:  // Deauth Count: ring 1..20
+            if (delta > 0) deauthCount_ = (deauthCount_ % 20) + 1;
+            else           deauthCount_ = (deauthCount_ <= 1) ? 20 : (deauthCount_ - 1);
+            break;
+        case 3:  // Timeout: ring 30 -> 60 -> 120 -> 180 -> 30
+            if (delta > 0)
+                timeoutSecs_ = (timeoutSecs_ == 30)  ? 60  :
+                               (timeoutSecs_ == 60)  ? 120 :
+                               (timeoutSecs_ == 120) ? 180 : 30;
+            else
+                timeoutSecs_ = (timeoutSecs_ == 30)  ? 180 :
+                               (timeoutSecs_ == 60)  ? 30  :
+                               (timeoutSecs_ == 120) ? 60  : 120;
+            break;
+    }
+}
+
 void HandshakeScreen::startCapture() {
     // Auto Hunt mode - start scanning
-    if (autoHuntMode_) {
+    if (isAutoHunt()) {
 #ifdef ESP32
         LOG_I("HS", "Starting Auto Hunt mode");
 #endif
@@ -452,7 +461,7 @@ void HandshakeScreen::stopCapture() {
     capture_.stop();
     
     // If in Auto Hunt mode, ensure scan is cleaned up
-    if (autoHuntMode_) {
+    if (isAutoHunt()) {
         WiFi.scanDelete();
     }
     
@@ -562,7 +571,7 @@ void HandshakeScreen::onHandshakeCaptured(const SessionHandshakeEntry& hs) {
 #endif
     
     // Add to session buffer for handshake list view (autohunt mode)
-    if (autoHuntMode_) {
+    if (isAutoHunt()) {
         // Check for duplicates (same BSSID)
         bool isDuplicate = false;
         for (const auto& existing : sessionHandshakeBuffer_) {
@@ -582,7 +591,7 @@ void HandshakeScreen::onHandshakeCaptured(const SessionHandshakeEntry& hs) {
     }
     
     // Transition to success screen (manual mode) or continue hunting (auto mode)
-    if (autoHuntMode_) {
+    if (isAutoHunt()) {
         handshakesCaptured_++;
         // Auto hunt continues to next target
         setAutoHuntState(AutoHuntState::NEXT_TARGET);
@@ -600,7 +609,7 @@ void HandshakeScreen::onStateChanged(HandshakeState state) {
     
     // In Auto Hunt mode, don't change screen state on timeout/error
     // The state machine handles transitions internally
-    if (autoHuntMode_) {
+    if (isAutoHunt()) {
         return;
     }
     
@@ -946,12 +955,12 @@ void HandshakeScreen::render(Canvas& canvas) {
     
     switch (screenState_) {
         case HandshakeScreenState::CONFIG:
-            drawHeader(canvas, "Handshake Capture");
+            drawHeader(canvas, isAutoHunt() ? "Auto Hunt" : "Manual Capture");
             drawConfig(canvas);
             break;
             
         case HandshakeScreenState::CAPTURING:
-            if (autoHuntMode_) {
+            if (isAutoHunt()) {
                 drawHeader(canvas, "Auto Hunt");
                 drawAutoHuntCapturing(canvas);
             } else {
@@ -986,16 +995,17 @@ void HandshakeScreen::render(Canvas& canvas) {
     // Set dynamic hints based on state
     switch (screenState_) {
         case HandshakeScreenState::CONFIG:
+            // No mode toggle (ADR-0094): Auto Hunt's only row starts; Manual's ENTER acts
+            // on the selected row (route to scanner / advance a value / start).
             footerHints_.setHints({
-                {'M', autoHuntMode_ ? "Mode - AUTO" : "Mode - MANUAL", true},
-                {'\r', "Start", true}
+                {'\r', isAutoHunt() ? "Start" : "Select", true}
             });
             break;
         case HandshakeScreenState::CAPTURING:
             footerHints_.setHints({
                 {'\r', "Stop", true},
-                {'w', "Whitelist", autoHuntMode_ && hasTarget_},
-                {'h', "History", autoHuntMode_}
+                {'w', "Whitelist", isAutoHunt() && hasTarget_},
+                {'h', "History", isAutoHunt()}
             });
             break;
         case HandshakeScreenState::SUCCESS:
@@ -1018,7 +1028,7 @@ void HandshakeScreen::render(Canvas& canvas) {
     }
     
     // Add captures count to right content in Auto Hunt
-    if (autoHuntMode_ && screenState_ == HandshakeScreenState::CAPTURING) {
+    if (isAutoHunt() && screenState_ == HandshakeScreenState::CAPTURING) {
         static char countBuf[16];
         snprintf(countBuf, sizeof(countBuf), "%lu/%lu", (unsigned long)handshakesCaptured_, (unsigned long)pmkidsCaptured_);
         footerHints_.setRightContent(countBuf);
@@ -1046,44 +1056,14 @@ void HandshakeScreen::drawHeader(Canvas& canvas, const char* title) {
 void HandshakeScreen::drawConfig(Canvas& canvas) {
     int16_t y = HEADER_HEIGHT + 4;
     int16_t screenWidth = canvas.width();
-    
-    // Target mode toggle (first item)
-    bool targetSelected = (configSelection_ == 0);
-    if (targetSelected) {
-        canvas.fillRect(0, y - 1, screenWidth, 12, theme::ACCENT());
-    }
-    canvas.setTextColor(theme::TEXT_SECONDARY());
-    canvas.setTextSize(1);
-    canvas.setCursor(4, y);
-    canvas.print("Target: ");
-    canvas.setTextColor(targetSelected ? theme::TEXT_PRIMARY() : theme::ACCENT());
-    if (autoHuntMode_) {
-        canvas.print("[Auto Hunt]");
-    } else if (hasTarget_) {
-        canvas.print(targetSsid_);
-    } else {
-        canvas.setTextColor(theme::WARNING());
-        canvas.print("[Select from scanner]");
-    }
-    y += 12;
-    
-    // Show target details for manual mode
-    if (!autoHuntMode_ && hasTarget_) {
-        char bssidStr[18];
-        utils::formatMacBytes(targetBssid_, bssidStr, sizeof(bssidStr));
-        canvas.setCursor(4, y);
+
+    if (isAutoHunt()) {
+        // Auto Hunt finds its own targets, so there is no Target row: describe what it
+        // does, then render START as the single selectable row (index 0).
         canvas.setTextColor(theme::TEXT_SECONDARY());
-        canvas.printf("CH:%d  %s", targetChannel_, bssidStr);
-        y += 12;
-    }
-    
-    y += 4;
-    
-    if (autoHuntMode_) {
-        // Auto Hunt mode - show info instead of options
+        canvas.setTextSize(1);
         canvas.setCursor(4, y);
-        canvas.setTextColor(theme::TEXT_SECONDARY());
-        canvas.print("-- Auto Hunt Settings --");
+        canvas.print("-- Auto Hunt --");
         y += 14;
         canvas.setCursor(4, y);
         canvas.print("Uses values from Settings menu");
@@ -1094,51 +1074,76 @@ void HandshakeScreen::drawConfig(Canvas& canvas) {
         canvas.setCursor(4, y);
         canvas.print("handshakes automatically");
         y += 20;
-        
+
         // Start button - shared ActionButton (ADR-0087)
-        bool startSelected = (configSelection_ == 1);
-        ui::ActionButton::render(canvas, y, "START AUTO HUNT", startSelected);
+        ui::ActionButton::render(canvas, y, "START AUTO HUNT", configSelection_ == 0);
+        return;
+    }
+
+    // Manual mode: Target (row 0) + three option rows + START.
+    bool targetSelected = (configSelection_ == 0);
+    if (targetSelected) {
+        canvas.fillRect(0, y - 1, screenWidth, 12, theme::ACCENT());
+    }
+    canvas.setTextColor(theme::TEXT_SECONDARY());
+    canvas.setTextSize(1);
+    canvas.setCursor(4, y);
+    canvas.print("Target: ");
+    canvas.setTextColor(targetSelected ? theme::TEXT_PRIMARY() : theme::ACCENT());
+    if (hasTarget_) {
+        canvas.print(targetSsid_);
     } else {
-        // Manual mode - show config options
-        const char* labels[] = {
-            "Auto Deauth:",
-            "Deauth Count:",
-            "Timeout:"
-        };
+        canvas.setTextColor(theme::WARNING());
+        canvas.print("[Select from scanner]");
+    }
+    y += 12;
 
-        for (int i = 0; i < 4; i++) {
-            bool selected = ((i + 1) == configSelection_);
+    if (hasTarget_) {
+        char bssidStr[18];
+        utils::formatMacBytes(targetBssid_, bssidStr, sizeof(bssidStr));
+        canvas.setCursor(4, y);
+        canvas.setTextColor(theme::TEXT_SECONDARY());
+        canvas.printf("CH:%d  %s", targetChannel_, bssidStr);
+        y += 12;
+    }
 
-            if (i == 3) { // Terminal start row: shared green ActionButton (slice-0089)
-                ui::ActionButton::render(canvas, y - 1, "START CAPTURE", selected);
-                y += 14;
-                continue;
-            }
+    y += 4;
 
-            if (selected) {
-                canvas.fillRect(0, y - 1, screenWidth, 12, theme::ACCENT());
-                canvas.setTextColor(theme::TEXT_PRIMARY());
-            } else {
-                canvas.setTextColor(theme::TEXT_PRIMARY());
-            }
+    const char* labels[] = {
+        "Auto Deauth:",
+        "Deauth Count:",
+        "Timeout:"
+    };
 
-            canvas.setCursor(4, y);
-            canvas.print(labels[i]);
+    for (int i = 0; i < 4; i++) {
+        bool selected = ((i + 1) == configSelection_);
 
-            // Draw value for first 3 items
-            char valueStr[16];
-            switch (i) {
-                case 0: snprintf(valueStr, sizeof(valueStr), "%s", autoDeauth_ ? "ON" : "OFF"); break;
-                case 1: snprintf(valueStr, sizeof(valueStr), "%d", deauthCount_); break;
-                case 2: snprintf(valueStr, sizeof(valueStr), "%lus", timeoutSecs_); break;
-            }
-
-            int16_t valueX = screenWidth - strlen(valueStr) * theme::FONT_CELL_WIDTH - 8;
-            canvas.setCursor(valueX, y);
-            canvas.print(valueStr);
-
+        if (i == 3) { // Terminal start row: shared green ActionButton (slice-0089)
+            ui::ActionButton::render(canvas, y - 1, "START CAPTURE", selected);
             y += 14;
+            continue;
         }
+
+        if (selected) {
+            canvas.fillRect(0, y - 1, screenWidth, 12, theme::ACCENT());
+        }
+        canvas.setTextColor(theme::TEXT_PRIMARY());
+
+        canvas.setCursor(4, y);
+        canvas.print(labels[i]);
+
+        char valueStr[16];
+        switch (i) {
+            case 0: snprintf(valueStr, sizeof(valueStr), "%s", autoDeauth_ ? "ON" : "OFF"); break;
+            case 1: snprintf(valueStr, sizeof(valueStr), "%d", deauthCount_); break;
+            case 2: snprintf(valueStr, sizeof(valueStr), "%lus", timeoutSecs_); break;
+        }
+
+        int16_t valueX = screenWidth - strlen(valueStr) * theme::FONT_CELL_WIDTH - 8;
+        canvas.setCursor(valueX, y);
+        canvas.print(valueStr);
+
+        y += 14;
     }
 }
 

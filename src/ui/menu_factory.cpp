@@ -12,6 +12,16 @@ std::vector<MenuItem> buildRootMenuItems() {
     using adversary::MenuItem;
     using adversary::MenuItemType;
 
+    // Handshake has two peer flows (ADR-0094): Auto Hunt (self-targeting) and Manual
+    // (scanner-targeted). A nested submenu surfaces Auto Hunt as a first-class entry
+    // instead of hiding it behind an in-screen mode toggle.
+    std::vector<MenuItem> handshakeMenu = {
+        MenuItem::action("Auto Hunt", ACTION_HANDSHAKE_AUTO, 'a'),
+        MenuItem::action("Manual Capture", ACTION_HANDSHAKE_MANUAL, 'm'),
+        MenuItem::separator(),
+        MenuItem::back()
+    };
+
     // Wireless submenu (Back last: entry lands the cursor on a real action, and
     // with wrap-around nav Back is one Up-press away from the top)
     std::vector<MenuItem> wirelessMenu = {
@@ -20,7 +30,7 @@ std::vector<MenuItem> buildRootMenuItems() {
         MenuItem::action("Deauth Attack", ACTION_DEAUTH_ATTACK, 'd'),
         MenuItem::action("Beacon Spam", ACTION_BEACON_SPAM, 'b'),
         MenuItem::action("Probe Flood", ACTION_PROBE_FLOOD, 'f'),
-        MenuItem::action("Handshake Capture", ACTION_HANDSHAKE_CAPTURE, 'h'),
+        MenuItem::submenu("Handshake", handshakeMenu, 'h'),
 
         MenuItem::separator(),
         MenuItem::action("Evil Twin AP", ACTION_EVIL_TWIN, 'e'),
