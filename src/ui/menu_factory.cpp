@@ -59,9 +59,17 @@ std::vector<MenuItem> buildRootMenuItems() {
         MenuItem::back()
     };
 
-    // BLE submenu
+    // BLE submenu, grouped Recon / Attacks to match the Wireless submenu's banding (one
+    // separator between bands). BLE has no persisted-capture browser, so there is no Data
+    // band: just Recon (passive discovery) then Attacks (active transmission). Shortcut keys
+    // audited for collisions while regrouping: s/a/h/i/p are all distinct (no dead keys like
+    // the Wireless 'd' clash that this house-style pass fixed there).
     std::vector<MenuItem> bleMenu = {
+        // Recon: passive discovery, nothing transmitted at the target.
         MenuItem::action("BLE Scanner", ACTION_BLE_SCAN, 's'),
+
+        MenuItem::separator(),
+        // Attacks: active transmission.
         MenuItem::action("Apple Attack", ACTION_BLE_APPLE_ATTACK, 'a'),
         // BadBLE has no built-in scripts — it only runs SD .txt scripts, so it is useless
         // without a card (slice-0021). Live-gated on the cached isReady() bool (slice-0042).
@@ -69,6 +77,7 @@ std::vector<MenuItem> buildRootMenuItems() {
                         []{ return adversary::SDManager::getInstance().isReady(); }),
         MenuItem::action("Identity Spoof", ACTION_BLE_SPOOF, 'i'),
         MenuItem::action("BLE Spam", ACTION_BLE_SPAM, 'p'),
+
         MenuItem::separator(),
         MenuItem::back()
     };
