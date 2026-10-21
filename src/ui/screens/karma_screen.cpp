@@ -756,14 +756,12 @@ void KarmaScreen::renderProbes(Canvas& canvas) {
     }
     
     if (probeScrollPos_ > 0) {
-        canvas.setTextColor(theme::ACCENT());
-        canvas.setCursor(config::SCREEN_WIDTH - 10, 25);
-        canvas.print("\x1E");  // up triangle (ADR-0098): items scrolled off above
+        ui::drawTriGlyph(canvas, config::SCREEN_WIDTH - 10, 25, ui::TriGlyph::Up,
+                         theme::ACCENT());  // triangle (ADR-0100): items scrolled off above
     }
     if (probeScrollPos_ + maxVisible < probes.size()) {
-        canvas.setTextColor(theme::ACCENT());
-        canvas.setCursor(config::SCREEN_WIDTH - 10, config::SCREEN_HEIGHT - 30);
-        canvas.print("\x1F");  // down triangle (ADR-0098): items scrolled off below
+        ui::drawTriGlyph(canvas, config::SCREEN_WIDTH - 10, config::SCREEN_HEIGHT - 30,
+                         ui::TriGlyph::Down, theme::ACCENT());  // items scrolled off below
     }
     
     // Footer hints

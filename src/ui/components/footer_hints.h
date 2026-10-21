@@ -20,15 +20,14 @@ namespace adversary {
 namespace ui {
 
 /**
- * @brief Human-readable label for a footer hint key (ADR-0098 house style).
+ * @brief Human-readable label for a footer hint key (text keys only).
  *
- * Control keys map to words; the Cardputer arrow cluster maps to the CP437 directional
- * triangles the default GLCD font already carries (measured in ADR-0098, decoded from
- * glcdfont.h). `;` (up) and `,` (left) are the handles for bidirectional movement in this
- * UI (vertical list nav, horizontal value adjust), so they return the two-glyph pair; `.`
- * and `/` keep a single direction for the rare one-way case. Any other key returns its
- * uppercased character. A free function (not a FooterHints member) so the mapping is
- * host-testable by include alone, mirroring configRowValueX / ActionButton's helper split.
+ * Control keys map to words; any other key returns its uppercased character. The Cardputer
+ * arrow cluster (`;`/`.`/`,`/`/`) is NOT handled here: those draw filled triangles as
+ * geometry via drawFooterKeyGlyphs, because the CP437 triangle code points are below 0x20
+ * and the M5GFX text layer discards codes < 0x20 before drawing, so they never render as
+ * text (ADR-0100, correcting ADR-0098). A free function (not a FooterHints member) so the
+ * mapping is host-testable by include alone, mirroring configRowValueX.
  */
 inline const char* footerKeyLabel(char key) {
     switch (key) {
@@ -37,16 +36,57 @@ inline const char* footerKeyLabel(char key) {
         case '`':  return "Esc";
         case ' ':  return "Space";
         case '\t': return "Tab";
-        case ';':  return "\x1E\x1F";  // up + down triangle: vertical nav/scroll handle
-        case '.':  return "\x1F";      // down triangle
-        case ',':  return "\x11\x10";  // left + right triangle: horizontal adjust handle
-        case '/':  return "\x10";      // right triangle
         default: {
             // Uppercased single character held in a static one-glyph cell.
             static char buf[2] = {0, 0};
             buf[0] = (key >= 'a' && key <= 'z') ? (key - 32) : key;
             return buf;
         }
+    }
+}
+
+/// A directional triangle affordance drawn as geometry (ADR-0100).
+enum class TriGlyph { Up, Down, Left, Right };
+
+/// Number of 6px glyph cells a key's drawn affordance occupies: 2 for the bidirectional nav
+/// handles (`;` vertical, `,` horizontal), 1 for the one-way keys (`.` down, `/` right), 0
+/// for a text key (drawn via footerKeyLabel instead). Pure, so it is host-testable and keeps
+/// getHintWidth in step with what drawFooterKeyGlyphs paints (ADR-0100).
+inline int footerKeyGlyphCells(char key) {
+    switch (key) {
+        case ';': case ',': return 2;
+        case '.': case '/': return 1;
+        default:            return 0;
+    }
+}
+
+/// Draw one filled triangle of direction `dir` inside a FONT_CELL_WIDTH (6px) cell whose top
+/// is (x, yTop), in `color`. Geometry, not a font glyph, so it is immune to the text layer's
+/// control-code filter (ADR-0100). Device-only (a canvas template), like render().
+template<typename Canvas>
+void drawTriGlyph(Canvas& canvas, int16_t x, int16_t yTop, TriGlyph dir, uint16_t color) {
+    switch (dir) {
+        case TriGlyph::Up:    canvas.fillTriangle(x + 3, yTop + 1, x + 1, yTop + 6, x + 5, yTop + 6, color); break;
+        case TriGlyph::Down:  canvas.fillTriangle(x + 1, yTop + 2, x + 5, yTop + 2, x + 3, yTop + 7, color); break;
+        case TriGlyph::Left:  canvas.fillTriangle(x + 1, yTop + 4, x + 5, yTop + 1, x + 5, yTop + 7, color); break;
+        case TriGlyph::Right: canvas.fillTriangle(x + 1, yTop + 1, x + 1, yTop + 7, x + 5, yTop + 4, color); break;
+    }
+}
+
+/// Draw the arrow affordance for `key` starting at (x, yTop): the up+down pair for `;`, the
+/// left+right pair for `,`, a single down for `.`, a single right for `/`. One triangle per
+/// 6px cell, so the width matches footerKeyGlyphCells(key). No-op for a non-arrow key.
+template<typename Canvas>
+void drawFooterKeyGlyphs(Canvas& canvas, int16_t x, int16_t yTop, char key, uint16_t color) {
+    const int16_t w = theme::FONT_CELL_WIDTH;
+    switch (key) {
+        case ';': drawTriGlyph(canvas, x, yTop, TriGlyph::Up,   color);
+                  drawTriGlyph(canvas, x + w, yTop, TriGlyph::Down,  color); break;
+        case ',': drawTriGlyph(canvas, x, yTop, TriGlyph::Left, color);
+                  drawTriGlyph(canvas, x + w, yTop, TriGlyph::Right, color); break;
+        case '.': drawTriGlyph(canvas, x, yTop, TriGlyph::Down,  color); break;
+        case '/': drawTriGlyph(canvas, x, yTop, TriGlyph::Right, color); break;
+        default:  break;
     }
 }
 
@@ -319,15 +359,23 @@ public:
             }
             
             canvas.setTextColor(textColor);
-            canvas.setCursor(x, y + 4);
-            
+
             // Platform-specific formatting
 #if defined(TARGET_M5STICK)
             // M5Stick: Label only (no keyboard)
+            canvas.setCursor(x, y + 4);
             canvas.print(hint.label);
 #else
-            // Cardputer: Key:Label format
-            canvas.print(footerKeyLabel(hint.key));
+            // Cardputer: Key:Label. Arrow keys draw filled-triangle glyphs (ADR-0100); every
+            // other key prints its footerKeyLabel text. Both reserve the same cell width.
+            int16_t glyphCells = footerKeyGlyphCells(hint.key);
+            if (glyphCells > 0) {
+                drawFooterKeyGlyphs(canvas, x, y + 4, hint.key, textColor);
+                canvas.setCursor(x + glyphCells * theme::FONT_CELL_WIDTH, y + 4);
+            } else {
+                canvas.setCursor(x, y + 4);
+                canvas.print(footerKeyLabel(hint.key));
+            }
             canvas.print(':');
             canvas.print(hint.label);
 #endif
@@ -358,8 +406,11 @@ private:
         // Label only
         return strlen(hint.label) * theme::FONT_CELL_WIDTH;
 #else
-        // Key:Label format - use formatted key label length
-        return (strlen(footerKeyLabel(hint.key)) + 1 + strlen(hint.label)) * theme::FONT_CELL_WIDTH;
+        // Key:Label format. An arrow key's glyph occupies footerKeyGlyphCells cells (triangles
+        // drawn as geometry, ADR-0100); a text key occupies strlen(footerKeyLabel) cells.
+        int keyCells = footerKeyGlyphCells(hint.key);
+        if (keyCells == 0) keyCells = strlen(footerKeyLabel(hint.key));
+        return (keyCells + 1 + strlen(hint.label)) * theme::FONT_CELL_WIDTH;
 #endif
     }
     

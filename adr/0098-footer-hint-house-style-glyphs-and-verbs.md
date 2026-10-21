@@ -2,10 +2,10 @@
 id: '0098'
 title: "Footer-hint house style: arrow-key glyphs and one verb per action"
 type: architecture
-status: accepted
+status: superseded
 date: 2026-10-21
 supersedes: []
-superseded_by: []
+superseded_by: ['0100']
 ---
 
 ## Context

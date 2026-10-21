@@ -299,30 +299,31 @@ void Menu::render(Canvas& canvas) {
     
     // Scroll indicators
     if (startIdx > 0) {
-        canvas.setTextColor(theme::ACCENT());
-        canvas.setCursor(config::SCREEN_WIDTH - 10, 25);
-        canvas.print("\x1E");  // up triangle (ADR-0098): items scrolled off above
+        ui::drawTriGlyph(canvas, config::SCREEN_WIDTH - 10, 25, ui::TriGlyph::Up,
+                         theme::ACCENT());  // triangle (ADR-0100): items scrolled off above
     }
     if (startIdx + maxVisible < static_cast<int>(items.size())) {
-        canvas.setTextColor(theme::ACCENT());
-        canvas.setCursor(config::SCREEN_WIDTH - 10, config::SCREEN_HEIGHT - 30);
-        canvas.print("\x1F");  // down triangle (ADR-0098): items scrolled off below
+        ui::drawTriGlyph(canvas, config::SCREEN_WIDTH - 10, config::SCREEN_HEIGHT - 30,
+                         ui::TriGlyph::Down, theme::ACCENT());  // items scrolled off below
     }
     
-    // Action bar. Key glyphs come from ui::footerKeyLabel so this hand-rolled bar renders the
-    // same Esc / arrow-triangle house style as the FooterHints component (ADR-0098); moving the
-    // menu fully onto FooterHints rides with the Menu->ScrollableList rework (LEDGER item 94),
-    // where this rendering is reworked anyway. On the keyboardless M5StickC it shows the action
-    // words alone, exactly as FooterHints does.
+    // Action bar, in the same house style as the FooterHints component: text keys from
+    // ui::footerKeyLabel, the arrow-nav glyph as a filled triangle pair drawn with
+    // ui::drawFooterKeyGlyphs (ADR-0100: the CP437 triangle bytes do not render through the
+    // text layer). Moving the menu fully onto FooterHints rides with the Menu->ScrollableList
+    // rework (LEDGER item 94). On the keyboardless M5StickC it shows the action words alone.
+    const int16_t barY = config::SCREEN_HEIGHT - 14;
     canvas.fillRect(0, config::SCREEN_HEIGHT - 20, config::SCREEN_WIDTH, 20, theme::BG_SECONDARY());
     canvas.setTextColor(theme::TEXT_SECONDARY());
-    canvas.setCursor(5, config::SCREEN_HEIGHT - 14);
+    canvas.setCursor(5, barY);
 
 #if defined(TARGET_M5STICK)
     canvas.print(menuStack_.empty() ? "Nav  Select" : "Back  Select");
 #else
     if (menuStack_.empty()) {
-        canvas.print(ui::footerKeyLabel(';'));  // up/down triangle pair: vertical nav
+        // Root: up+down triangle pair (2 cells) for vertical nav, drawn as geometry.
+        ui::drawFooterKeyGlyphs(canvas, 5, barY, ';', theme::TEXT_SECONDARY());
+        canvas.setCursor(5 + 2 * theme::FONT_CELL_WIDTH, barY);
         canvas.print(":Nav  ");
     } else {
         canvas.print(ui::footerKeyLabel('`'));  // Esc
