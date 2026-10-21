@@ -120,9 +120,12 @@ void SettingsScreen::buildSettingsList() {
     items_[itemCount_++] = SettingItem("Brightness", &tempBrightness_, 10, 100, 10, "%");
     items_[itemCount_++] = SettingItem("Toast Position", &tempToastPosition_, 0, 2, 1, "");
     
-    // Theme selector with label showing current theme name
+    // Theme selector with label showing current theme name. Max is the last non-custom
+    // preset (CUSTOM is a disabled placeholder), derived from the enum so a new preset is
+    // selectable without re-counting here.
+    static constexpr int lastSelectableTheme = static_cast<int>(ThemePreset::CUSTOM) - 1;
     snprintf(themeLabelBuf_, sizeof(themeLabelBuf_), "Theme: %s", getThemeName(static_cast<ThemePreset>(tempThemePreset_)));
-    items_[itemCount_++] = SettingItem(themeLabelBuf_, &tempThemePreset_, 0, 5, 1, "");
+    items_[itemCount_++] = SettingItem(themeLabelBuf_, &tempThemePreset_, 0, lastSelectableTheme, 1, "");
     
     // WiFi Connection section
     items_[itemCount_++] = SettingItem::header("-- WiFi Connection --");

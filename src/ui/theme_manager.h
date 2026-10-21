@@ -32,8 +32,9 @@ enum class ThemePreset : uint8_t {
     FALLOUT = 3,     ///< Pip-Boy green terminal
     CYBERPUNK = 4,   ///< Neon pink/blue synthwave
     M5STICK = 5,     ///< Orange matching M5Stick hardware
-    CUSTOM = 6,      ///< User-defined (future)
-    PRESET_COUNT = 7
+    TRON = 6,        ///< Electric cyan on black (the only blue identity theme)
+    CUSTOM = 7,      ///< User-defined (future)
+    PRESET_COUNT = 8
 };
 
 /**
@@ -47,6 +48,7 @@ inline const char* getThemeName(ThemePreset preset) {
         case ThemePreset::FALLOUT:   return "Fallout";
         case ThemePreset::CYBERPUNK: return "Cyberpunk";
         case ThemePreset::M5STICK:   return "M5Stick";
+        case ThemePreset::TRON:      return "Tron";
         case ThemePreset::CUSTOM:    return "Custom";
         default:                     return "Unknown";
     }
@@ -191,6 +193,26 @@ inline const ThemeColors M5STICK = {
     .textInverse  = 0x0000                     // Black
 };
 
+// Tron - Electric cyan on a black grid void
+// NOTE: every value is chosen to survive the 8-bit RGB332 canvas (red/green 3-bit, blue
+// 2-bit = levels 0/85/170/255), the same constraint documented on CYBERPUNK above. Tron's
+// cyan-on-black identity sidesteps the blue trap: the backgrounds stay near-black (deep
+// tinted blues would quantize straight to black anyway) and the identity rides the accent
+// and the selection band. RGB332 landings in the comments are where each colour renders.
+inline const ThemeColors TRON = {
+    .bgPrimary    = 0x0000,                     // Black grid void
+    .bgSecondary  = rgb565(0x00, 0x00, 0x60),  // Dark blue panel   (RGB332 0,0,85)
+    .bgTertiary   = rgb565(0x00, 0x30, 0x60),  // Dark teal         (RGB332 0,36,85)
+    .bgSelected   = rgb565(0x00, 0x50, 0x80),  // Teal selection    (RGB332 0,73,170)
+    .accent       = rgb565(0x22, 0xD3, 0xEE),  // Electric cyan     (RGB332 36,219,255)
+    .accentLight  = rgb565(0x90, 0xE8, 0xFF),  // Pale cyan glow    (RGB332 146,255,255)
+    .accentDark   = rgb565(0x00, 0x70, 0xB0),  // Teal              (RGB332 0,109,170)
+    .textPrimary  = rgb565(0xB0, 0xF0, 0xFF),  // Cyan-tinted white (RGB332 182,255,255)
+    .textSecondary = rgb565(0x40, 0x90, 0xB0), // Muted teal        (RGB332 73,146,170)
+    .textDisabled = rgb565(0x00, 0x50, 0x60),  // Dark teal         (RGB332 0,73,85)
+    .textInverse  = 0x0000                      // Black (text on cyan bands)
+};
+
 // Custom (placeholder - will be user-defined)
 inline const ThemeColors CUSTOM_DEFAULT = {
     .bgPrimary    = 0x0000,
@@ -271,8 +293,14 @@ public:
     
     /**
      * @brief Get total number of available presets (excluding custom if disabled)
+     *
+     * Derived from the enum so adding a preset needs only the enum edit: CUSTOM is the
+     * last value before the PRESET_COUNT sentinel, so hiding it drops the count by one.
      */
-    uint8_t getPresetCount() const { return customEnabled_ ? 7 : 6; }
+    uint8_t getPresetCount() const {
+        constexpr uint8_t total = static_cast<uint8_t>(ThemePreset::PRESET_COUNT);
+        return customEnabled_ ? total : total - 1;
+    }
     
     /**
      * @brief Cycle to next theme (for live preview)
@@ -349,6 +377,7 @@ private:
             case ThemePreset::FALLOUT:   colors_ = presets::FALLOUT; break;
             case ThemePreset::CYBERPUNK: colors_ = presets::CYBERPUNK; break;
             case ThemePreset::M5STICK:   colors_ = presets::M5STICK; break;
+            case ThemePreset::TRON:      colors_ = presets::TRON; break;
             case ThemePreset::CUSTOM:    colors_ = customColors_; break;
             default:                     colors_ = presets::RED_TEAM; break;
         }

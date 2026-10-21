@@ -71,7 +71,7 @@ struct DisplaySettings {
     uint8_t brightness = 100;
     uint16_t screenTimeoutSec = 0;  // 0 = never
     uint8_t toastPosition = 0;      // 0=TOP, 1=CENTER, 2=BOTTOM
-    uint8_t themePreset = 0;        // 0=Red Team, 1=Matrix, 2=T800, 3=Fallout, 4=Cyberpunk, 5=M5Stick
+    uint8_t themePreset = 0;        // 0=Red Team, 1=Matrix, 2=T800, 3=Fallout, 4=Cyberpunk, 5=M5Stick, 6=Tron
 };
 
 struct SystemSettings {
