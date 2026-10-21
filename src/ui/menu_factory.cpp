@@ -22,32 +22,39 @@ std::vector<MenuItem> buildRootMenuItems() {
         MenuItem::back()
     };
 
-    // Wireless submenu (Back last: entry lands the cursor on a real action, and
-    // with wrap-around nav Back is one Up-press away from the top)
+    // Wireless submenu, grouped Recon / Attacks / Data with a separator between bands so the
+    // ~12 entries read as three intents instead of one flat wall (Back last: entry lands the
+    // cursor on a real action, and with wrap-around nav Back is one Up-press away from the top).
     std::vector<MenuItem> wirelessMenu = {
+        // Recon: passive discovery, nothing transmitted at the target.
         MenuItem::action("Scan Networks", ACTION_SCAN_NETWORKS, 's'),
         MenuItem::action("Packet Sniffer", ACTION_PACKET_SNIFFER, 'p'),
+        // Live-gated (slice-0042): a GPS attached after boot un-greys Wardriving on the next
+        // frame after a Modules Re-scan refreshes g_gpsDetected, with no menu rebuild. Keyed
+        // 'w', not 'd': 'd' collided with Deauth below and was a dead shortcut (the first
+        // 'd' match won, so Wardriving's key never fired).
+        MenuItem::gated("Wardriving", ACTION_WARDRIVING, 'w', "Wardriving (No GPS)",
+                        []{ return adversary::ui::g_gpsDetected; }),
+
+        MenuItem::separator(),
+        // Attacks: active transmission. Handshake leads as the headline WPA-capture flow.
+        MenuItem::submenu("Handshake", handshakeMenu, 'h'),
         MenuItem::action("Deauth Attack", ACTION_DEAUTH_ATTACK, 'd'),
         MenuItem::action("Beacon Spam", ACTION_BEACON_SPAM, 'b'),
         MenuItem::action("Probe Flood", ACTION_PROBE_FLOOD, 'f'),
-        MenuItem::submenu("Handshake", handshakeMenu, 'h'),
-
-        MenuItem::separator(),
         MenuItem::action("Evil Twin AP", ACTION_EVIL_TWIN, 'e'),
         MenuItem::action("Karma AP", ACTION_KARMA_AP, 'k'),
 
-        // Live-gated (slice-0042): a GPS attached after boot un-greys Wardriving on the next
-        // frame after a Modules Re-scan refreshes g_gpsDetected, with no menu rebuild.
-        MenuItem::gated("Wardriving", ACTION_WARDRIVING, 'd', "Wardriving (No GPS)",
-                        []{ return adversary::ui::g_gpsDetected; }),
         MenuItem::separator(),
-        // Captures is a pure browser over SD capture files — nothing to show without a card,
-        // so gate it on the cached isReady() bool live (slice-0042): mounting a card (boot or
-        // Retry SD Mount) un-greys it on the next frame. Safe to poll per-frame because
-        // isReady() is a flag read, not SD I/O (unlike the SERVER tile's fileExists gate).
+        // Data: browse/manage what the recon and attacks produced. Captures is a pure browser
+        // over SD capture files — nothing to show without a card, so gate it on the cached
+        // isReady() bool live (slice-0042): mounting a card (boot or Retry SD Mount) un-greys
+        // it on the next frame. Safe to poll per-frame because isReady() is a flag read, not
+        // SD I/O (unlike the SERVER tile's fileExists gate).
         MenuItem::gated("Captures", ACTION_CAPTURES, 'c', "Captures (No SD)",
                         []{ return adversary::SDManager::getInstance().isReady(); }),
         MenuItem::action("Whitelist", ACTION_WHITELIST, 'l'),
+
         MenuItem::separator(),
         MenuItem::back()
     };
