@@ -432,7 +432,7 @@ void BadUsbScreen::runScript(int index) {
     m_interp.load(ducky);
     m_state       = State::RUNNING;
     m_needsRedraw = true;
-    m_footer.setHints({{'`', "Abort", true}});
+    m_footer.setHints({{'`', "Stop", true}});
 }
 
 void BadUsbScreen::freeScriptBuffer() {

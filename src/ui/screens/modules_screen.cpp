@@ -55,7 +55,7 @@ void ModulesScreen::show() {
     footerHints_.setHints({
         {'r', "Re-scan"},
         {'o', "Override"},
-        {'`', "Exit"}
+        {'`', "Back"}
     });
 }
 

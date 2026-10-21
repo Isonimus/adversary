@@ -357,7 +357,7 @@ void DeauthScreen::drawRunning(Canvas& canvas)
     footerHints_.setHints({
         {' ', attack.isPaused() ? "Resume" : "Pause"},
         {'\n', "Stop"},
-        {'`', "Abort"}
+        {'`', "Stop"}
     });
     drawFooter(canvas);
 #else
@@ -406,7 +406,7 @@ void DeauthScreen::drawResults(Canvas& canvas)
     // Footer
     footerHints_.setHints({
         {'\n', "Continue"},
-        {'`', "Exit"}
+        {'`', "Back"}
     });
     drawFooter(canvas);
 #else

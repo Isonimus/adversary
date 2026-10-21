@@ -756,7 +756,7 @@ void BleBadBleScreen::runBleScript(int index) {
     m_bleInterp.load(m_bleScriptBuf);
     m_state = State::SCRIPT_RUNNING;
     m_needsRedraw = true;
-    footerHints_.setHints({{'`', "Abort", true}});
+    footerHints_.setHints({{'`', "Stop", true}});
 }
 
 void BleBadBleScreen::freeBleScriptBuf() {

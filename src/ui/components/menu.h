@@ -14,6 +14,7 @@
 #include <vector>
 #include <functional>
 #include "../../hal/input/input_manager.h"
+#include "footer_hints.h"   // ui::footerKeyLabel: shared key-glyph house style (ADR-0098)
 #include <memory>
 
 namespace adversary {
@@ -300,24 +301,36 @@ void Menu::render(Canvas& canvas) {
     if (startIdx > 0) {
         canvas.setTextColor(theme::ACCENT());
         canvas.setCursor(config::SCREEN_WIDTH - 10, 25);
-        canvas.print("^");
+        canvas.print("\x1E");  // up triangle (ADR-0098): items scrolled off above
     }
     if (startIdx + maxVisible < static_cast<int>(items.size())) {
         canvas.setTextColor(theme::ACCENT());
         canvas.setCursor(config::SCREEN_WIDTH - 10, config::SCREEN_HEIGHT - 30);
-        canvas.print("v");
+        canvas.print("\x1F");  // down triangle (ADR-0098): items scrolled off below
     }
     
-    // Action bar
+    // Action bar. Key glyphs come from ui::footerKeyLabel so this hand-rolled bar renders the
+    // same Esc / arrow-triangle house style as the FooterHints component (ADR-0098); moving the
+    // menu fully onto FooterHints rides with the Menu->ScrollableList rework (LEDGER item 94),
+    // where this rendering is reworked anyway. On the keyboardless M5StickC it shows the action
+    // words alone, exactly as FooterHints does.
     canvas.fillRect(0, config::SCREEN_HEIGHT - 20, config::SCREEN_WIDTH, 20, theme::BG_SECONDARY());
     canvas.setTextColor(theme::TEXT_SECONDARY());
     canvas.setCursor(5, config::SCREEN_HEIGHT - 14);
-    
+
+#if defined(TARGET_M5STICK)
+    canvas.print(menuStack_.empty() ? "Nav  Select" : "Back  Select");
+#else
     if (menuStack_.empty()) {
-        canvas.print(";/.:Nav  ENTER:Select");
+        canvas.print(ui::footerKeyLabel(';'));  // up/down triangle pair: vertical nav
+        canvas.print(":Nav  ");
     } else {
-        canvas.print("`:Back  ENTER:Select");
+        canvas.print(ui::footerKeyLabel('`'));  // Esc
+        canvas.print(":Back  ");
     }
+    canvas.print(ui::footerKeyLabel('\n'));      // Enter
+    canvas.print(":Select");
+#endif
 }
 
 } // namespace adversary

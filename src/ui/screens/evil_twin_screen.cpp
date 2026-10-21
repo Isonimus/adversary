@@ -20,7 +20,7 @@ EvilTwinScreen::EvilTwinScreen() {
     footerHints_.setHints({
         {'`', "Back"},
         {';', "Nav"},
-        {'\n', "Go"}
+        {'\n', "Start"}
     });
 }
 
@@ -719,12 +719,12 @@ void EvilTwinScreen::renderCredentials(Canvas& canvas) {
     if (credentialScrollPos_ > 0) {
         canvas.setTextColor(theme::ACCENT());
         canvas.setCursor(config::SCREEN_WIDTH - 10, 25);
-        canvas.print("^");
+        canvas.print("\x1E");  // up triangle (ADR-0098): items scrolled off above
     }
     if (credentialScrollPos_ + maxVisible < creds.size()) {
         canvas.setTextColor(theme::ACCENT());
         canvas.setCursor(config::SCREEN_WIDTH - 10, config::SCREEN_HEIGHT - 30);
-        canvas.print("v");
+        canvas.print("\x1F");  // down triangle (ADR-0098): items scrolled off below
     }
     
     // Footer hints

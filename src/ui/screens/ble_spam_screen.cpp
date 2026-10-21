@@ -34,9 +34,9 @@ void BleSpamScreen::show() {
     
     footerHints_.setHints({
         {';', "Nav"},
-        {'.', "Nav"},
         {',', "Edit"},
-        {'\r', "Go"}
+        {'\r', "Start"},
+        {'`', "Back"}
     });
 }
 
@@ -265,13 +265,15 @@ void BleSpamScreen::stopAttack() {
     // Restore memory/WiFi
     SystemManager::getInstance().restoreFromMemoryIntensiveTask();
     
+    // Returns to CONFIG, so show the same hints as the config entry footer above
+    // (the old Prev/Next/Toggle + dead 'd' Start set never matched this screen's keys).
     footerHints_.setHints({
-        {';', "Prev", true},
-        {'.', "Next", true},
-        {'\n', "Toggle", true},
-        {'d', "Start", true}
+        {';', "Nav"},
+        {',', "Edit"},
+        {'\r', "Start"},
+        {'`', "Back"}
     });
-    
+
     m_needsRedraw = true;
     ToastManager::getInstance().show("Attack Stopped", ToastType::WARNING);
 }

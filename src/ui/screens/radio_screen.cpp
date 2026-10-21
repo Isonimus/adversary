@@ -208,7 +208,7 @@ void RadioScreen::updateFooterHints() {
             break;
         case MenuState::SIGNAL_LIST:
             footerHints_.setHints({{' ', "Focus"}, {';', "Nav"},
-                                   {'\n', "Open", !signals_.empty()}, {'`', "Back"}});
+                                   {'\n', "Select", !signals_.empty()}, {'`', "Back"}});
             break;
         case MenuState::SIGNAL_ACTION:
             footerHints_.setHints({{' ', "Focus"}, {';', "Nav"}, {'\n', "Select"}, {'`', "Back"}});
@@ -217,7 +217,7 @@ void RadioScreen::updateFooterHints() {
             footerHints_.setHints({{'S', "Save"}, {'`', "Discard"}});
             break;
         case MenuState::FREQ_SELECT:
-            footerHints_.setHints({{' ', "Focus"}, {';', "Nav"}, {'\n', "OK"}, {'`', "Back"}});
+            footerHints_.setHints({{' ', "Focus"}, {';', "Nav"}, {'\n', "Select"}, {'`', "Back"}});
             break;
         case MenuState::FSK_SELECT:
             footerHints_.setHints({{' ', "Focus"}, {';', "Nav"}, {'\n', "Capture"}, {'`', "Back"}});

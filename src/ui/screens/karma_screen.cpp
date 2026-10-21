@@ -522,11 +522,15 @@ void KarmaScreen::renderConfig(Canvas& canvas) {
         },
         !footerHints_.hasFocus());
 
-    // Footer hints. The 'M' hint is a fixed label (no appended value): the live mode already
-    // shows on the Mode row, and appending it here overflowed the footer (slice-0093).
+    // Config footer matches the sibling config forms (beacon_spam, deauth): Focus / Nav /
+    // Change, since karma's config list has the same nav + edit + ENTER model. The 'M'/'P'
+    // mode/portal shortcuts stay live in handleInput but are no longer advertised here: the
+    // narrow M5StickC footer can't hold them alongside Nav/Change, and both options are
+    // reachable by nav + edit like every other row (ADR-0098 drift b).
     footerHints_.setHints({
-        {'M', "Mode", true},
-        {'P', "Portal", configMode_ == 1}
+        {' ', "Focus"},
+        {';', "Nav"},
+        {'\n', "Change"}
     });
     footerHints_.render(canvas);
 }
@@ -754,12 +758,12 @@ void KarmaScreen::renderProbes(Canvas& canvas) {
     if (probeScrollPos_ > 0) {
         canvas.setTextColor(theme::ACCENT());
         canvas.setCursor(config::SCREEN_WIDTH - 10, 25);
-        canvas.print("^");
+        canvas.print("\x1E");  // up triangle (ADR-0098): items scrolled off above
     }
     if (probeScrollPos_ + maxVisible < probes.size()) {
         canvas.setTextColor(theme::ACCENT());
         canvas.setCursor(config::SCREEN_WIDTH - 10, config::SCREEN_HEIGHT - 30);
-        canvas.print("v");
+        canvas.print("\x1F");  // down triangle (ADR-0098): items scrolled off below
     }
     
     // Footer hints
@@ -843,7 +847,7 @@ void KarmaScreen::renderClients(Canvas& canvas) {
 
     // Footer hints
     footerHints_.setHints({
-        {'\r', "Details", !macs.empty()},
+        {'\r', "Select", !macs.empty()},
         {'`', "Back", true}
     });
     footerHints_.render(canvas);

@@ -443,7 +443,7 @@ bool RfidScreen::handleInput(char key) {
             // Go back to summary from sector detail
             m_state = State::AUDIT_SUMMARY;
             footerHints_.setHints({
-                {'\n', "View", true},
+                {'\n', "Select", true},
                 {'s', "Save", hasAuditData()},
                 {'`', "Back", true}
             });
@@ -565,7 +565,7 @@ bool RfidScreen::handleInput(char key) {
                     m_state = State::WRITE_PROMPT;
                     m_writePromptSelection = 0;
                     footerHints_.setHints({
-                        {';', "^", true}, {'.', "v", true},
+                        {';', "Scroll", true},
                         {'\n', "Select", true}, {'`', "Back", true}
                     });
                     m_needsRedraw = true;
@@ -610,8 +610,7 @@ bool RfidScreen::handleInput(char key) {
         m_state = State::DETAILS;
         m_detailsScroll = 0;  // Reset scroll on entry
         footerHints_.setHints({
-            {';', "^", true},  // Scroll up
-            {'.', "v", true},  // Scroll down
+            {';', "Scroll", true},
             {'`', "Back", true}
         });
         m_needsRedraw = true;
@@ -744,8 +743,7 @@ void RfidScreen::promptAudit() {
     m_needsRedraw = true;
     
     footerHints_.setHints({
-        {';', "^", true},
-        {'.', "v", true},
+        {';', "Scroll", true},
         {'\n', "Select", true},
         {'`', "Back", true}
     });
@@ -814,7 +812,7 @@ void RfidScreen::onAuditComplete() {
     ToastManager::getInstance().show(msg, ToastType::SUCCESS);
     
     footerHints_.setHints({
-        {'\n', "View", true},
+        {'\n', "Select", true},
         {'s', "Save", hasAuditData()},
         {'`', "Back", true}
     });
@@ -1203,7 +1201,7 @@ void RfidScreen::enterWritePick() {
 
     m_state = State::WRITE_PICK;
     footerHints_.setHints({
-        {';', "^", true}, {'.', "v", true},
+        {';', "Scroll", true},
         {'\n', "Select", true}, {'`', "Back", true}
     });
     m_needsRedraw = true;

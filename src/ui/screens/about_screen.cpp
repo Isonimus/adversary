@@ -87,7 +87,7 @@ void AboutScreen::show() {
     
     // Initialize footer hints
     footerHints_.setHints({
-        {'`', "Exit"}
+        {'`', "Back"}
     });
 }
 

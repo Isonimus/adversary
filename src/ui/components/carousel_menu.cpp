@@ -44,7 +44,7 @@ void CarouselMenu::setItems(const std::vector<CarouselItem>& items) {
     // This implies interactive footer.
     // Let's go with standard SELECT for now.
     footerHints_.setHints({
-        {'\n', "Open", true}
+        {'\n', "Select", true}
     });
 }
 

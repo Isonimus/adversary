@@ -385,7 +385,7 @@ void BeaconSpamScreen::drawStats(Canvas& canvas)
     // Update footer hints for completed state
     footerHints_.setHints({
         {'\n', "Continue"},
-        {'`', "Exit"}
+        {'`', "Back"}
     });
 #else
     (void)canvas;

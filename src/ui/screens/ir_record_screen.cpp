@@ -118,7 +118,7 @@ void IrRecordScreen::updateFooterHints() {
             break;
         case MenuState::CODE_LIST:
             footerHints_.setHints({{' ', "Focus"}, {';', "Nav"},
-                                   {'\n', "Open", !codes_.empty()}, {'`', "Back"}});
+                                   {'\n', "Select", !codes_.empty()}, {'`', "Back"}});
             break;
         case MenuState::CODE_ACTION:
         case MenuState::TX_SOURCE_SELECT:

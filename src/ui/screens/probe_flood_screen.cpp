@@ -377,7 +377,7 @@ void ProbeFloodScreen::drawStats(Canvas& canvas)
     
     footerHints_.setHints({
         {'\n', "Continue"},
-        {'`', "Exit"}
+        {'`', "Back"}
     });
 #else
     (void)canvas;

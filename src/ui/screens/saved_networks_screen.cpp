@@ -79,7 +79,7 @@ void SavedNetworksScreen::render(Canvas& canvas) {
     
     // Footer Hints
     footerHints_.setHints({
-        {'\n', "Action", true},
+        {'\n', "Select", true},
         {'`', "Back", true}
     });
     

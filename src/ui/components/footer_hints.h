@@ -11,12 +11,44 @@
 #pragma once
 
 #include <cstdint>
+#include <cstring>
 #include <vector>
 #include <initializer_list>
 #include "../theme.h"
 
 namespace adversary {
 namespace ui {
+
+/**
+ * @brief Human-readable label for a footer hint key (ADR-0098 house style).
+ *
+ * Control keys map to words; the Cardputer arrow cluster maps to the CP437 directional
+ * triangles the default GLCD font already carries (measured in ADR-0098, decoded from
+ * glcdfont.h). `;` (up) and `,` (left) are the handles for bidirectional movement in this
+ * UI (vertical list nav, horizontal value adjust), so they return the two-glyph pair; `.`
+ * and `/` keep a single direction for the rare one-way case. Any other key returns its
+ * uppercased character. A free function (not a FooterHints member) so the mapping is
+ * host-testable by include alone, mirroring configRowValueX / ActionButton's helper split.
+ */
+inline const char* footerKeyLabel(char key) {
+    switch (key) {
+        case '\n':
+        case '\r': return "Enter";
+        case '`':  return "Esc";
+        case ' ':  return "Space";
+        case '\t': return "Tab";
+        case ';':  return "\x1E\x1F";  // up + down triangle: vertical nav/scroll handle
+        case '.':  return "\x1F";      // down triangle
+        case ',':  return "\x11\x10";  // left + right triangle: horizontal adjust handle
+        case '/':  return "\x10";      // right triangle
+        default: {
+            // Uppercased single character held in a static one-glyph cell.
+            static char buf[2] = {0, 0};
+            buf[0] = (key >= 'a' && key <= 'z') ? (key - 32) : key;
+            return buf;
+        }
+    }
+}
 
 /**
  * @brief Single footer hint item
@@ -295,7 +327,7 @@ public:
             canvas.print(hint.label);
 #else
             // Cardputer: Key:Label format
-            canvas.print(getKeyLabel(hint.key));
+            canvas.print(footerKeyLabel(hint.key));
             canvas.print(':');
             canvas.print(hint.label);
 #endif
@@ -327,29 +359,8 @@ private:
         return strlen(hint.label) * theme::FONT_CELL_WIDTH;
 #else
         // Key:Label format - use formatted key label length
-        return (strlen(getKeyLabel(hint.key)) + 1 + strlen(hint.label)) * theme::FONT_CELL_WIDTH;
+        return (strlen(footerKeyLabel(hint.key)) + 1 + strlen(hint.label)) * theme::FONT_CELL_WIDTH;
 #endif
-    }
-    
-    /**
-     * @brief Get display label for a key character
-     * @param key Key character
-     * @return Human-readable key name
-     */
-    static const char* getKeyLabel(char key) {
-        switch (key) {
-            case '\n':
-            case '\r': return "Enter";
-            case '`': return "Esc";
-            case ' ': return "Space";
-            case '\t': return "Tab";
-            default: {
-                // Return uppercase single character as static buffer
-                static char buf[2] = {0, 0};
-                buf[0] = (key >= 'a' && key <= 'z') ? (key - 32) : key;
-                return buf;
-            }
-        }
     }
     
     /**

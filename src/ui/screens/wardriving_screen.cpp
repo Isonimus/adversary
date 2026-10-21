@@ -413,7 +413,7 @@ void WardrivingScreen::drawIdle(Canvas& canvas) {
     
     footerHints_.setHints({
         {'\r', "Start", true},
-        {'`', "Exit", true}
+        {'`', "Back", true}
     });
     footerHints_.render(canvas);
 }
