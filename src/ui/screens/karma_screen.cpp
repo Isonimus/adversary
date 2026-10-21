@@ -5,6 +5,7 @@
 
 #include "karma_screen.h"
 #include "ui/components/action_button.h"
+#include "ui/components/config_row.h"
 
 #ifdef ESP32
 #include <WiFi.h>
@@ -511,18 +512,13 @@ void KarmaScreen::renderConfig(Canvas& canvas) {
                 ui::ActionButton::render(c, rowY, "START KARMA", selected);
                 return;
             }
-            c.setTextColor(selected ? theme::ACCENT() : theme::TEXT_PRIMARY());
-            c.setCursor(4, rowY + theme::LIST_ROW_TEXT_DY);
-            c.print(optionLabels[idx]);
-
             char valueStr[24] = "";
             switch (idx) {
                 case 0: strncpy(valueStr, getModeStr(), sizeof(valueStr)); break;
                 case 1: strncpy(valueStr, getPortalStr(), sizeof(valueStr)); break;
                 case 2: strncpy(valueStr, configLogSD_ ? "Yes" : "No", sizeof(valueStr)); break;
             }
-            c.setCursor(75, rowY + theme::LIST_ROW_TEXT_DY);
-            c.print(valueStr);
+            ui::ConfigRow::render(c, rowY, optionLabels[idx], valueStr);
         },
         !footerHints_.hasFocus());
 

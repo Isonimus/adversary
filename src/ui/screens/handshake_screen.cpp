@@ -13,6 +13,7 @@
 #include "modules/gps/gps_manager.h"
 #include "hal/expansion/expansion_cap.h"
 #include "ui/components/action_button.h"
+#include "ui/components/config_row.h"
 #include "ui/components/status_bar.h"
 #include "ui/components/toast_manager.h"
 #include "ui/screen_manager.h"
@@ -1083,7 +1084,7 @@ void HandshakeScreen::drawConfig(Canvas& canvas) {
     // Manual mode: Target (row 0) + three option rows + START.
     bool targetSelected = (configSelection_ == 0);
     if (targetSelected) {
-        canvas.fillRect(0, y - 1, screenWidth, 12, theme::ACCENT());
+        canvas.fillRect(0, y - 1, screenWidth, 12, theme::BG_SELECTED());
     }
     canvas.setTextColor(theme::TEXT_SECONDARY());
     canvas.setTextSize(1);
@@ -1125,12 +1126,8 @@ void HandshakeScreen::drawConfig(Canvas& canvas) {
         }
 
         if (selected) {
-            canvas.fillRect(0, y - 1, screenWidth, 12, theme::ACCENT());
+            canvas.fillRect(0, y - 1, screenWidth, 12, theme::BG_SELECTED());
         }
-        canvas.setTextColor(theme::TEXT_PRIMARY());
-
-        canvas.setCursor(4, y);
-        canvas.print(labels[i]);
 
         char valueStr[16];
         switch (i) {
@@ -1139,9 +1136,10 @@ void HandshakeScreen::drawConfig(Canvas& canvas) {
             case 2: snprintf(valueStr, sizeof(valueStr), "%lus", timeoutSecs_); break;
         }
 
-        int16_t valueX = screenWidth - strlen(valueStr) * theme::FONT_CELL_WIDTH - 8;
-        canvas.setCursor(valueX, y);
-        canvas.print(valueStr);
+        // Row content via the shared ConfigRow (ADR-0096): label left, value right-aligned
+        // dim. Pass the row top (y - DY) so ConfigRow's house baseline lands on this screen's
+        // existing per-row baseline y, keeping the hand-tuned spacing untouched.
+        ui::ConfigRow::render(canvas, y - theme::LIST_ROW_TEXT_DY, labels[i], valueStr);
 
         y += 14;
     }

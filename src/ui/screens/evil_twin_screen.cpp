@@ -5,6 +5,7 @@
 
 #include "evil_twin_screen.h"
 #include "ui/components/action_button.h"
+#include "ui/components/config_row.h"
 #include "ui/screen_manager.h"
 #include "core/event_bus.h"
 
@@ -502,10 +503,6 @@ void EvilTwinScreen::renderConfig(Canvas& canvas) {
                 ui::ActionButton::render(c, rowY, "START TWIN", selected);
                 return;
             }
-            c.setTextColor(selected ? theme::ACCENT() : theme::TEXT_PRIMARY());
-            c.setCursor(4, rowY + theme::LIST_ROW_TEXT_DY);
-            c.print(optionLabels[idx]);
-
             char valueStr[24] = "";
             switch (idx) {
                 case 0: {
@@ -541,8 +538,7 @@ void EvilTwinScreen::renderConfig(Canvas& canvas) {
                     break;
                 case 6: strncpy(valueStr, configLogSD_ ? "Yes" : "No", sizeof(valueStr)); break;
             }
-            c.setCursor(80, rowY + theme::LIST_ROW_TEXT_DY);
-            c.print(valueStr);
+            ui::ConfigRow::render(c, rowY, optionLabels[idx], valueStr);
         },
         !footerHints_.hasFocus());
 

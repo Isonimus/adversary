@@ -8,6 +8,7 @@
 #include "ui/theme.h"
 #include "ui/components/status_bar.h"
 #include "ui/components/action_button.h"
+#include "ui/components/config_row.h"
 #include "modules/storage/settings_manager.h"
 #include "modules/ble/ble_scanner.h"
 #include "config/config.h"
@@ -169,34 +170,29 @@ void BleBadBleScreen::drawIdle(Canvas& canvas) {
                 ui::ActionButton::render(c, rowY, "START ATTACK", selected);
                 return;
             }
-            c.setTextColor(selected ? theme::ACCENT() : theme::TEXT_PRIMARY());
-            c.setCursor(10, rowY + theme::LIST_ROW_TEXT_DY);
-            c.print(labels[idx]);
-
-            // Value keeps this screen's two-tone colour: selected row -> primary, else secondary.
-            c.setCursor(80, rowY + theme::LIST_ROW_TEXT_DY);
-            c.setTextColor(selected ? theme::TEXT_PRIMARY() : theme::TEXT_SECONDARY());
+            char valueStr[24] = "";
             switch (idx) {
                 case 0: // Name
-                    c.print(m_sessionName);
+                    strncpy(valueStr, m_sessionName, sizeof(valueStr) - 1);
                     break;
                 case 1: // Type
                     switch (m_appearance) {
-                        case 0x03C1: c.print("< Keyboard >"); break;
-                        case 0x03C2: c.print("< Mouse >"); break;
-                        case 0x03C3: c.print("< Joystick >"); break;
-                        case 0x03C4: c.print("< Gamepad >"); break;
-                        default: c.print("< Unknown >"); break;
+                        case 0x03C1: strncpy(valueStr, "Keyboard", sizeof(valueStr) - 1); break;
+                        case 0x03C2: strncpy(valueStr, "Mouse", sizeof(valueStr) - 1); break;
+                        case 0x03C3: strncpy(valueStr, "Joystick", sizeof(valueStr) - 1); break;
+                        case 0x03C4: strncpy(valueStr, "Gamepad", sizeof(valueStr) - 1); break;
+                        default: strncpy(valueStr, "Unknown", sizeof(valueStr) - 1); break;
                     }
                     break;
                 case 2: // Target
                     switch (m_targetOs) {
-                        case TargetOS::LINUX:   c.print("< LINUX >"); break;
-                        case TargetOS::WINDOWS: c.print("< WINDOWS >"); break;
-                        case TargetOS::MACOS:   c.print("< MACOS >"); break;
+                        case TargetOS::LINUX:   strncpy(valueStr, "LINUX", sizeof(valueStr) - 1); break;
+                        case TargetOS::WINDOWS: strncpy(valueStr, "WINDOWS", sizeof(valueStr) - 1); break;
+                        case TargetOS::MACOS:   strncpy(valueStr, "MACOS", sizeof(valueStr) - 1); break;
                     }
                     break;
             }
+            ui::ConfigRow::render(c, rowY, labels[idx], valueStr);
         },
         !footerHints_.hasFocus());
 }
