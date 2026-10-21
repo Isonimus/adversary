@@ -32,7 +32,7 @@ DeauthScreen::DeauthScreen()
         {' ', "Focus"},
         {'s', "Start", false},
         {';', "Nav"},
-        {'\n', "Toggle"}
+        {'\n', "Change"}
     });
 }
 
@@ -73,7 +73,7 @@ void DeauthScreen::show()
             {' ', "Focus"},
             {'s', "Start", hasTarget_},
             {';', "Nav"},
-            {'\n', "Toggle"}
+            {'\n', "Change"}
         });
     }
     // Subscribe for attack state changes
@@ -478,6 +478,14 @@ bool DeauthScreen::handleInput(char key)
         case '.':  // Down
             handleDown();
             return true;
+        case ',':  // Edit previous (ADR-0092)
+        case '<':
+            handleEdit(-1);
+            return true;
+        case '/':  // Edit next (ADR-0092)
+        case '>':
+            handleEdit(+1);
+            return true;
         case '\n':
         case '\r':
             handleSelect();
@@ -532,34 +540,7 @@ void DeauthScreen::handleSelect()
                     startAttack();
                 }
             } else {
-                // Toggle options
-                switch (configList_.selectedIndex()) {
-                    case 0:  // Target type
-                        if (targetType_ == DeauthTargetType::ALL_CLIENTS) {
-                            targetType_ = DeauthTargetType::SINGLE_CLIENT;
-                        } else if (targetType_ == DeauthTargetType::SINGLE_CLIENT) {
-                            targetType_ = DeauthTargetType::AP_ONLY;
-                        } else {
-                            targetType_ = DeauthTargetType::ALL_CLIENTS;
-                        }
-                        break;
-                    case 1:  // Packet count
-                        if (packetCount_ == 0) packetCount_ = 50;
-                        else if (packetCount_ < 100) packetCount_ = 100;
-                        else if (packetCount_ < 500) packetCount_ = 500;
-                        else if (packetCount_ < 1000) packetCount_ = 1000;
-                        else packetCount_ = 0;  // Infinite
-                        break;
-                    case 2:  // Delay
-                        if (delayMs_ <= 10) delayMs_ = 50;
-                        else if (delayMs_ <= 50) delayMs_ = 100;
-                        else if (delayMs_ <= 100) delayMs_ = 200;
-                        else delayMs_ = 10;
-                        break;
-                    case 3:  // Send disassoc
-                        sendDisassoc_ = !sendDisassoc_;
-                        break;
-                }
+                handleEdit(+1);  // value row: ENTER advances the field (ADR-0092)
             }
             needsRedraw_ = true;
             break;
@@ -578,6 +559,57 @@ void DeauthScreen::handleSelect()
         default:
             break;
     }
+}
+
+void DeauthScreen::handleEdit(int delta)
+{
+    if (screenState_ != DeauthScreenState::CONFIG) return;
+    const bool fwd = delta > 0;
+    switch (configList_.selectedIndex()) {
+        case 0:  // Target type: 3-state ring ALL -> SINGLE -> AP_ONLY
+            if (fwd) {
+                targetType_ = (targetType_ == DeauthTargetType::ALL_CLIENTS)  ? DeauthTargetType::SINGLE_CLIENT
+                            : (targetType_ == DeauthTargetType::SINGLE_CLIENT) ? DeauthTargetType::AP_ONLY
+                            :                                                    DeauthTargetType::ALL_CLIENTS;
+            } else {
+                targetType_ = (targetType_ == DeauthTargetType::ALL_CLIENTS) ? DeauthTargetType::AP_ONLY
+                            : (targetType_ == DeauthTargetType::AP_ONLY)     ? DeauthTargetType::SINGLE_CLIENT
+                            :                                                  DeauthTargetType::ALL_CLIENTS;
+            }
+            break;
+        case 1:  // Packet count ring: 0(infinite), 50, 100, 500, 1000
+            if (fwd) {
+                if (packetCount_ == 0) packetCount_ = 50;
+                else if (packetCount_ < 100) packetCount_ = 100;
+                else if (packetCount_ < 500) packetCount_ = 500;
+                else if (packetCount_ < 1000) packetCount_ = 1000;
+                else packetCount_ = 0;
+            } else {
+                if (packetCount_ == 0) packetCount_ = 1000;
+                else if (packetCount_ <= 50) packetCount_ = 0;
+                else if (packetCount_ <= 100) packetCount_ = 50;
+                else if (packetCount_ <= 500) packetCount_ = 100;
+                else packetCount_ = 500;
+            }
+            break;
+        case 2:  // Delay ring: 10, 50, 100, 200 ms
+            if (fwd) {
+                if (delayMs_ <= 10) delayMs_ = 50;
+                else if (delayMs_ <= 50) delayMs_ = 100;
+                else if (delayMs_ <= 100) delayMs_ = 200;
+                else delayMs_ = 10;
+            } else {
+                if (delayMs_ <= 10) delayMs_ = 200;
+                else if (delayMs_ <= 50) delayMs_ = 10;
+                else if (delayMs_ <= 100) delayMs_ = 50;
+                else delayMs_ = 100;
+            }
+            break;
+        case 3:  // Send disassoc: toggle (prev and next both flip)
+            sendDisassoc_ = !sendDisassoc_;
+            break;
+    }
+    needsRedraw_ = true;
 }
 
 void DeauthScreen::handleBack()

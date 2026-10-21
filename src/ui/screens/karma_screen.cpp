@@ -394,8 +394,11 @@ bool KarmaScreen::handleInput(char key) {
             
         case '\n':
         case '\r':
-            if (screenState_ == KarmaScreenState::CONFIG && configList_.selectedIndex() == CONFIG_OPTION_COUNT - 1) {
-                return startWithConfig();
+            if (screenState_ == KarmaScreenState::CONFIG) {
+                if (configList_.selectedIndex() == CONFIG_OPTION_COUNT - 1) {
+                    return startWithConfig();
+                }
+                return handleInput('/');  // value row: ENTER advances the field (ADR-0092)
             }
             if (screenState_ == KarmaScreenState::CLIENTS) {
                 auto macs = TrafficProxy::getInstance().getClientMacList();
@@ -523,12 +526,10 @@ void KarmaScreen::renderConfig(Canvas& canvas) {
         },
         !footerHints_.hasFocus());
 
-    // Footer hints
-    static char modeBuf[32];
-    snprintf(modeBuf, sizeof(modeBuf), "Mode - %s", getModeStr());
-    
+    // Footer hints. The 'M' hint is a fixed label (no appended value): the live mode already
+    // shows on the Mode row, and appending it here overflowed the footer (slice-0093).
     footerHints_.setHints({
-        {'M', modeBuf, true},
+        {'M', "Mode", true},
         {'P', "Portal", configMode_ == 1}
     });
     footerHints_.render(canvas);

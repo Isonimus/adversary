@@ -5,6 +5,7 @@
 
 #include "evil_twin_screen.h"
 #include "ui/components/action_button.h"
+#include "ui/screen_manager.h"
 #include "core/event_bus.h"
 
 #ifdef ESP32
@@ -18,7 +19,6 @@ EvilTwinScreen::EvilTwinScreen() {
     footerHints_.setHints({
         {'`', "Back"},
         {';', "Nav"},
-        {'/', "Edit"},
         {'\n', "Go"}
     });
 }
@@ -279,15 +279,16 @@ bool EvilTwinScreen::handleInput(char key) {
         case '<':
             if (screenState_ == EvilTwinScreenState::CONFIG) {
                 switch (configList_.selectedIndex()) {
-                    case 0: if (configMode_ > 0) configMode_--; break;
-                    case 1: configPortal_ = 0; break;
-                    case 2: 
+                    case 0: break;  // Target: navigation row, nothing to edit in place (ADR-0092)
+                    case 1: if (configMode_ > 0) configMode_--; break;
+                    case 2: configPortal_ = 0; break;
+                    case 3:
                         configUseFixedSSID_ = false;
                         memset(configFixedSSID_, 0, sizeof(configFixedSSID_));
                         break;
-                    case 3: configDeauth_ = false; break;
-                    case 4: if (configDeauthInterval_ > 0) configDeauthInterval_--; break;
-                    case 5: configLogSD_ = false; break;
+                    case 4: configDeauth_ = false; break;
+                    case 5: if (configDeauthInterval_ > 0) configDeauthInterval_--; break;
+                    case 6: configLogSD_ = false; break;
                 }
                 return true;
             }
@@ -297,9 +298,10 @@ bool EvilTwinScreen::handleInput(char key) {
         case '>':
             if (screenState_ == EvilTwinScreenState::CONFIG) {
                 switch (configList_.selectedIndex()) {
-                    case 0: if (configMode_ < 1) configMode_++; break;
-                    case 1: configPortal_ = (configPortal_ == 0) ? 1 : 0; break;
-                    case 2: {
+                    case 0: break;  // Target: navigation row, nothing to edit in place (ADR-0092)
+                    case 1: if (configMode_ < 1) configMode_++; break;
+                    case 2: configPortal_ = (configPortal_ == 0) ? 1 : 0; break;
+                    case 3: {
                         ssidPopup_.setOnSubmit([this](const char* text) {
                             strncpy(configFixedSSID_, text, sizeof(configFixedSSID_) - 1);
                             configFixedSSID_[sizeof(configFixedSSID_) - 1] = '\0';
@@ -312,7 +314,7 @@ bool EvilTwinScreen::handleInput(char key) {
                         showingSsidPopup_ = true;
                         break;
                     }
-                    case 3:
+                    case 4:
                         // Warn on enable: deauth against the real AP is the known
                         // stability risk in this attack (drops clients, can wedge
                         // the softAP). Fire only on the off->on edge, not on repeat.
@@ -323,8 +325,8 @@ bool EvilTwinScreen::handleInput(char key) {
                         }
                         configDeauth_ = true;
                         break;
-                    case 4: if (configDeauthInterval_ < 2) configDeauthInterval_++; break;
-                    case 5: configLogSD_ = true; break;
+                    case 5: if (configDeauthInterval_ < 2) configDeauthInterval_++; break;
+                    case 6: configLogSD_ = true; break;
                 }
                 return true;
             }
@@ -422,9 +424,17 @@ bool EvilTwinScreen::handleInput(char key) {
             
         case '\n':
         case '\r':
-            if (screenState_ == EvilTwinScreenState::CONFIG &&
-                configList_.selectedIndex() == CONFIG_OPTION_COUNT - 1) {
-                return startWithConfig();
+            if (screenState_ == EvilTwinScreenState::CONFIG) {
+                if (configList_.selectedIndex() == 0) {
+                    // Target row: route to the WiFi scanner to pick a target; it returns via
+                    // ATTACK_TARGET_SELECTED -> setTarget (like handshake, ADR-0092).
+                    ScreenManager::getInstance().navigateTo(ScreenId::SCANNER);
+                    return true;
+                }
+                if (configList_.selectedIndex() == CONFIG_OPTION_COUNT - 1) {
+                    return startWithConfig();
+                }
+                return handleInput('/');  // value row: ENTER advances the field (ADR-0092)
             }
             break;
     }
@@ -473,30 +483,13 @@ void EvilTwinScreen::renderConfig(Canvas& canvas) {
     canvas.fillScreen(theme::BG_PRIMARY());
     ui::StatusBar::render(canvas, "Evil Twin Config");
     
-    int16_t y = 26;
-    const int lineHeight = 15;
-
-    // Target info
-    canvas.setTextColor(theme::TEXT_SECONDARY());
-    canvas.setCursor(4, y);
-    canvas.print("Target: ");
-    canvas.setTextColor(theme::ACCENT());
-    const char* ssidDisplay = getSSIDDisplay();
-    if (strlen(ssidDisplay) > 16) {
-        char truncated[17];
-        strncpy(truncated, ssidDisplay, 13);
-        strcpy(truncated + 13, "...");
-        canvas.print(truncated);
-    } else {
-        canvas.print(ssidDisplay);
-    }
-    y += lineHeight;
-    
-    const int16_t listTop = y;  // immediately below the Target: header line
+    // Target is now the first selectable list row (ENTER routes to the scanner, ADR-0092),
+    // not a separate header, so the list starts right below the status bar.
+    const int16_t listTop = 26;
     const int16_t availableHeight = config::SCREEN_HEIGHT - listTop - ui::FOOTER_HEIGHT - 4;
 
     const char* optionLabels[] = {
-        "Mode:", "Portal:", "Fixed SSID:", "Deauth:", "Interval:", "Log SD:"
+        "Target:", "Mode:", "Portal:", "Fixed SSID:", "Deauth:", "Interval:", "Log SD:"
     };
 
     // The shared component owns scroll, the proportional thumb, the selection band and keeping the
@@ -515,11 +508,22 @@ void EvilTwinScreen::renderConfig(Canvas& canvas) {
 
             char valueStr[24] = "";
             switch (idx) {
-                case 0: strncpy(valueStr, getModeStr(), sizeof(valueStr)); break;
-                case 1:
+                case 0: {
+                    // Target row: show the current target SSID (or "(from scanner)"), truncated.
+                    const char* t = getSSIDDisplay();
+                    if (strlen(t) > 16) {
+                        strncpy(valueStr, t, 13);
+                        strcpy(valueStr + 13, "...");
+                    } else {
+                        strncpy(valueStr, t, sizeof(valueStr) - 1);
+                    }
+                    break;
+                }
+                case 1: strncpy(valueStr, getModeStr(), sizeof(valueStr)); break;
+                case 2:
                     strncpy(valueStr, configMode_ == 0 ? getPortalStr() : "---", sizeof(valueStr));
                     break;
-                case 2:
+                case 3:
                     if (configUseFixedSSID_ && configFixedSSID_[0]) {
                         if (strlen(configFixedSSID_) > 10) {
                             strncpy(valueStr, configFixedSSID_, 7);
@@ -531,23 +535,21 @@ void EvilTwinScreen::renderConfig(Canvas& canvas) {
                         strncpy(valueStr, configUseFixedSSID_ ? "[Edit]" : "OFF", sizeof(valueStr));
                     }
                     break;
-                case 3: strncpy(valueStr, configDeauth_ ? "ON" : "OFF", sizeof(valueStr)); break;
-                case 4:
+                case 4: strncpy(valueStr, configDeauth_ ? "ON" : "OFF", sizeof(valueStr)); break;
+                case 5:
                     strncpy(valueStr, configDeauth_ ? getDeauthIntervalStr() : "---", sizeof(valueStr));
                     break;
-                case 5: strncpy(valueStr, configLogSD_ ? "Yes" : "No", sizeof(valueStr)); break;
+                case 6: strncpy(valueStr, configLogSD_ ? "Yes" : "No", sizeof(valueStr)); break;
             }
             c.setCursor(80, rowY + theme::LIST_ROW_TEXT_DY);
             c.print(valueStr);
         },
         !footerHints_.hasFocus());
 
-    // Footer hints
-    static char modeBuf[32];
-    snprintf(modeBuf, sizeof(modeBuf), "Mode - %s", getModeStr());
-
+    // Footer hints. The 'M' hint is a fixed label (no appended value): the live mode already
+    // shows on the Mode row, and appending it here overflowed the footer (slice-0093).
     footerHints_.setHints({
-        {'M', modeBuf, true},
+        {'M', "Mode", true},
         {'P', "Portal", configMode_ == 0},
         {'S', "SSID", true},
         {'\r', "Start", configList_.selectedIndex() == CONFIG_OPTION_COUNT - 1}

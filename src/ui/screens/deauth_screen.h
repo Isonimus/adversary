@@ -91,6 +91,9 @@ private:
     void handleUp();
     void handleDown();
     void handleSelect();
+    // Single source of per-field stepping (ADR-0092): delta +1 next, -1 previous. ENTER on a
+    // value row, '/' and '<'/'>' all route through here so ENTER and '/' stay identical.
+    void handleEdit(int delta);
     void handleBack();
     void startAttack();
     void stopAttack();

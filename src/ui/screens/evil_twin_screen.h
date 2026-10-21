@@ -116,8 +116,9 @@ private:
     // clientScrollPos_).
     ListScrollModel clientList_;
 
-    // Config options
-    static constexpr int CONFIG_OPTION_COUNT = 7;
+    // Config options. Row 0 is the Target navigation row (ENTER routes to the WiFi scanner,
+    // ADR-0092); rows 1..6 are the value options; the last row is the START TWIN terminal.
+    static constexpr int CONFIG_OPTION_COUNT = 8;
     // Owns the config-row selection + scroll window + wrap; renderConfig feeds it the live viewport
     // each frame, replacing the old manual configSelection_ + configScrollOffset_ (slice-0091).
     ListScrollModel configList_;

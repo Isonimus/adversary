@@ -526,7 +526,8 @@ bool BleBadBleScreen::handleInput(char key) {
                 }
                 return true;
             case '\n': // ENTER
-                if (m_configList.selectedIndex() == 0) { // Name
+            case '\r':
+                if (m_configList.selectedIndex() == 0) { // Name (popup row)
                     m_namePopup.show("Session Name", m_sessionName, false, 31);
                     m_namePopup.setOnSubmit([this](const char* text) {
                         strncpy(m_sessionName, text, 32);
@@ -534,10 +535,12 @@ bool BleBadBleScreen::handleInput(char key) {
                         m_needsRedraw = true;
                     });
                     m_namePopup.setOnCancel([this]() {
-                        m_needsRedraw = true; 
+                        m_needsRedraw = true;
                     });
-                } else if (m_configList.selectedIndex() == 3) { // Start
+                } else if (m_configList.selectedIndex() == IDLE_OPTION_COUNT - 1) { // Start
                     startAdvertising();
+                } else {
+                    return handleInput('/');  // value row: ENTER advances the field (ADR-0092)
                 }
                 return true;
             case '`': // BACK

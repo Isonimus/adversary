@@ -35,7 +35,7 @@ BeaconSpamScreen::BeaconSpamScreen()
         {' ', "Focus"},
         {'s', "Start"},
         {';', "Nav"},
-        {'\n', "Toggle"}
+        {'\n', "Change"}
     });
 }
 
@@ -69,7 +69,7 @@ void BeaconSpamScreen::show() {
         {' ', "Focus"},
         {'s', "Start"},
         {';', "Nav"},
-        {'\n', "Toggle"}
+        {'\n', "Change"}
     });
     
     // Subscribe to attack state changes
@@ -421,11 +421,21 @@ bool BeaconSpamScreen::handleInput(char key) {
         case ';':  // Up
             handleUp();
             return true;
-            
+
         case '.':  // Down
             handleDown();
             return true;
-            
+
+        case ',':  // Edit previous (ADR-0092)
+        case '<':
+            handleEdit(-1);
+            return true;
+
+        case '/':  // Edit next (ADR-0092)
+        case '>':
+            handleEdit(+1);
+            return true;
+
         case '\n':  // Enter/Select
         case '\r':
             handleSelect();
@@ -473,38 +483,10 @@ void BeaconSpamScreen::handleDown() {
 void BeaconSpamScreen::handleSelect() {
     switch (screenState_) {
         case BeaconSpamScreenState::CONFIG:
-            switch (configList_.selectedIndex()) {
-                case 0:  // Mode - cycle through modes
-                    mode_ = static_cast<BeaconSpamMode>(
-                        (static_cast<int>(mode_) + 1) % 6);
-                    break;
-                    
-                case 1:  // Channel - cycle 1-14
-                    channel_ = (channel_ % 14) + 1;
-                    break;
-                    
-                case 2:  // Interval - cycle through presets
-                    if (intervalMs_ <= 50) intervalMs_ = 100;
-                    else if (intervalMs_ <= 100) intervalMs_ = 200;
-                    else if (intervalMs_ <= 200) intervalMs_ = 500;
-                    else intervalMs_ = 50;
-                    break;
-                    
-                case 3:  // Randomize BSSID
-                    randomizeBssid_ = !randomizeBssid_;
-                    break;
-                    
-                case 4:  // Encrypted
-                    encryptedNetwork_ = !encryptedNetwork_;
-                    break;
-                    
-                case 5:  // Channel Hop
-                    channelHopEnabled_ = !channelHopEnabled_;
-                    break;
-                    
-                case 6:  // Start button
-                    startAttack();
-                    break;
+            if (configList_.selectedIndex() == CONFIG_OPTION_COUNT - 1) {
+                startAttack();
+            } else {
+                handleEdit(+1);  // value row: ENTER advances the field (ADR-0092)
             }
             needsRedraw_ = true;
             break;
@@ -525,11 +507,49 @@ void BeaconSpamScreen::handleSelect() {
                 {' ', "Focus"},
                 {'s', "Start"},
                 {';', "Nav"},
-                {'\n', "Toggle"}
+                {'\n', "Change"}
             });
             needsRedraw_ = true;
             break;
     }
+}
+
+void BeaconSpamScreen::handleEdit(int delta) {
+    if (screenState_ != BeaconSpamScreenState::CONFIG) return;
+    const bool fwd = delta > 0;
+    switch (configList_.selectedIndex()) {
+        case 0:  // Mode: ring of 6
+            mode_ = static_cast<BeaconSpamMode>(
+                (static_cast<int>(mode_) + (fwd ? 1 : 5)) % 6);
+            break;
+        case 1:  // Channel: 1-14
+            if (fwd) channel_ = (channel_ % 14) + 1;
+            else channel_ = (channel_ <= 1) ? 14 : channel_ - 1;
+            break;
+        case 2:  // Interval ring: 50, 100, 200, 500 ms
+            if (fwd) {
+                if (intervalMs_ <= 50) intervalMs_ = 100;
+                else if (intervalMs_ <= 100) intervalMs_ = 200;
+                else if (intervalMs_ <= 200) intervalMs_ = 500;
+                else intervalMs_ = 50;
+            } else {
+                if (intervalMs_ <= 50) intervalMs_ = 500;
+                else if (intervalMs_ <= 100) intervalMs_ = 50;
+                else if (intervalMs_ <= 200) intervalMs_ = 100;
+                else intervalMs_ = 200;
+            }
+            break;
+        case 3:  // Randomize BSSID: toggle
+            randomizeBssid_ = !randomizeBssid_;
+            break;
+        case 4:  // Encrypted: toggle
+            encryptedNetwork_ = !encryptedNetwork_;
+            break;
+        case 5:  // Channel Hop: toggle
+            channelHopEnabled_ = !channelHopEnabled_;
+            break;
+    }
+    needsRedraw_ = true;
 }
 
 void BeaconSpamScreen::handleBack() {
@@ -548,7 +568,7 @@ void BeaconSpamScreen::handleBack() {
                 {' ', "Focus"},
                 {'s', "Start"},
                 {';', "Nav"},
-                {'\n', "Toggle"}
+                {'\n', "Change"}
             });
             needsRedraw_ = true;
             break;
@@ -560,7 +580,7 @@ void BeaconSpamScreen::handleBack() {
                 {' ', "Focus"},
                 {'s', "Start"},
                 {';', "Nav"},
-                {'\n', "Toggle"}
+                {'\n', "Change"}
             });
             needsRedraw_ = true;
             break;

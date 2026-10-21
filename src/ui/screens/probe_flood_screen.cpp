@@ -32,7 +32,7 @@ ProbeFloodScreen::ProbeFloodScreen()
         {' ', "Focus"},
         {'s', "Start"},
         {';', "Nav"},
-        {'\n', "Toggle"}
+        {'\n', "Change"}
     });
 }
 
@@ -56,7 +56,7 @@ void ProbeFloodScreen::show() {
         {' ', "Focus"},
         {'s', "Start"},
         {';', "Nav"},
-        {'\n', "Toggle"}
+        {'\n', "Change"}
     });
     
     // Subscribe to attack state changes
@@ -417,6 +417,14 @@ bool ProbeFloodScreen::handleInput(char key) {
         case '.':  // Down
             handleDown();
             return true;
+        case ',':  // Edit previous (ADR-0092)
+        case '<':
+            handleEdit(-1);
+            return true;
+        case '/':  // Edit next (ADR-0092)
+        case '>':
+            handleEdit(+1);
+            return true;
         case '\n':  // Enter
         case '\r':
             handleSelect();
@@ -457,27 +465,10 @@ void ProbeFloodScreen::handleDown() {
 
 void ProbeFloodScreen::handleSelect() {
     if (screenState_ == ProbeFloodScreenState::CONFIG) {
-        switch (configList_.selectedIndex()) {
-            case 0:  // Mode
-                mode_ = static_cast<ProbeFloodMode>((static_cast<int>(mode_) + 1) % 4);
-                break;
-            case 1:  // Channel
-                channel_++;
-                if (channel_ > 14) channel_ = 0;  // 0 = hopping
-                break;
-            case 2:  // Interval
-                intervalMs_ += 25;
-                if (intervalMs_ > 500) intervalMs_ = 25;
-                break;
-            case 3:  // Randomize MAC
-                randomizeMac_ = !randomizeMac_;
-                break;
-            case 4:  // Channel Hop
-                channelHopEnabled_ = !channelHopEnabled_;
-                break;
-            case 5:  // Start
-                startAttack();
-                break;
+        if (configList_.selectedIndex() == CONFIG_OPTION_COUNT - 1) {
+            startAttack();
+        } else {
+            handleEdit(+1);  // value row: ENTER advances the field (ADR-0092)
         }
     } else if (screenState_ == ProbeFloodScreenState::RUNNING ||
                screenState_ == ProbeFloodScreenState::PAUSED) {
@@ -487,7 +478,7 @@ void ProbeFloodScreen::handleSelect() {
             {' ', "Focus"},
             {'s', "Start"},
             {';', "Nav"},
-            {'\n', "Toggle"}
+            {'\n', "Change"}
         });
     } else if (screenState_ == ProbeFloodScreenState::COMPLETED) {
         screenState_ = ProbeFloodScreenState::CONFIG;
@@ -495,9 +486,35 @@ void ProbeFloodScreen::handleSelect() {
             {' ', "Focus"},
             {'s', "Start"},
             {';', "Nav"},
-            {'\n', "Toggle"}
+            {'\n', "Change"}
         });
     }
+}
+
+void ProbeFloodScreen::handleEdit(int delta) {
+    if (screenState_ != ProbeFloodScreenState::CONFIG) return;
+    const bool fwd = delta > 0;
+    switch (configList_.selectedIndex()) {
+        case 0:  // Mode: ring of 4
+            mode_ = static_cast<ProbeFloodMode>(
+                (static_cast<int>(mode_) + (fwd ? 1 : 3)) % 4);
+            break;
+        case 1:  // Channel: 0 (hop), 1..14
+            if (fwd) { channel_++; if (channel_ > 14) channel_ = 0; }
+            else { channel_ = (channel_ == 0) ? 14 : channel_ - 1; }
+            break;
+        case 2:  // Interval: 25..500 ms, step 25
+            if (fwd) { intervalMs_ += 25; if (intervalMs_ > 500) intervalMs_ = 25; }
+            else { intervalMs_ = (intervalMs_ <= 25) ? 500 : intervalMs_ - 25; }
+            break;
+        case 3:  // Randomize MAC: toggle
+            randomizeMac_ = !randomizeMac_;
+            break;
+        case 4:  // Channel Hop: toggle
+            channelHopEnabled_ = !channelHopEnabled_;
+            break;
+    }
+    needsRedraw_ = true;
 }
 
 void ProbeFloodScreen::handleBack() {
@@ -511,7 +528,7 @@ void ProbeFloodScreen::handleBack() {
             {' ', "Focus"},
             {'s', "Start"},
             {';', "Nav"},
-            {'\n', "Toggle"}
+            {'\n', "Change"}
         });
     } else {
         screenState_ = ProbeFloodScreenState::CONFIG;
@@ -519,7 +536,7 @@ void ProbeFloodScreen::handleBack() {
             {' ', "Focus"},
             {'s', "Start"},
             {';', "Nav"},
-            {'\n', "Toggle"}
+            {'\n', "Change"}
         });
     }
 }
