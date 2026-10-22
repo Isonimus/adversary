@@ -17,6 +17,7 @@
 #include "ui/components/action_menu.h"
 #include "ui/components/list_scroll_model.h"
 #include "ui/components/scrollable_list.h"
+#include "network_log_ring.h"
 #include "screen_interface.h"
 #include <Arduino.h>
 
@@ -98,29 +99,11 @@ private:
     bool exitToMenu_;
     uint32_t lastUpdateMs_;
     
-    // Network log tracking (circular buffer)
-    static constexpr size_t MAX_LOG_NETWORKS = 25;
-    struct LoggedNetwork {
-        char ssid[33];                      ///< SSID (WiFi) or device name (BLE); "" for an unnamed advertiser
-        uint8_t bssid[6];                   ///< AP BSSID / BLE BD_ADDR; the dedup key so distinct radios never share a row
-        int8_t rssi;
-        uint8_t channel;                    ///< WiFi channel; 0 for BLE (WiGLE convention)
-        uint8_t security;                   ///< WiFi security enum; unused for a BLE row
-        wardriving::ObservationType type;   ///< selects the row shape (WiFi channel/security vs "BLE" tag)
-        uint32_t timestamp;
-        bool valid;
-    };
-    LoggedNetwork networkLog_[MAX_LOG_NETWORKS];
-    size_t logWriteIndex_;
-    size_t logCount_;
+    // Live network-log view. The ring reserves a per-type minimum so BLE's high-volume stream
+    // cannot evict every WiFi row (NetworkLogRing doc); dedup by (type, bssid) shows each
+    // distinct radio once (slice-0075).
+    NetworkLogRing networkLog_;
 
-    // Appends one observation to the display ring, skipping it when its MAC is already shown.
-    // Dedup is by (type, bssid) across the whole ring, not a trailing window, so a cumulative
-    // source (BLE's growing device list, or WiFi's full current AP set each scan) shows each
-    // distinct radio once instead of re-adding rows past the window (slice-0075).
-    void appendObservation(const char* name, const uint8_t* bssid, int8_t rssi,
-                           uint8_t channel, uint8_t security, wardriving::ObservationType type);
-    
     // Selection + scroll window for the network log. The shared model keeps the selection on
     // screen from the viewport the renderer derives each frame, so the off-screen/premature
     // scroll bugs can't recur here, and it wraps at the ends (slice-0062).
