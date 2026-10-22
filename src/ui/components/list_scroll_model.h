@@ -18,6 +18,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 
 namespace adversary {
 
@@ -35,6 +36,15 @@ public:
     /// Set how many rows the viewport can show (the renderer's live row budget). Re-clamps the
     /// scroll offset so the selection stays visible even when the viewport shrank this frame.
     void setViewport(int visibleRows);
+
+    /// Install a predicate deciding which indices the cursor may rest on; an index the predicate
+    /// rejects is skipped by moveUp/moveDown and snapped off by setSelectedIndex/setItemCount
+    /// (separators, live-disabled rows). An empty predicate (the default) means every index is
+    /// selectable, so a list that sets none behaves exactly as before (slice-0105, ADR-0104).
+    /// The predicate closes over the owning screen's item list; the screen owns both and must
+    /// keep the predicate valid for this model's lifetime. setViewport never snaps — a row that
+    /// becomes non-selectable while selected stays selected until the next nav or rebuild.
+    void setSelectablePredicate(std::function<bool(int)> predicate);
 
     /// Move the selection one row up; wraps from the first item to the last.
     void moveUp();
@@ -67,10 +77,20 @@ private:
     /// then clamp it to the valid range. The single rule both bugs above violated a copy of.
     void clampOffsetToSelection();
 
+    /// True when index `i` is in range and the selectable predicate accepts it (or none is set).
+    bool isSelectable(int i) const;
+    /// First selectable index at or after `from`, searching in `direction` (+1/-1) and wrapping,
+    /// up to itemCount_ steps; -1 when no index is selectable. The loop-termination guarantee.
+    int seekSelectable(int from, int direction) const;
+    /// Snap the current selection to the nearest selectable index (forward, wrapping); leaves it
+    /// put when nothing is selectable. Used after a jump or a list rebuild, never per-frame.
+    void snapSelectionToSelectable();
+
     int itemCount_ = 0;
     int selectedIndex_ = 0;
     int scrollOffset_ = 0;
     int visibleRows_ = 1;  // at least 1; the renderer overwrites this every frame
+    std::function<bool(int)> selectable_;  // empty = every index selectable
 };
 
 } // namespace adversary

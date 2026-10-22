@@ -143,7 +143,6 @@ private:
     void drawSettingRow(Canvas& canvas, const SettingItem& item, int16_t rowTopY,
                         bool isSelected, bool editing, int16_t screenWidth);
     void formatNumberValue(const SettingItem& item, char* out, size_t outSize) const;
-    int firstSelectableIndex() const;
     void buildSettingsList();
     void applyBrightness();
     

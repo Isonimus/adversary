@@ -87,10 +87,6 @@ private:
     void showReplayConfirm();
     void showDeleteConfirm();
 
-    // First selectable main-menu index: the Learn row (0) is unselectable while IR RX is absent,
-    // so the selection starts and stays on an enabled row (slice-0072).
-    int firstEnabledMain() const { return captureAvailable_ ? 0 : 1; }
-
     // Draws a signal's encoding summary (RAW dimmed vs decoded) plus, for a raw
     // train, its static pulse-strip preview. Shared by the capture-review and
     // code-detail screens so both read a captured code the same way.
@@ -118,7 +114,9 @@ private:
 
     MenuState state_;
     MenuState lastHintState_;  // footer hints refreshed only when state_ changes
-    int mainSelection_;      // 0=Learn 1=Saved 2=TX source
+    // The 3-row main menu's selection + skip-nav (Learn row disabled without IR RX) rides the
+    // shared model's predicate, not a hand-rolled skip-loop (ADR-0104).
+    ListScrollModel mainMenu_;  // 0=Learn 1=Saved 2=TX source
     int actionSelection_;    // 0=Replay 1=Delete
     // Saved-codes list: selection + scroll window + wrap. drawCodeList feeds it the live
     // viewport each frame; the three fixed caption-menus above stay on listNav (slice-0069).

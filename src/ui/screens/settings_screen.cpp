@@ -215,15 +215,14 @@ void SettingsScreen::buildSettingsList() {
         }
     }
 
-    // Keep the shared list model's row count in sync on every rebuild (slice-0069).
+    // Keep the shared list model's row count in sync on every rebuild (slice-0069), and let the
+    // model skip the structural header/separator rows itself via a selectable predicate instead
+    // of the screen's own skip-nav (ADR-0104). The predicate reads the live row type, so it
+    // stays correct across rebuilds.
     itemList_.setItemCount(itemCount_);
-}
-
-int SettingsScreen::firstSelectableIndex() const {
-    for (int i = 0; i < itemCount_; i++) {
-        if (isSelectableRow(items_[i].type)) return i;
-    }
-    return 0;
+    itemList_.setSelectablePredicate([this](int i) {
+        return i >= 0 && i < itemCount_ && isSelectableRow(items_[i].type);
+    });
 }
 
 void SettingsScreen::init() {
@@ -242,7 +241,7 @@ void SettingsScreen::show() {
     // top (setSelectedIndex can only scroll down to reveal the cursor, never back up). The
     // first render then sets the true viewport over this already-correct offset (slice-0069).
     itemList_.setViewport(itemCount_);
-    itemList_.setSelectedIndex(firstSelectableIndex());
+    itemList_.setSelectedIndex(0);  // predicate snaps forward to the first selectable row
 }
 
 void SettingsScreen::hide() {
@@ -360,26 +359,13 @@ bool SettingsScreen::handleInput(char key) {
     }
     
     if (screenState_ == SettingsScreenState::BROWSING) {
-        // Next selectable row in `dir`, wrapping around and skipping headers and
-        // separators (so the cursor never lands on a non-actionable row).
-        auto nextSelectable = [this](int from, int dir) -> int {
-            if (itemCount_ <= 0) return 0;
-            int idx = from;
-            for (int n = 0; n < itemCount_; ++n) {
-                idx += dir;
-                if (idx < 0) idx = itemCount_ - 1;
-                else if (idx >= itemCount_) idx = 0;
-                if (isSelectableRow(items_[idx].type)) return idx;
-            }
-            return from;
-        };
         switch (key) {
-            case ';':  // Up (wraps to last); the model scrolls the new row into view
-                itemList_.setSelectedIndex(nextSelectable(itemList_.selectedIndex(), -1));
+            case ';':  // Up (wraps to last); the model skips headers/separators and scrolls
+                itemList_.moveUp();
                 return true;
 
             case '.':  // Down (wraps to first)
-                itemList_.setSelectedIndex(nextSelectable(itemList_.selectedIndex(), 1));
+                itemList_.moveDown();
                 return true;
 
             case '\n':
