@@ -26,6 +26,10 @@
 #include <M5Unified.h>
 #endif
 
+#ifdef ESP32
+#include "esp_heap_caps.h"   // largest-free-block for the opt-in heap-badge diagnostic
+#endif
+
 namespace adversary {
 namespace ui {
 
@@ -262,16 +266,24 @@ private:
 #ifdef ESP32
         const auto& settings = SettingsManager::getInstance().get();
         if (!settings.system.showHeapBadge) return rightEdge;
-        
+
         uint32_t freeHeap = ESP.getFreeHeap() / 1024;  // KB
-        
-        char badge[12];
-        snprintf(badge, sizeof(badge), "H%u", (unsigned)freeHeap);
-        
+
+        char badge[16];
+        if (settings.system.showHeapLargestBlock) {
+            // "H<free>/<largest>": free heap alone reads as a gentle slope under
+            // fragmentation; the gap to the largest free block is the fragmentation tell
+            // that classified the BOTH-mode wardriving OOM (ADR-0103).
+            uint32_t largestBlock = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) / 1024;
+            snprintf(badge, sizeof(badge), "H%u/%u", (unsigned)freeHeap, (unsigned)largestBlock);
+        } else {
+            snprintf(badge, sizeof(badge), "H%u", (unsigned)freeHeap);
+        }
+
         int16_t badgeWidth = strlen(badge) * theme::FONT_CELL_WIDTH;
         int16_t x = rightEdge - badgeWidth;
-        
-        // Color by health: green >100KB, yellow >50KB, red ≤50KB
+
+        // Color by health: green >100KB, yellow >50KB, red ≤50KB (keyed on free heap)
         uint16_t color;
         if (freeHeap > 100) color = theme::SUCCESS();
         else if (freeHeap > 50) color = theme::WARNING();

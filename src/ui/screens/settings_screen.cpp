@@ -73,6 +73,7 @@ void SettingsScreen::buildSettingsList() {
     tempNotifySounds_ = settings.system.notifySounds ? 1 : 0;
     tempNotifyLeds_ = settings.system.notifyLeds ? 1 : 0;
     tempShowHeapBadge_ = settings.system.showHeapBadge ? 1 : 0;
+    tempShowHeapLargestBlock_ = settings.system.showHeapLargestBlock ? 1 : 0;
     tempDashboardAuthEnabled_ = settings.system.dashboardAuthEnabled ? 1 : 0;
     
     // Build items list
@@ -142,6 +143,7 @@ void SettingsScreen::buildSettingsList() {
     items_[itemCount_++] = SettingItem::toggle("Sound Alerts", &tempNotifySounds_);
     items_[itemCount_++] = SettingItem::toggle("LED Alerts", &tempNotifyLeds_);
     items_[itemCount_++] = SettingItem::toggle("Heap Badge", &tempShowHeapBadge_);
+    items_[itemCount_++] = SettingItem::toggle("Heap Largest Blk", &tempShowHeapLargestBlock_);
     items_[itemCount_++] = SettingItem::toggle("Serial Debug", &tempSerialDebug_);
     
     // Dashboard Server section
@@ -265,6 +267,7 @@ void SettingsScreen::hide() {
         settings.system.notifySounds = (tempNotifySounds_ != 0);
         settings.system.notifyLeds = (tempNotifyLeds_ != 0);
         settings.system.showHeapBadge = (tempShowHeapBadge_ != 0);
+        settings.system.showHeapLargestBlock = (tempShowHeapLargestBlock_ != 0);
         settings.system.dashboardAuthEnabled = (tempDashboardAuthEnabled_ != 0);
         
         // Apply notification settings immediately

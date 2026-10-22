@@ -18,51 +18,8 @@
 
 #include "utils/log.h"
 
-#if defined(WARDRIVE_HEAP_TRACE) && defined(ARDUINO)
-// Throwaway diagnostic (build with -DWARDRIVE_HEAP_TRACE): per-scan-cycle heap slope to
-// SD, for the untethered BOTH-mode OOM hunt. Remove once the slope is characterized
-// (LEDGER: "Remove the WARDRIVE_HEAP_TRACE instrument"). esp_heap_caps gives the
-// largest-free-block, which separates fragmentation from plain exhaustion.
-#include "esp_heap_caps.h"
-#endif
-
 namespace adversary {
 namespace wardriving {
-
-#if defined(WARDRIVE_HEAP_TRACE) && defined(ARDUINO)
-namespace {
-// Append one heap sample to a dedicated sidecar file, using the same open/append/close
-// idiom as writeNetworkToCSV so it adds no new file handle or cadence of its own. Writes
-// internal-RAM free and largest-free-block: free-vs-largest is the fragmentation tell.
-void appendHeapSample(uint32_t uptimeMs, uint32_t deviceCount, uint8_t mode) {
-    static bool headerWritten = false;
-    const char* path = "/adversary/logs/wardrive-heap.csv";
-    File f = SD.open(path, FILE_APPEND);
-    if (!f) {
-        if (!SD.exists("/adversary/logs")) SD.mkdir("/adversary/logs");
-        f = SD.open(path, FILE_APPEND);
-        if (!f) {
-            // Non-fatal by design: a dropped diagnostic sample must not abort a field
-            // run, but say so rather than masking it.
-            LOG_W("HEAPTRACE", "SD open failed; sample dropped");
-            return;
-        }
-    }
-    if (!headerWritten) {
-        f.println("uptimeMs,devices,freeInternal,largestBlockInternal,mode");
-        headerWritten = true;
-    }
-    char line[96];
-    snprintf(line, sizeof(line), "%lu,%lu,%u,%u,%u\n",
-             (unsigned long)uptimeMs, (unsigned long)deviceCount,
-             (unsigned int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
-             (unsigned int)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
-             (unsigned int)mode);
-    f.print(line);
-    f.close();
-}
-}  // namespace
-#endif
 
 // ============================================================================
 // Singleton Access
@@ -336,11 +293,6 @@ void WardrivingManager::update() {
             // ~58.6 KB heap nor the scan-throughput cost (ADR-0060).
             BLEScanner::getInstance().deinit();
         }
-#endif
-#if defined(WARDRIVE_HEAP_TRACE) && defined(ARDUINO)
-        // Sample once per scan cycle (~scanInterval) so the slope is dense enough to read,
-        // unlike the 30 s SD flush. Placed after the scans so it reflects post-scan heap.
-        appendHeapSample(now, session_.networksFound, static_cast<uint8_t>(mode));
 #endif
         lastWiFiScanMs_ = now;
     }
