@@ -62,8 +62,18 @@ public:
     /**
      * @brief Start an asynchronous scan
      * @param durationSeconds 0 for continuous (manual stop)
+     * @param activeScan true sends SCAN_REQ to collect scan-response data (names,
+     *        services); false is passive (listen only). Passive is required for a
+     *        long *continuous* scan, because active + continuous + legacy ADV_IND makes
+     *        NimBLE retain a NimBLEAdvertisedDevice per unique address while it waits for
+     *        a scan response, and the maxResults=0 erase only runs after the callback
+     *        fires (NimBLEScan.cpp:143-158); DISC_COMPLETE, which would flush them, never
+     *        fires in continuous mode. Under BLE MAC randomization that vector grows
+     *        unbounded and exhausts the heap (ADR-0103 phase 3). Passive scan reports each
+     *        advertisement immediately, so the device is erased at once and memory stays
+     *        flat, at the cost of scan-response-only fields.
      */
-    void startScan(uint32_t durationSeconds = 0);
+    void startScan(uint32_t durationSeconds = 0, bool activeScan = true);
 
     /**
      * @brief Stop current scan
