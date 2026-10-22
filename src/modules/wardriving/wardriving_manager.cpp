@@ -489,7 +489,9 @@ void WardrivingManager::processBLEScan() {
         scanner.init();
     }
     if (!scanner.isScanning()) {
-        scanner.startScan(0);   // 0 = continuous (manual stop on session end)
+        // Passive + continuous: active scan would retain a NimBLEAdvertisedDevice per unique
+        // address for the whole session (ADR-0103 phase 3), fatal under BLE MAC randomization.
+        scanner.startScan(0, false);   // 0 = continuous (manual stop on session end)
     }
 
     uint32_t newCount = 0;

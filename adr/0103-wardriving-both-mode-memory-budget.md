@@ -137,3 +137,46 @@ and roughly doubles the device ceiling, but the OOM persists at a higher count. 
 measured target rather than a hypothesis. The crash recorder confirmed the reboots (PANIC under
 memory pressure) but stores only reason plus heap stats, no backtrace, so the heap trace, not
 the crash log, is what localized the fault.
+
+## Amendment (2026-10-22): phase 3 is passive scan, not setDuplicateFilter; field-proven flat
+
+The original phase-3 Decision above (`NimBLEScan::setDuplicateFilter(false)`) was wrong, and the
+Consequences/Validation attribution of the residual ~30 B/device to "the NimBLE controller
+duplicate-address cache" was wrong with it. Both are left intact above as the record of the
+pre-run reasoning; this amendment corrects them and records the proof.
+
+What the slope model's term 2 actually is, traced by reading NimBLE's gap-event path
+(`NimBLEScan.cpp:120-179`) rather than guessing: the wardriving scan runs *active* and
+*continuous* (`startScan(0)`), and for a legacy `ADV_IND` device under active scan NimBLE defers
+the callback until a scan response arrives, so `m_callbackSent` stays false. The
+`setMaxResults(0)` erase that bounds memory only runs *after* the callback fires
+(`if (m_maxResults == 0 && m_callbackSent) erase(...)`), and the `DISC_COMPLETE` backstop that
+would flush pending devices never fires in a continuous scan. So every `ADV_IND` device awaiting
+a scan response is retained in `m_advertisedDevicesVector` for the whole session, and under BLE
+MAC randomization that vector grows unbounded. The growth is in the host vector, not the
+controller cache: toggling `filter_duplicates` would add callback churn while barely touching the
+retention, because the erase is gated on `m_callbackSent`, not on the controller filter.
+
+The fix is `setActiveScan(false)` for the wardriving scan only (the interactive BLE Scanner keeps
+active scan for its scan-response fields). Passive reports each advertisement immediately, so the
+device is erased at once and the vector stays bounded. The cost is fields that live *only* in
+scan responses (some names, services); the `ADV_IND` payload (including FastPair) is still
+captured, and WiGLE BLE rows need only MAC + RSSI + type + location, so the loss is within the
+accepted probabilistic-coverage stance. Passive also drops `SCAN_REQ` transmissions, improving
+WiFi/BLE coexistence in BOTH mode. One line, trivially revertible, shipped and measured on its
+own (commit after `1da255d`).
+
+Field-proven 2026-10-22 (`WD-20261022-091723`, trace in `wardrive-heap.csv`): one continuous
+BOTH-mode session reached **544 unique devices with no OOM**. Per-device slope collapsed to
+**-0.32 B/device** (least-squares over 852 samples, 0 -> 544 devices); free heap no longer trends
+with device count, holding a ~14-21 KB band with the largest free block flat at 7668 B. The
+capture persisted correctly: 140 WiFi + 404 BLE = 544 rows, 255 GPS-tagged, WiGLE-ready. The ~84
+-> ~30 -> ~0 B/device progression confirms both terms: term 1 (the `unordered_set` node + rehash
+churn) removed by the Bloom in phase 2, term 2 (the retained `NimBLEAdvertisedDevice` per unique
+address) removed by passive scan in phase 3.
+
+| Phase | Per-device slope | Device ceiling |
+|---|---|---|
+| 1 (unordered_set) | ~84 B/device | ~253 (OOM) |
+| 2 (Bloom dedup) | ~30 B/device | ~490 (OOM) |
+| 3 (+ passive scan) | ~-0.3 B/device (flat) | 544+, no OOM |

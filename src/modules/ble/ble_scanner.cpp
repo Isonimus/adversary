@@ -68,12 +68,15 @@ void BLEScanner::deinit() {
     LOG_I("BLE", "Scanner shut down (radio released, host objects retained)");
 }
 
-void BLEScanner::startScan(uint32_t durationSeconds) {
+void BLEScanner::startScan(uint32_t durationSeconds, bool activeScan) {
     if (m_scanning) return;
 
     NimBLEScan* pScan = NimBLEDevice::getScan();
     pScan->setAdvertisedDeviceCallbacks(this);
-    pScan->setActiveScan(true); // Active scan for more info (name, services)
+    // Active scan collects scan-response data but, in a continuous scan, leaks a retained
+    // device per unique address (see startScan doc / ADR-0103 phase 3); passive keeps the
+    // long wardriving scan's memory flat. Interactive, time-boxed scans keep active.
+    pScan->setActiveScan(activeScan);
     pScan->setInterval(100);
     pScan->setWindow(99);
     // Callback-only: after onResult fires, NimBLE erases the device instead of
