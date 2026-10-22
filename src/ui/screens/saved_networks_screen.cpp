@@ -4,6 +4,7 @@
  */
 
 #include "saved_networks_screen.h"
+#include "utils/count_format.h"
 #include "utils/log.h"
 #include <cstdio>
 #include <algorithm>
@@ -82,10 +83,9 @@ void SavedNetworksScreen::render(Canvas& canvas) {
         {'`', "Back", true}
     });
     
-    char countBuf[16];
-    snprintf(countBuf, sizeof(countBuf), "%d/%d",
-             creds.empty() ? 0 : list_.selectedIndex() + 1,
-             (int)creds.size());
+    char countBuf[utils::COUNT_FORMAT_BUFFER_SIZE];
+    utils::formatCount(creds.empty() ? 0 : list_.selectedIndex() + 1,
+                       static_cast<int>(creds.size()), countBuf, sizeof(countBuf));
     footerHints_.setRightContent(countBuf);
     footerHints_.render(canvas);
 

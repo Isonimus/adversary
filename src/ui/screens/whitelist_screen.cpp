@@ -4,6 +4,7 @@
  */
 
 #include "whitelist_screen.h"
+#include "utils/count_format.h"
 
 #ifdef ESP32
 #include <Arduino.h>
@@ -222,8 +223,9 @@ void WhitelistScreen::drawList(Canvas& canvas) {
         });
 
     // Draw entry count on right
-    static char countBuf[16];
-    snprintf(countBuf, sizeof(countBuf), "%d/%d", entryList_.selectedIndex() + 1, (int)entries_.size());
+    static char countBuf[utils::COUNT_FORMAT_BUFFER_SIZE];
+    utils::formatCount(entryList_.selectedIndex() + 1, static_cast<int>(entries_.size()),
+                       countBuf, sizeof(countBuf));
     footerHints_.setRightContent(countBuf);
 }
 
