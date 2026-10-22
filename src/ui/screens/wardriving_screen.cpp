@@ -33,20 +33,8 @@ WardrivingScreen::WardrivingScreen()
     , visible_(false)
     , exitToMenu_(false)
     , lastUpdateMs_(0)
-    , logWriteIndex_(0)
-    , logCount_(0)
 {
-    // Initialize network log
-    for (size_t i = 0; i < MAX_LOG_NETWORKS; i++) {
-        networkLog_[i].ssid[0] = '\0';
-        memset(networkLog_[i].bssid, 0, sizeof(networkLog_[i].bssid));
-        networkLog_[i].rssi = -100;
-        networkLog_[i].channel = 0;
-        networkLog_[i].security = 0;
-        networkLog_[i].type = wardriving::ObservationType::WIFI;
-        networkLog_[i].timestamp = 0;
-        networkLog_[i].valid = false;
-    }
+    // networkLog_ starts empty (count 0); no per-slot init needed.
 }
 
 WardrivingScreen::~WardrivingScreen() {
@@ -151,9 +139,9 @@ void WardrivingScreen::update() {
     if (sessionState == WardrivingState::SCANNING && now - lastUpdateMs_ >= LOG_HARVEST_INTERVAL_MS) {
         const auto& networks = WiFiScanner::getInstance().getNetworks();
         for (const auto& net : networks) {
-            appendObservation(net.ssid.c_str(), net.bssid, net.rssi, net.channel,
-                              static_cast<uint8_t>(net.security),
-                              wardriving::ObservationType::WIFI);
+            networkLog_.append(net.ssid.c_str(), net.bssid, net.rssi, net.channel,
+                               static_cast<uint8_t>(net.security),
+                               wardriving::ObservationType::WIFI);
         }
 
 #ifdef ARDUINO
@@ -171,9 +159,9 @@ void WardrivingScreen::update() {
                 }
                 // The scanner stamps nameless advertisers with BLE_NAME_UNKNOWN, so test the
                 // advertised-name predicate (not emptiness) and let the row fall back to the MAC.
-                appendObservation(hasAdvertisedName(dev) ? dev.name.c_str() : nullptr, addr,
-                                  static_cast<int8_t>(dev.rssi), 0, 0,
-                                  wardriving::ObservationType::BLE);
+                networkLog_.append(hasAdvertisedName(dev) ? dev.name.c_str() : nullptr, addr,
+                                   static_cast<int8_t>(dev.rssi), 0, 0,
+                                   wardriving::ObservationType::BLE);
             }
         }
 #endif
@@ -244,7 +232,7 @@ bool WardrivingScreen::handleInput(char key) {
             } else if (key == 'l' || key == 'L') {  // Network log
                 returnState_ = WardrivingState::SCANNING;
                 state_ = WardrivingState::NETWORK_LOG;
-                logList_.setItemCount((int)logCount_);
+                logList_.setItemCount((int)networkLog_.count());
                 logList_.setSelectedIndex(0);
                 return true;
             }
@@ -264,7 +252,7 @@ bool WardrivingScreen::handleInput(char key) {
             } else if (key == 'l' || key == 'L') {  // Network log
                 returnState_ = WardrivingState::PAUSED;
                 state_ = WardrivingState::NETWORK_LOG;
-                logList_.setItemCount((int)logCount_);
+                logList_.setItemCount((int)networkLog_.count());
                 logList_.setSelectedIndex(0);
                 return true;
             }
@@ -638,37 +626,6 @@ void WardrivingScreen::drawSessionStats(Canvas& canvas, int16_t y) {
     canvas.print(distStr);
 }
 
-void WardrivingScreen::appendObservation(const char* name, const uint8_t* bssid, int8_t rssi,
-                                         uint8_t channel, uint8_t security,
-                                         wardriving::ObservationType type) {
-    // Already shown? Dedup by (type, bssid) across every valid slot. A WiFi BSSID and a BLE
-    // BD_ADDR can be byte-equal, so the type is part of the key (same rule as the manager's
-    // observationKey). Scanning all <=25 rows, not a trailing window, is what makes a
-    // cumulative source show each radio once.
-    for (size_t i = 0; i < logCount_; i++) {
-        const auto& e = networkLog_[i];
-        if (e.valid && e.type == type && memcmp(e.bssid, bssid, 6) == 0) {
-            return;
-        }
-    }
-
-    auto& entry = networkLog_[logWriteIndex_];
-    strncpy(entry.ssid, name ? name : "", sizeof(entry.ssid) - 1);
-    entry.ssid[sizeof(entry.ssid) - 1] = '\0';
-    memcpy(entry.bssid, bssid, sizeof(entry.bssid));
-    entry.rssi = rssi;
-    entry.channel = channel;
-    entry.security = security;
-    entry.type = type;
-    entry.timestamp = millis();
-    entry.valid = true;
-
-    logWriteIndex_ = (logWriteIndex_ + 1) % MAX_LOG_NETWORKS;
-    if (logCount_ < MAX_LOG_NETWORKS) {
-        logCount_++;
-    }
-}
-
 void WardrivingScreen::drawNetworkLog(Canvas& canvas) {
     char ramBuf[12];
     ui::StatusBar::render(canvas, "Network Log", statusHeapText(ramBuf, sizeof(ramBuf)));
@@ -677,9 +634,9 @@ void WardrivingScreen::drawNetworkLog(Canvas& canvas) {
     const int16_t listY = ui::STATUS_BAR_HEIGHT + 1;                         // sit just under the bar
     const int16_t listHeight = canvas.height() - listY - ui::FOOTER_HEIGHT;  // ...down to the footer
 
-    logList_.setItemCount((int)logCount_);
+    logList_.setItemCount((int)networkLog_.count());
 
-    if (logCount_ == 0) {
+    if (networkLog_.count() == 0) {
         canvas.setTextColor(theme::TEXT_DISABLED());
         canvas.setTextSize(1);
         canvas.setCursor(4, listY + listHeight / 2);
@@ -697,9 +654,8 @@ void WardrivingScreen::drawNetworkLog(Canvas& canvas) {
     // selection on screen, and draws the unified scrollbar; this callback only paints one row.
     ScrollableList::render(canvas, logList_, 0, listY, canvas.width(), listHeight, itemHeight,
         [this](Canvas& c, int idx, int16_t y, bool /*isSelected*/) {
-            int bufferIdx = (logWriteIndex_ - 1 - idx + MAX_LOG_NETWORKS) % MAX_LOG_NETWORKS;
-            const auto& net = networkLog_[bufferIdx];
-            if (!net.valid) return;
+            // The model clamps idx to [0, count), so newest-first access is always in range.
+            const auto& net = networkLog_.newestFirst((size_t)idx);
 
             const bool isBle = net.type == wardriving::ObservationType::BLE;
 
@@ -739,7 +695,7 @@ void WardrivingScreen::drawNetworkLog(Canvas& canvas) {
         });
 
     char footerLeft[32];
-    snprintf(footerLeft, sizeof(footerLeft), "%d/%d", logList_.selectedIndex() + 1, (int)logCount_);
+    snprintf(footerLeft, sizeof(footerLeft), "%d/%d", logList_.selectedIndex() + 1, (int)networkLog_.count());
     footerHints_.setRightContent(footerLeft);
 
     footerHints_.setHints({

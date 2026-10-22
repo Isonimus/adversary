@@ -273,9 +273,11 @@ void WardrivingManager::stopSession() {
         LOG_I("WARDRV", "Session summary saved: %s", jsonPath);
     }
     
-    // Clear memory - this is the key to avoiding OOM
+    // Release the dedup filter + pending buffer: the heap these hold is the OOM lever
+    // (ADR-0103). session_.networksFound is a value-type session summary, not heap, so it is
+    // deliberately left intact here: the saving screen reports it after stop, and zeroing it
+    // showed "0 networks exported" in the field. startSession is the sole reset point.
     seenFilter_.clear();
-    session_.networksFound = 0;
     saturationWarned_ = false;
     pendingNetworks_.clear();
     pendingNetworks_.shrink_to_fit();

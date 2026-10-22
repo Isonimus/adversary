@@ -374,9 +374,49 @@ void test_ble_dedup_vs_wifi(void) {
     TEST_ASSERT_TRUE(bleKey == 0x0001001122334455ULL);
 }
 
+/**
+ * @brief stopSession keeps the final network count so the saving screen can report it.
+ *
+ * The saving screen reads getSession().networksFound after the session stops. stopSession
+ * used to zero that counter while releasing the dedup/pending heap, so the screen always
+ * printed "0 networks exported" (ADR-0103 field run). The count is a value-type summary,
+ * not heap, and is reset by the next startSession, so stop must leave it intact. Before the
+ * fix this assertion reads 0 and fails.
+ */
+void test_count_survives_stop(void) {
+    WardrivingManager& manager = WardrivingManager::getInstance();
+    manager.startSession();
+
+    WiFiScanner& scanner = WiFiScanner::getInstance();
+    scanner.init();
+
+    uint8_t bssid[6] = {0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F};
+    std::vector<NetworkInfo> mockNetworks;
+    NetworkInfo net;
+    net.ssid = "StopCountTest";
+    memcpy(net.bssid, bssid, 6);
+    mockNetworks.push_back(net);
+
+    scanner.setMockNetworks(mockNetworks);
+    scanner.incrementScanCount();
+    manager.update();
+
+    TEST_ASSERT_EQUAL(1, manager.getNetworkCount());
+
+    manager.stopSession();
+
+    // The saving screen's source of truth must still show the final count after stop.
+    TEST_ASSERT_EQUAL(1, manager.getSession().networksFound);
+
+    // ...and the next session resets it, proving stop is no longer the reset point.
+    manager.startSession();
+    TEST_ASSERT_EQUAL(0, manager.getSession().networksFound);
+}
+
 int main(int argc, char **argv) {
     UNITY_BEGIN();
     RUN_TEST(test_bssid_deduplication);
+    RUN_TEST(test_count_survives_stop);
     RUN_TEST(test_scan_skip_logic);
     RUN_TEST(test_gps_tagging);
     RUN_TEST(test_buffer_flush_logic);
