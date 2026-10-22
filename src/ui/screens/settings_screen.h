@@ -190,6 +190,7 @@ private:
     int32_t tempNotifySounds_;
     int32_t tempNotifyLeds_;
     int32_t tempShowHeapBadge_;
+    int32_t tempShowHeapLargestBlock_;
     int32_t tempToastPosition_;
     int32_t tempThemePreset_;
     char themeLabelBuf_[32];

@@ -80,7 +80,12 @@ struct SystemSettings {
     bool notifySounds = true;   // Enable audio notifications
     bool notifyLeds = true;     // Enable LED notifications
     bool showHeapBadge = false; // Show free heap in status bar
-    
+    // Append the largest free block to the heap badge (only when showHeapBadge is on).
+    // Free heap alone reads as a gentle slope under fragmentation; the largest block is
+    // what classified the BOTH-mode wardriving OOM (ADR-0103), so it is kept as an
+    // opt-in diagnostic rather than a compile-time flag.
+    bool showHeapLargestBlock = false;
+
     // Dashboard Server Settings
     bool dashboardAuthEnabled = true;       // Enable HTTP basic auth (secure default)
     char dashboardUsername[33] = "admin";   // Auth username (if enabled)
@@ -489,7 +494,8 @@ inline bool SettingsManager::load() {
         settings_.system.notifySounds = system["notifySounds"] | true;
         settings_.system.notifyLeds = system["notifyLeds"] | true;
         settings_.system.showHeapBadge = system["showHeapBadge"] | false;
-        
+        settings_.system.showHeapLargestBlock = system["showHeapLargestBlock"] | false;
+
         // Dashboard Server Settings
         settings_.system.dashboardAuthEnabled = system["dashboardAuthEnabled"] | true;
         const char* dashUser = system["dashboardUsername"] | "admin";
@@ -608,7 +614,8 @@ inline bool SettingsManager::save() {
     system["notifySounds"] = settings_.system.notifySounds;
     system["notifyLeds"] = settings_.system.notifyLeds;
     system["showHeapBadge"] = settings_.system.showHeapBadge;
-    
+    system["showHeapLargestBlock"] = settings_.system.showHeapLargestBlock;
+
     // Dashboard Server Settings
     system["dashboardAuthEnabled"] = settings_.system.dashboardAuthEnabled;
     system["dashboardUsername"] = settings_.system.dashboardUsername;
