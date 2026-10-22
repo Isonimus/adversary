@@ -18,8 +18,51 @@
 
 #include "utils/log.h"
 
+#if defined(WARDRIVE_HEAP_TRACE) && defined(ARDUINO)
+// Throwaway diagnostic (build with -DWARDRIVE_HEAP_TRACE): per-scan-cycle heap slope to
+// SD, for the untethered BOTH-mode OOM hunt. Remove once the slope is characterized
+// (LEDGER: "Remove the WARDRIVE_HEAP_TRACE instrument"). esp_heap_caps gives the
+// largest-free-block, which separates fragmentation from plain exhaustion.
+#include "esp_heap_caps.h"
+#endif
+
 namespace adversary {
 namespace wardriving {
+
+#if defined(WARDRIVE_HEAP_TRACE) && defined(ARDUINO)
+namespace {
+// Append one heap sample to a dedicated sidecar file, using the same open/append/close
+// idiom as writeNetworkToCSV so it adds no new file handle or cadence of its own. Writes
+// internal-RAM free and largest-free-block: free-vs-largest is the fragmentation tell.
+void appendHeapSample(uint32_t uptimeMs, uint32_t deviceCount, uint8_t mode) {
+    static bool headerWritten = false;
+    const char* path = "/adversary/logs/wardrive-heap.csv";
+    File f = SD.open(path, FILE_APPEND);
+    if (!f) {
+        if (!SD.exists("/adversary/logs")) SD.mkdir("/adversary/logs");
+        f = SD.open(path, FILE_APPEND);
+        if (!f) {
+            // Non-fatal by design: a dropped diagnostic sample must not abort a field
+            // run, but say so rather than masking it.
+            LOG_W("HEAPTRACE", "SD open failed; sample dropped");
+            return;
+        }
+    }
+    if (!headerWritten) {
+        f.println("uptimeMs,devices,freeInternal,largestBlockInternal,mode");
+        headerWritten = true;
+    }
+    char line[96];
+    snprintf(line, sizeof(line), "%lu,%lu,%u,%u,%u\n",
+             (unsigned long)uptimeMs, (unsigned long)deviceCount,
+             (unsigned int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+             (unsigned int)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+             (unsigned int)mode);
+    f.print(line);
+    f.close();
+}
+}  // namespace
+#endif
 
 // ============================================================================
 // Singleton Access
@@ -39,6 +82,7 @@ WardrivingManager& WardrivingManager::getInstance() {
 WardrivingManager::WardrivingManager()
     : active_(false)
     , paused_(false)
+    , saturationWarned_(false)
     , csvHeaderWritten_(false)
     , lastProcessedScanCount_(0)
     , lastLat_(0.0)
@@ -80,9 +124,11 @@ bool WardrivingManager::startSession() {
     // =========================================================================
     // STREAM-TO-SD ARCHITECTURE
     // =========================================================================
-    // Clear hash set (BSSID deduplication - fixed memory ~8 bytes per network)
-    seenBSSIDs_.clear();
-    
+    // Reset the bounded dedup filter + exact counter (ADR-0103)
+    seenFilter_.clear();
+    session_.networksFound = 0;
+    saturationWarned_ = false;
+
     // Clear and pre-allocate small pending buffer (~20 entries max for GPS updates)
     // This is much smaller than before - we write to SD as soon as GPS is obtained
     pendingNetworks_.clear();
@@ -161,8 +207,10 @@ void WardrivingManager::discardSession() {
             LOG_I("WARDRV", "Session discarded. Deleted: %s", discardedPath);
         }
     }
-    
-    seenBSSIDs_.clear();
+
+    seenFilter_.clear();
+    session_.networksFound = 0;
+    saturationWarned_ = false;
     pendingNetworks_.clear();
 }
 
@@ -226,7 +274,9 @@ void WardrivingManager::stopSession() {
     }
     
     // Clear memory - this is the key to avoiding OOM
-    seenBSSIDs_.clear();
+    seenFilter_.clear();
+    session_.networksFound = 0;
+    saturationWarned_ = false;
     pendingNetworks_.clear();
     pendingNetworks_.shrink_to_fit();
     
@@ -285,6 +335,11 @@ void WardrivingManager::update() {
             BLEScanner::getInstance().deinit();
         }
 #endif
+#if defined(WARDRIVE_HEAP_TRACE) && defined(ARDUINO)
+        // Sample once per scan cycle (~scanInterval) so the slope is dense enough to read,
+        // unlike the 30 s SD flush. Placed after the scans so it reflects post-scan heap.
+        appendHeapSample(now, session_.networksFound, static_cast<uint8_t>(mode));
+#endif
         lastWiFiScanMs_ = now;
     }
     
@@ -309,7 +364,7 @@ void WardrivingManager::update() {
     if (now - lastHeapLog > 60000) {
         LOG_I("WARDRV", "Heap: %lu, seen: %lu, pending: %lu", 
               (unsigned long)ESP.getFreeHeap(),
-              (unsigned long)seenBSSIDs_.size(),
+              (unsigned long)session_.networksFound,
               (unsigned long)pendingNetworks_.size());
         lastHeapLog = now;
     }
@@ -332,8 +387,9 @@ const WardrivingSession& WardrivingManager::getSession() const {
 }
 
 uint32_t WardrivingManager::getNetworkCount() const {
-    // Hash set contains all unique BSSIDs - this is the accurate count
-    return static_cast<uint32_t>(seenBSSIDs_.size());
+    // Exact unique count: incremented once per genuinely-new (mac,type), the Bloom cannot
+    // count so this is the authoritative figure (ADR-0103).
+    return session_.networksFound;
 }
 
 std::vector<NetworkEntry> WardrivingManager::getNetworks() const {
@@ -376,7 +432,7 @@ void WardrivingManager::processWiFiScan() {
 
     if (newCount > 0) {
         LOG_I("WARDRV", "Found %lu new networks (total: %lu)",
-              (unsigned long)newCount, (unsigned long)seenBSSIDs_.size());
+              (unsigned long)newCount, (unsigned long)session_.networksFound);
     }
 }
 
@@ -456,7 +512,7 @@ void WardrivingManager::processBLEScan() {
 
     if (newCount > 0) {
         LOG_I("WARDRV", "Found %lu new BLE devices (total: %lu)",
-              (unsigned long)newCount, (unsigned long)seenBSSIDs_.size());
+              (unsigned long)newCount, (unsigned long)session_.networksFound);
     }
 }
 #endif
@@ -500,20 +556,26 @@ void WardrivingManager::processGPSUpdate() {
 
 bool WardrivingManager::hasSeenBSSID(const uint8_t* bssid, ObservationType type) const {
     uint64_t key = observationKey(bssid, type);
-    return seenBSSIDs_.find(key) != seenBSSIDs_.end();
+    return seenFilter_.test(key);
 }
 
 NetworkEntry* WardrivingManager::addNewNetwork(const uint8_t* bssid, ObservationType type) {
     uint64_t key = observationKey(bssid, type);
 
-    // Check if max observations reached (WiFi + BLE share the cap: it bounds the
-    // dedup set's memory, which is type-agnostic).
-    if (seenBSSIDs_.size() >= MAX_NETWORKS) {
+    // Cap reached: the Bloom is sized for MAX_NETWORKS at ~1% FP, so past it accuracy
+    // degrades. Stop adding and warn once (fail loud) rather than silently dropping devices
+    // at a climbing false-positive rate (ADR-0103).
+    if (session_.networksFound >= MAX_NETWORKS) {
+        if (!saturationWarned_) {
+            LOG_W("WARDRV", "Dedup at capacity (%u) - new devices dropped, coverage degraded",
+                  (unsigned)MAX_NETWORKS);
+            saturationWarned_ = true;
+        }
         return nullptr;
     }
 
-    // Add to hash set for future deduplication
-    seenBSSIDs_.insert(key);
+    // Record in the bounded dedup filter and bump the exact unique counter
+    seenFilter_.add(key);
     session_.networksFound++;
 
     // Add to pending buffer for GPS tagging
@@ -547,7 +609,7 @@ void WardrivingManager::flushToSD() {
     }
     
     LOG_I("WARDRV", "Flushed %lu networks to SD (total: %lu)", 
-          (unsigned long)flushedCount, (unsigned long)seenBSSIDs_.size());
+          (unsigned long)flushedCount, (unsigned long)session_.networksFound);
     
     // Clear pending buffer - memory is now free
     pendingNetworks_.clear();

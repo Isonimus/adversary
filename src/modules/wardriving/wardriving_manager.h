@@ -12,7 +12,6 @@
 #include "wardriving_config.h"
 #include <vector>
 #include <algorithm>
-#include <unordered_set>
 #include <ctime>    // time_t for formatWigleTimestamp
 
 #ifdef ARDUINO
@@ -296,8 +295,11 @@ private:
     bool paused_;                              ///< Session is paused
     WardrivingSession session_;                ///< Current session data
     
-    // Memory-efficient network tracking
-    std::unordered_set<uint64_t> seenBSSIDs_; ///< BSSID hashes for O(1) dedup (~8 bytes each)
+    // Bounded-memory network tracking (ADR-0103). The Bloom filter answers "seen this
+    // (mac,type)?" in fixed memory regardless of device count; session_.networksFound is the
+    // exact unique count (the Bloom cannot count), incremented only on a genuinely-new add.
+    SeenFilter seenFilter_;                   ///< Fixed ~6 KB dedup, replaces unordered_set
+    bool saturationWarned_;                   ///< One-time warn when the dedup hits capacity
     std::vector<NetworkEntry> pendingNetworks_; ///< Small buffer for GPS updates (~20 max)
     
     // Streaming CSV file

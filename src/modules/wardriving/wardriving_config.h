@@ -7,6 +7,8 @@
 
 #include <cstdint>
 
+#include "utils/bloom_filter.h"
+
 namespace adversary {
 namespace wardriving {
 
@@ -14,8 +16,18 @@ namespace wardriving {
 // Network Storage
 // ============================================================================
 
-/// Maximum unique networks per session (tracked via BSSID hash set)
+/// Maximum unique networks per session, and the Bloom filter's design capacity. New
+/// observations past this are dropped with a one-time fail-loud warning (ADR-0103).
 constexpr size_t MAX_NETWORKS = 5000;
+
+/// Bounded-memory dedup (ADR-0103). Sized for MAX_NETWORKS keys at ~1% false positive:
+/// m = ceil(-n ln p / (ln2)^2) = 47926 -> 48000 bits (6000 B, fixed); k = round((m/n) ln2) = 7.
+/// Replaces the old unbounded std::unordered_set<uint64_t> that grew ~O(unique devices) and
+/// exhausted the thin BOTH-mode heap. A false positive drops a genuinely-new device (the
+/// accepted trade: see ADR-0103); there are never false negatives, so nothing is re-logged.
+constexpr size_t SEEN_BLOOM_BITS = 48000;
+constexpr size_t SEEN_BLOOM_HASHES = 7;
+using SeenFilter = utils::BloomFilter<SEEN_BLOOM_BITS, SEEN_BLOOM_HASHES>;
 
 /// Pending buffer size for GPS updates before writing to SD
 /// Small buffer - networks are written to SD as soon as GPS is obtained
