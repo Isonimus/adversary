@@ -14,7 +14,9 @@
 #include <vector>
 #include <functional>
 #include "../../hal/input/input_manager.h"
-#include "footer_hints.h"   // ui::footerKeyLabel: shared key-glyph house style (ADR-0098)
+#include "footer_hints.h"       // FooterHints: the shared footer-hint bar (ADR-0098/0100)
+#include "list_scroll_model.h"  // shared selection/scroll state + skip-nav predicate (ADR-0104)
+#include "scrollable_list.h"    // shared list renderer: band + unified thumb (slice-0063)
 #include <memory>
 
 namespace adversary {
@@ -177,22 +179,28 @@ public:
     void render(Canvas& canvas);
     
     // Getters
-    int getSelection() const { return selection_; }
+    int getSelection() const { return listModel_.selectedIndex(); }
     int getMenuDepth() const { return menuStack_.size(); }
     const std::string& getCurrentTitle() const;
     const std::vector<MenuItem>& getCurrentItems() const;
     bool isAtRoot() const { return menuStack_.empty(); }
-    
+
 private:
-    void ensureValidSelection();
     bool isSelectable(const MenuItem& item) const;
-    int findNextSelectable(int from, int direction);
+    /// Point the shared model at the current level: sync its row count, then set the selection
+    /// (the predicate snaps off a separator/disabled row). Replaces the old ensureValidSelection
+    /// + findNextSelectable skip-nav, now folded into ListScrollModel (ADR-0104).
+    void syncModelToLevel(int desiredSelection);
     void enterSubmenu(const std::vector<MenuItem>& items, const std::string& title);
-    
+
     std::vector<MenuItem> rootItems_;
     std::string title_;
     std::string rootTitle_;
-    int selection_;
+    /// Selection + scroll window for the current level, with a selectable predicate that skips
+    /// separators and live-disabled rows. The per-level selection is saved/restored via the
+    /// menuStack_ entries (ADR-0104).
+    ListScrollModel listModel_;
+    ui::FooterHints footer_;  // the menu's own non-interactive hint bar
     ActionCallback callback_;
     
     // Stack for submenu navigation
@@ -218,9 +226,9 @@ namespace adversary {
 template<typename Canvas>
 void Menu::render(Canvas& canvas) {
     const auto& items = getCurrentItems();
-    
+
     canvas.fillScreen(theme::BG_PRIMARY());
-    
+
     // Status bar with SD and battery indicators. In a submenu, prefix the title
     // with a back chevron so the "you can go back" hint sits on the LEFT with the
     // title — the previous fixed-position overlay at (SCREEN_WIDTH-50, 6) collided
@@ -230,108 +238,53 @@ void Menu::render(Canvas& canvas) {
         title = "< " + title;
     }
     ui::StatusBar::render(canvas, title.c_str());
-    
-    // Menu items
-    int16_t yPos = 20 + 8;
-    
-    // Visible-row budget. A row's selection band is itemHeight tall and starts
-    // highlightInsetAbove px above the text baseline (yPos), so a row is fully visible
-    // when that band clears the action bar top. Count the bands that fit rather than a
-    // naive contentHeight/itemHeight: 87/18 truncated to 4 and dropped a 5th row that
-    // in fact fits (band at yPos=100 ends at y=113, above the y=115 action bar).
-    const int16_t itemHeight = 18;
-    const int16_t separatorHeight = 14;
-    const int16_t highlightInsetAbove = 5;
-    const int16_t actionBarTop = config::SCREEN_HEIGHT - 20;                    // 115
-    const int maxVisible = (actionBarTop - (yPos - highlightInsetAbove)) / itemHeight;  // (115-23)/18 = 5
-    
-    int startIdx = 0;
-    if (selection_ >= maxVisible) {
-        startIdx = selection_ - maxVisible + 1;
-    }
-    
-    int visibleCount = 0;
-    for (size_t i = startIdx; i < items.size() && visibleCount < maxVisible; i++) {
-        const MenuItem& item = items[i];
-        
-        // Stop before a row's selection band would cross into the action bar.
-        if ((yPos - highlightInsetAbove) + itemHeight > actionBarTop) {
-            break;
-        }
-        
-        // Skip separators in selection but still draw them
-        if (item.type == MenuItemType::SEPARATOR) {
-            canvas.drawLine(10, yPos + 6, config::SCREEN_WIDTH - 10, yPos + 6, theme::TEXT_DISABLED());
-            yPos += separatorHeight;
-            visibleCount++;
-            continue;
-        }
-        
-        // Highlight selected item. "Disabled" is now the live isEnabled() verdict, not just
-        // the static ITEM_DISABLED type, so a gated-off entry greys itself (slice-0042).
-        const bool enabled = item.isEnabled();
-        if (static_cast<int>(i) == selection_) {
-            canvas.fillRect(0, yPos - 5, config::SCREEN_WIDTH, 18, theme::ACCENT());
-            canvas.setTextColor(theme::BG_PRIMARY());
-        } else if (!enabled) {
-            canvas.setTextColor(theme::TEXT_DISABLED());
-        } else {
-            canvas.setTextColor(theme::TEXT_PRIMARY());
-        }
 
-        canvas.setTextSize(1);
-        canvas.setCursor(10, yPos);
+    // Footer hints, drawn through the shared FooterHints component (same house style as every
+    // screen; replaces the old hand-rolled bar, ADR-0104). The bar is non-interactive here: the
+    // menu keeps its own key handling and never gives the footer focus. The root offers vertical
+    // Nav; a submenu offers Back. Enter always selects. On the keyboardless M5StickC the
+    // component renders the action words alone.
+    footer_.setHints(menuStack_.empty()
+                         ? std::initializer_list<ui::FooterHint>{ {';', "Nav"}, {'\n', "Select"} }
+                         : std::initializer_list<ui::FooterHint>{ {'`', "Back"}, {'\n', "Select"} });
 
-        // A gated-off entry shows its reason-bearing label (e.g. "RFID (Module missing)").
-        const std::string& shownLabel = (!enabled && !item.disabledLabel.empty())
-                                            ? item.disabledLabel : item.label;
-        canvas.print(shownLabel.c_str());
-        
-        // Submenu indicator
-        if (item.type == MenuItemType::SUBMENU) {
-            canvas.setCursor(config::SCREEN_WIDTH - 15, yPos);
-            canvas.print(">");
-        }
-        
-        yPos += itemHeight;
-        visibleCount++;
-    }
-    
-    // Scroll indicators
-    if (startIdx > 0) {
-        ui::drawTriGlyph(canvas, config::SCREEN_WIDTH - 10, 25, ui::TriGlyph::Up,
-                         theme::ACCENT());  // triangle (ADR-0100): items scrolled off above
-    }
-    if (startIdx + maxVisible < static_cast<int>(items.size())) {
-        ui::drawTriGlyph(canvas, config::SCREEN_WIDTH - 10, config::SCREEN_HEIGHT - 30,
-                         ui::TriGlyph::Down, theme::ACCENT());  // items scrolled off below
-    }
-    
-    // Action bar, in the same house style as the FooterHints component: text keys from
-    // ui::footerKeyLabel, the arrow-nav glyph as a filled triangle pair drawn with
-    // ui::drawFooterKeyGlyphs (ADR-0100: the CP437 triangle bytes do not render through the
-    // text layer). Moving the menu fully onto FooterHints rides with the Menu->ScrollableList
-    // rework (LEDGER item 94). On the keyboardless M5StickC it shows the action words alone.
-    const int16_t barY = config::SCREEN_HEIGHT - 14;
-    canvas.fillRect(0, config::SCREEN_HEIGHT - 20, config::SCREEN_WIDTH, 20, theme::BG_SECONDARY());
-    canvas.setTextColor(theme::TEXT_SECONDARY());
-    canvas.setCursor(5, barY);
+    // The list body rides the shared component: it derives the viewport from the rect, paints
+    // the app-wide selection band (ADR-0104 unifies the old accent-inverted idiom with every
+    // data list), and draws the one proportional scrollbar thumb (retiring the up/down carets).
+    // The callback draws row content only — label/greying/chevron for an item, a divider line
+    // for a separator; the band is never painted here. The model's predicate already keeps the
+    // cursor off separators and live-disabled rows, so the selected row is always a real item.
+    const int16_t listTop = config::STATUS_BAR_HEIGHT + 2;
+    const int16_t listH =
+        static_cast<int16_t>(config::SCREEN_HEIGHT - ui::FOOTER_HEIGHT - listTop);
+    canvas.setTextSize(1);
+    ScrollableList::render(
+        canvas, listModel_, 0, listTop, config::SCREEN_WIDTH, listH, theme::LIST_ROW_HEIGHT,
+        [&items](Canvas& c, int itemIndex, int16_t rowTopY, bool /*isSelected*/) {
+            const MenuItem& item = items[static_cast<size_t>(itemIndex)];
+            if (item.type == MenuItemType::SEPARATOR) {
+                const int16_t midY = rowTopY + theme::LIST_ROW_HEIGHT / 2;
+                c.drawLine(10, midY, config::SCREEN_WIDTH - 10, midY, theme::TEXT_DISABLED());
+                return;
+            }
+            // "Disabled" is the live isEnabled() verdict, not just the static ITEM_DISABLED type,
+            // so a gated-off entry greys itself and shows its reason-bearing label, e.g.
+            // "RFID (Module missing)" (slice-0042). The selected row reads as primary text on
+            // the shared band, no longer inverted.
+            const bool enabled = item.isEnabled();
+            c.setTextColor(enabled ? theme::TEXT_PRIMARY() : theme::TEXT_DISABLED());
+            const int16_t textY = rowTopY + theme::LIST_ROW_TEXT_DY;
+            c.setCursor(10, textY);
+            const std::string& shownLabel = (!enabled && !item.disabledLabel.empty())
+                                                ? item.disabledLabel : item.label;
+            c.print(shownLabel.c_str());
+            if (item.type == MenuItemType::SUBMENU) {
+                c.setCursor(config::SCREEN_WIDTH - 15, textY);
+                c.print(">");
+            }
+        });  // focused defaults true: the menu footer never steals the band's colour
 
-#if defined(TARGET_M5STICK)
-    canvas.print(menuStack_.empty() ? "Nav  Select" : "Back  Select");
-#else
-    if (menuStack_.empty()) {
-        // Root: up+down triangle pair (2 cells) for vertical nav, drawn as geometry.
-        ui::drawFooterKeyGlyphs(canvas, 5, barY, ';', theme::TEXT_SECONDARY());
-        canvas.setCursor(5 + 2 * theme::FONT_CELL_WIDTH, barY);
-        canvas.print(":Nav  ");
-    } else {
-        canvas.print(ui::footerKeyLabel('`'));  // Esc
-        canvas.print(":Back  ");
-    }
-    canvas.print(ui::footerKeyLabel('\n'));      // Enter
-    canvas.print(":Select");
-#endif
+    footer_.render(canvas);
 }
 
 } // namespace adversary

@@ -66,12 +66,19 @@ IrRecordScreen::IrRecordScreen()
     , captureAvailable_(false)
     , state_(MenuState::MAIN)
     , lastHintState_(MenuState::MAIN)
-    , mainSelection_(0)
     , actionSelection_(0)
     , txSelection_(0)
     , captureStage_(0)
     , actionSignalValid_(false)
 {
+    // The 3-row main menu's cursor skips the Learn row while no IR RX module is present, now via
+    // the shared model's predicate instead of a hand-rolled skip-loop (ADR-0104). The predicate
+    // reads captureAvailable_ live, so attaching the module un-disables Learn without a rebuild.
+    mainMenu_.setItemCount(3);
+    mainMenu_.setViewport(3);
+    mainMenu_.setSelectablePredicate([this](int i) {
+        return !(i == 0 && !captureAvailable_);  // Learn (row 0) is selectable only with IR RX
+    });
 }
 
 IrRecordScreen::~IrRecordScreen() {
@@ -98,8 +105,9 @@ void IrRecordScreen::show() {
 
     captureAvailable_ = ir::hasIrRx();
     // Start past the Learn row when it is disabled (no IR RX module), so the selection never
-    // lands on a greyed, unselectable entry (slice-0072).
-    mainSelection_ = firstEnabledMain();
+    // lands on a greyed, unselectable entry; the model's predicate does the snap (slice-0072,
+    // ADR-0104).
+    mainMenu_.setSelectedIndex(0);
 
     lastHintState_ = state_;
     updateFooterHints();
@@ -422,26 +430,17 @@ bool IrRecordScreen::handleInput(char key) {
     int unusedScroll = 0;
     switch (state_) {
         case MenuState::MAIN:
-            if (key == ';' || key == '.') {
-                // Wrap through the 3 rows, skipping the Learn row while it is disabled so the
-                // selection never rests on a greyed, unselectable entry (slice-0072).
-                const int dir = (key == ';') ? -1 : 1;
-                int next = mainSelection_;
-                for (int step = 0; step < 3; ++step) {
-                    next = (next + dir + 3) % 3;
-                    if (!(next == 0 && !captureAvailable_)) break;
-                }
-                mainSelection_ = next;
-                return true;
-            }
+            if (key == ';') { mainMenu_.moveUp(); return true; }
+            if (key == '.') { mainMenu_.moveDown(); return true; }
             if (key == '\n' || key == '\r') {
-                if (mainSelection_ == 0) {
+                const int mainSelection = mainMenu_.selectedIndex();
+                if (mainSelection == 0) {
                     if (captureAvailable_) {
                         startCapture();
                     } else {
                         showWarningToast("IR RX needs external module");
                     }
-                } else if (mainSelection_ == 1) {
+                } else if (mainSelection == 1) {
                     loadCodeList();
                     codeList_.setItemCount(static_cast<int>(codes_.size()));
                     codeList_.setSelectedIndex(0);
@@ -568,7 +567,7 @@ void IrRecordScreen::drawMain(Canvas& canvas) {
     const bool focused = !footerHints_.hasFocus();
     for (int i = 0; i < 3; ++i) {
         const bool learnDisabled = (i == 0 && !captureAvailable_);
-        const bool selected = (i == mainSelection_);
+        const bool selected = (i == mainMenu_.selectedIndex());
         if (selected) paintMenuBand(canvas, rowTop, canvas.width(), focused);
         canvas.setTextColor(learnDisabled ? theme::TEXT_DISABLED()
                             : selected     ? theme::TEXT_PRIMARY()

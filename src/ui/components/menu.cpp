@@ -16,16 +16,22 @@ namespace adversary {
 Menu::Menu()
     : title_("MENU")
     , rootTitle_("MENU")
-    , selection_(0)
 {
+    // The shared model skips any row the menu treats as non-selectable (separator or
+    // live-disabled), consulting the live current level each time so greying takes effect
+    // without a rebuild. Replaces the old findNextSelectable/ensureValidSelection (ADR-0104).
+    listModel_.setSelectablePredicate([this](int index) {
+        const auto& items = getCurrentItems();
+        return index >= 0 && index < static_cast<int>(items.size()) &&
+               isSelectable(items[static_cast<size_t>(index)]);
+    });
 }
 
 void Menu::setItems(const std::vector<MenuItem>& items) {
     rootItems_ = items;
     rootTitle_ = title_;
     menuStack_.clear();
-    selection_ = 0;
-    ensureValidSelection();
+    syncModelToLevel(0);
 }
 
 bool Menu::handleInput(char key) {
@@ -67,7 +73,7 @@ bool Menu::handleInput(char key) {
         for (size_t i = 0; i < items.size(); i++) {
             if (isSelectable(items[i])) {
                 if (selectableCount == index) {
-                    selection_ = static_cast<int>(i);
+                    listModel_.setSelectedIndex(static_cast<int>(i));
                     selectCurrent();
                     return true;
                 }
@@ -82,7 +88,7 @@ bool Menu::handleInput(char key) {
         if (items[i].shortcut != 0 && 
             (items[i].shortcut == key || items[i].shortcut == (key ^ 0x20))) {  // Case insensitive
             if (isSelectable(items[i])) {
-                selection_ = static_cast<int>(i);
+                listModel_.setSelectedIndex(static_cast<int>(i));
                 selectCurrent();
                 return true;
             }
@@ -121,18 +127,19 @@ bool Menu::handleAction(InputAction action) {
 }
 
 void Menu::navigateUp() {
-    selection_ = findNextSelectable(selection_ - 1, -1);
+    listModel_.moveUp();
 }
 
 void Menu::navigateDown() {
-    selection_ = findNextSelectable(selection_ + 1, 1);
+    listModel_.moveDown();
 }
 
 void Menu::selectCurrent() {
     const auto& items = getCurrentItems();
-    if (selection_ < 0 || selection_ >= static_cast<int>(items.size())) return;
-    
-    const MenuItem& item = items[selection_];
+    const int sel = listModel_.selectedIndex();
+    if (sel < 0 || sel >= static_cast<int>(items.size())) return;
+
+    const MenuItem& item = items[static_cast<size_t>(sel)];
     
     switch (item.type) {
         case MenuItemType::ACTION:
@@ -162,28 +169,21 @@ bool Menu::goBack() {
     if (menuStack_.empty()) {
         return false;  // Already at root
     }
-    
-    // Restore previous level
+
+    // Restore the parent level's saved selection (stored on the level we are leaving).
     MenuLevel prev = menuStack_.back();
     menuStack_.pop_back();
-    
     if (menuStack_.empty()) {
-        // Back to root
-        title_ = rootTitle_;
-        selection_ = prev.selection;
-    } else {
-        // Stay in submenu stack
-        selection_ = prev.selection;
+        title_ = rootTitle_;  // Back to root
     }
-    
+    syncModelToLevel(prev.selection);
     return true;
 }
 
 void Menu::reset() {
     menuStack_.clear();
     title_ = rootTitle_;
-    selection_ = 0;
-    ensureValidSelection();
+    syncModelToLevel(0);
 }
 
 // render() is now a template in the header file
@@ -202,17 +202,12 @@ const std::vector<MenuItem>& Menu::getCurrentItems() const {
     return menuStack_.back().items;
 }
 
-void Menu::ensureValidSelection() {
+void Menu::syncModelToLevel(int desiredSelection) {
     const auto& items = getCurrentItems();
-    if (items.empty()) {
-        selection_ = 0;
-        return;
-    }
-    
-    // Find first selectable item
-    if (!isSelectable(items[selection_])) {
-        selection_ = findNextSelectable(0, 1);
-    }
+    listModel_.setItemCount(static_cast<int>(items.size()));
+    // The predicate snaps the cursor off a separator/disabled row, so this lands on the first
+    // selectable row at or after desiredSelection (what ensureValidSelection used to do).
+    listModel_.setSelectedIndex(desiredSelection);
 }
 
 bool Menu::isSelectable(const MenuItem& item) const {
@@ -225,46 +220,22 @@ bool Menu::isSelectable(const MenuItem& item) const {
            item.isEnabled();
 }
 
-int Menu::findNextSelectable(int from, int direction) {
-    const auto& items = getCurrentItems();
-    if (items.empty()) return 0;
-    
-    int count = static_cast<int>(items.size());
-    int current = from;
-    
-    // Wrap around
-    if (current < 0) current = count - 1;
-    if (current >= count) current = 0;
-    
-    // Search for selectable item
-    for (int i = 0; i < count; i++) {
-        if (isSelectable(items[current])) {
-            return current;
-        }
-        current += direction;
-        if (current < 0) current = count - 1;
-        if (current >= count) current = 0;
-    }
-    
-    return 0;  // Fallback
-}
-
 void Menu::enterSubmenu(const std::vector<MenuItem>& items, const std::string& title) {
-    // Save current state
+    // Save current state (the parent level's selection is stored on the pushed entry and
+    // restored by goBack).
     MenuLevel current;
     current.items = getCurrentItems();
     current.title = getCurrentTitle();
-    current.selection = selection_;
-    
+    current.selection = listModel_.selectedIndex();
+
     menuStack_.push_back(current);
-    
+
     // Enter new submenu
     // Note: We store items in the stack, but we actually want to use the new items
     menuStack_.back().items = items;
     menuStack_.back().title = title;
-    
-    selection_ = 0;
-    ensureValidSelection();
+
+    syncModelToLevel(0);
 }
 
 } // namespace adversary

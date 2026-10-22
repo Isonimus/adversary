@@ -19,6 +19,7 @@ void ListScrollModel::setItemCount(int count) {
     itemCount_ = count < 0 ? 0 : count;
     const int lastIndex = itemCount_ > 0 ? itemCount_ - 1 : 0;
     selectedIndex_ = clampInt(selectedIndex_, 0, lastIndex);
+    snapSelectionToSelectable();  // a rebuild may leave the selection on a now-rejected row
     clampOffsetToSelection();
 }
 
@@ -28,21 +29,52 @@ void ListScrollModel::setViewport(int visibleRows) {
     clampOffsetToSelection();
 }
 
+void ListScrollModel::setSelectablePredicate(std::function<bool(int)> predicate) {
+    selectable_ = std::move(predicate);
+}
+
+bool ListScrollModel::isSelectable(int i) const {
+    if (i < 0 || i >= itemCount_) return false;
+    return selectable_ ? selectable_(i) : true;
+}
+
+int ListScrollModel::seekSelectable(int from, int direction) const {
+    if (itemCount_ == 0) return -1;
+    int current = from;
+    if (current < 0) current = itemCount_ - 1;
+    if (current >= itemCount_) current = 0;
+    for (int step = 0; step < itemCount_; ++step) {
+        if (isSelectable(current)) return current;
+        current += direction;
+        if (current < 0) current = itemCount_ - 1;
+        if (current >= itemCount_) current = 0;
+    }
+    return -1;  // nothing selectable: the caller leaves the selection where it was
+}
+
+void ListScrollModel::snapSelectionToSelectable() {
+    const int sel = seekSelectable(selectedIndex_, 1);
+    if (sel >= 0) selectedIndex_ = sel;
+}
+
 void ListScrollModel::moveUp() {
     if (itemCount_ == 0) return;
-    selectedIndex_ = (selectedIndex_ > 0) ? selectedIndex_ - 1 : itemCount_ - 1;
+    const int next = seekSelectable(selectedIndex_ - 1, -1);
+    if (next >= 0) selectedIndex_ = next;  // leave put when nothing is selectable
     clampOffsetToSelection();
 }
 
 void ListScrollModel::moveDown() {
     if (itemCount_ == 0) return;
-    selectedIndex_ = (selectedIndex_ < itemCount_ - 1) ? selectedIndex_ + 1 : 0;
+    const int next = seekSelectable(selectedIndex_ + 1, 1);
+    if (next >= 0) selectedIndex_ = next;
     clampOffsetToSelection();
 }
 
 void ListScrollModel::setSelectedIndex(int index) {
     if (itemCount_ == 0) return;
     selectedIndex_ = clampInt(index, 0, itemCount_ - 1);
+    snapSelectionToSelectable();  // a jump onto a rejected row snaps to the nearest selectable
     clampOffsetToSelection();
 }
 
