@@ -11,9 +11,6 @@
 #include "modules/storage/settings_manager.h"
 #ifdef ARDUINO
 #include "modules/ble/ble_scanner.h"   // NimBLE; device-only (not in the native build filter)
-#if defined(WARDRIVE_HEAP_TRACE) && defined(ARDUINO)
-#include "esp_heap_caps.h"   // largest-free-block for the throwaway BOTH-mode OOM HUD
-#endif
 #endif
 #include <Arduino.h>
 
@@ -313,22 +310,12 @@ String WardrivingScreen::formatDistance(float km) {
 }
 
 const char* WardrivingScreen::statusHeapText(char* buf, size_t len) const {
-#if defined(WARDRIVE_HEAP_TRACE) && defined(ARDUINO)
-    // Throwaway diagnostic (build with -DWARDRIVE_HEAP_TRACE): always show free + the
-    // largest-free-block (the fragmentation tell), overriding the badge dedup, so an
-    // untethered BOTH-mode field run is self-verifying and the operator sees the moment
-    // it turns. Pairs with the SD slope in wardriving_manager. Remove with the SD side.
-    snprintf(buf, len, "%uK/%uK",
-             (unsigned int)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
-             (unsigned int)(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) / 1024));
-    return buf;
-#else
-    // The heap badge, when enabled, already renders free heap in the status bar;
-    // only add the centre readout when it is off, so wardriving never shows it twice.
+    // The heap badge, when enabled, already renders free heap (and optionally the
+    // largest free block) in the status bar; only add the centre readout when it is
+    // off, so wardriving never shows the heap twice.
     if (SettingsManager::getInstance().get().system.showHeapBadge) return nullptr;
     snprintf(buf, len, "%uK", (unsigned int)(ESP.getFreeHeap() / 1024));
     return buf;
-#endif
 }
 
 uint16_t WardrivingScreen::getRSSIColor(int8_t rssi) {
