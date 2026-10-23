@@ -5,6 +5,7 @@
 
 #include "beacon_spam_screen.h"
 #include "ui/components/action_button.h"
+#include "ui/components/config_row.h"
 
 #ifdef ESP32
 #include <Arduino.h>
@@ -208,11 +209,9 @@ void BeaconSpamScreen::drawConfig(Canvas& canvas)
     int16_t y = HEADER_HEIGHT + 4;
     int16_t screenWidth = canvas.width();
     const int16_t lineHeight = theme::LIST_ROW_HEIGHT;
-    const int16_t labelX = 8;
-    const int16_t valueX = 100;
-    
+
     canvas.setTextSize(1);
-    
+
     // Config options with labels and values
     struct ConfigOption {
         const char* label;
@@ -258,18 +257,14 @@ void BeaconSpamScreen::drawConfig(Canvas& canvas)
     int16_t footerY = canvas.height() - ui::FOOTER_HEIGHT;
     configList_.setItemCount(CONFIG_OPTION_COUNT);
     ScrollableList::render(canvas, configList_, 0, y, screenWidth, footerY - y, lineHeight,
-        [&options, labelX, valueX](Canvas& c, int idx, int16_t rowY, bool selected) {
+        [&options](Canvas& c, int idx, int16_t rowY, bool selected) {
             if (idx == CONFIG_OPTION_COUNT - 1) { // Terminal start row: shared green ActionButton (slice-0089)
                 ui::ActionButton::render(c, rowY, "START BEACONS", selected);
                 return;
             }
-            // Config field: selected field reddens to ACCENT (the edit cue); band drawn by the
-            // component and dimmed on footer focus via the focused flag below (slice-0063).
-            c.setTextColor(selected ? theme::ACCENT() : theme::TEXT_PRIMARY());
-            c.setCursor(labelX, rowY + theme::LIST_ROW_TEXT_DY);
-            c.print(options[idx].label);
-            c.setCursor(valueX, rowY + theme::LIST_ROW_TEXT_DY);
-            c.print(options[idx].value);
+            // Config field through the shared chrome-only ConfigRow: label left, value
+            // right-aligned and dim, selection shown by the band alone (ADR-0096, slice-0106).
+            ui::ConfigRow::render(c, rowY, options[idx].label, options[idx].value);
         },
         !footerHints_.hasFocus());
 #else
