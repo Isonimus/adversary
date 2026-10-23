@@ -609,6 +609,25 @@ constexpr const char* SD_BASE_PATH = "/adversary";
 > promote hardware-verify items, arch/design deferrals, security/supply-chain audits, or
 > deep-state bugs. Full criteria and rationale: `adr/0022-promote-select-ledger-items-to-github-issues.md`.
 
+> **Cutting a release?** Do the whole bump in **one** `chore(release): vX.Y.Z-alpha` commit on
+> `main` (release chores land directly, not via a branch), then tag and push:
+> 1. Bump `VERSION` in `src/config/config.h` — the single source of truth. Do not duplicate the
+>    number anywhere else (the footer version line was dropped for exactly this reason).
+> 2. **Re-stamp `DEPENDENCIES.lock.md` in this same commit.** Re-resolve all three envs
+>    (`pio pkg list -e cardputer`, `-e m5stick`, `-e native`), confirm the resolved trees still
+>    match the snapshot (no drift), and update its "Last verified" date + native test count. CI's
+>    `dep-lock-staleness` gate fails the build when that date predates the release tag, so skipping
+>    it reds the release push (learned the hard way at v0.5.0-alpha). See the lock's own Bump/Gate
+>    sections.
+> 3. Add the `CHANGELOG.md` section (newest first) with curated, user-facing bullets citing the
+>    slices/ADRs; update `README.md` feature/usage text only if the release changed it.
+> 4. Verify before tagging: build all three envs **serially** and run `pio test -e native`; all
+>    green.
+> 5. Annotated tag — `git tag -a vX.Y.Z-alpha -m "Release vX.Y.Z-alpha"` on that commit — then
+>    `git push origin main vX.Y.Z-alpha`. The `v*` tag drives `release.yml` (dio factory image,
+>    GitHub Release), which redeploys the web flasher via `pages.yml`: no manual flasher step.
+>    Pushing is an outward action — get the go-ahead first.
+
 ---
 
 ## 📝 Commit Message Format
