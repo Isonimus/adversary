@@ -185,8 +185,10 @@ private:
     char targetSsid_[33];
     uint8_t targetChannel_;
     
-    // Config options
-    int configSelection_;
+    // Config options. The shared model owns selection + scroll window + wrap; drawConfig feeds it
+    // the live viewport each frame so the two can't drift (slice-0062/0110). Both modes use it:
+    // Auto Hunt is a single Terminal row, Manual is Target + 3 value rows + START (ADR-0092/0094).
+    ListScrollModel configList_;
     bool autoDeauth_;
     uint8_t deauthCount_;
     uint32_t timeoutSecs_;
