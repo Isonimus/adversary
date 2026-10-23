@@ -6,6 +6,7 @@
 #include "probe_flood_screen.h"
 #include "ui/components/action_button.h"
 #include "ui/components/config_row.h"
+#include "ui/components/config_input.h"
 
 #ifdef ESP32
 #include <Arduino.h>
@@ -405,23 +406,39 @@ bool ProbeFloodScreen::handleInput(char key) {
     }
     
     needsRedraw_ = true;
-    
+
+    // Canonical config-form input in the CONFIG state, from the shared classifier (ADR-0107):
+    // the last row is the terminal START button, every other row is a value row.
+    if (screenState_ == ProbeFloodScreenState::CONFIG) {
+        const ui::ConfigRowKind kind = (configList_.selectedIndex() == CONFIG_OPTION_COUNT - 1)
+            ? ui::ConfigRowKind::Terminal : ui::ConfigRowKind::Value;
+        switch (ui::classifyConfigKey(key, kind)) {
+            case ui::ConfigKeyAction::NavUp:
+                configList_.setItemCount(CONFIG_OPTION_COUNT);
+                configList_.moveUp();  // wraps to last; model keeps the selection on screen
+                return true;
+            case ui::ConfigKeyAction::NavDown:
+                configList_.setItemCount(CONFIG_OPTION_COUNT);
+                configList_.moveDown();  // wraps to first; model keeps the selection on screen
+                return true;
+            case ui::ConfigKeyAction::EditPrev:
+                handleEdit(-1);
+                return true;
+            case ui::ConfigKeyAction::EditNext:
+                handleEdit(+1);  // also ENTER on a value row (never inert, ADR-0092)
+                return true;
+            case ui::ConfigKeyAction::Activate:
+                startAttack();  // ENTER on the terminal START row
+                return true;
+            case ui::ConfigKeyAction::Navigate:
+            case ui::ConfigKeyAction::Popup:
+            case ui::ConfigKeyAction::None:
+                break;  // probe has no navigation/popup rows; fall through to the keys below
+        }
+    }
+
     switch (key) {
-        case ';':  // Up
-            handleUp();
-            return true;
-        case '.':  // Down
-            handleDown();
-            return true;
-        case ',':  // Edit previous (ADR-0092)
-        case '<':
-            handleEdit(-1);
-            return true;
-        case '/':  // Edit next (ADR-0092)
-        case '>':
-            handleEdit(+1);
-            return true;
-        case '\n':  // Enter
+        case '\n':  // Enter (non-CONFIG states: stop / continue)
         case '\r':
             handleSelect();
             return true;
@@ -445,27 +462,10 @@ bool ProbeFloodScreen::handleInput(char key) {
     }
 }
 
-void ProbeFloodScreen::handleUp() {
-    if (screenState_ == ProbeFloodScreenState::CONFIG) {
-        configList_.setItemCount(CONFIG_OPTION_COUNT);
-        configList_.moveUp();  // wraps to last; model keeps the selection on screen
-    }
-}
-
-void ProbeFloodScreen::handleDown() {
-    if (screenState_ == ProbeFloodScreenState::CONFIG) {
-        configList_.setItemCount(CONFIG_OPTION_COUNT);
-        configList_.moveDown();  // wraps to first; model keeps the selection on screen
-    }
-}
-
 void ProbeFloodScreen::handleSelect() {
     if (screenState_ == ProbeFloodScreenState::CONFIG) {
-        if (configList_.selectedIndex() == CONFIG_OPTION_COUNT - 1) {
-            startAttack();
-        } else {
-            handleEdit(+1);  // value row: ENTER advances the field (ADR-0092)
-        }
+        // ENTER in CONFIG is handled by the classifier in handleInput; this path is only
+        // reached in the attack states below.
     } else if (screenState_ == ProbeFloodScreenState::RUNNING ||
                screenState_ == ProbeFloodScreenState::PAUSED) {
         stopAttack();

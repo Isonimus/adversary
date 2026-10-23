@@ -5,6 +5,7 @@
 
 #include "deauth_screen.h"
 #include "ui/components/config_row.h"
+#include "ui/components/config_input.h"
 
 namespace adversary {
 
@@ -465,23 +466,43 @@ bool DeauthScreen::handleInput(char key)
         return true;
     }
     
+    // Canonical config-form input in the CONFIG state, from the shared classifier (ADR-0107):
+    // the last row is the terminal "Start Attack" row (activates only with a target), every
+    // other row is a value row.
+    if (screenState_ == DeauthScreenState::CONFIG) {
+        const ui::ConfigRowKind kind = (configList_.selectedIndex() == CONFIG_OPTION_COUNT - 1)
+            ? ui::ConfigRowKind::Terminal : ui::ConfigRowKind::Value;
+        switch (ui::classifyConfigKey(key, kind)) {
+            case ui::ConfigKeyAction::NavUp:
+                configList_.setItemCount(CONFIG_OPTION_COUNT);
+                configList_.moveUp();  // wraps to last; model keeps the selection on screen
+                needsRedraw_ = true;
+                return true;
+            case ui::ConfigKeyAction::NavDown:
+                configList_.setItemCount(CONFIG_OPTION_COUNT);
+                configList_.moveDown();  // wraps to first; model keeps the selection on screen
+                needsRedraw_ = true;
+                return true;
+            case ui::ConfigKeyAction::EditPrev:
+                handleEdit(-1);
+                return true;
+            case ui::ConfigKeyAction::EditNext:
+                handleEdit(+1);  // also ENTER on a value row (never inert, ADR-0092)
+                return true;
+            case ui::ConfigKeyAction::Activate:
+                if (hasTarget_) startAttack();  // terminal row: guarded on having a target
+                needsRedraw_ = true;
+                return true;
+            case ui::ConfigKeyAction::Navigate:
+            case ui::ConfigKeyAction::Popup:
+            case ui::ConfigKeyAction::None:
+                break;  // deauth has no navigation/popup rows; fall through to the keys below
+        }
+    }
+
     // Screen-specific input
     switch (key) {
-        case ';':  // Up
-            handleUp();
-            return true;
-        case '.':  // Down
-            handleDown();
-            return true;
-        case ',':  // Edit previous (ADR-0092)
-        case '<':
-            handleEdit(-1);
-            return true;
-        case '/':  // Edit next (ADR-0092)
-        case '>':
-            handleEdit(+1);
-            return true;
-        case '\n':
+        case '\n':  // Enter (non-CONFIG states: stop / return to config)
         case '\r':
             handleSelect();
             return true;
@@ -506,40 +527,14 @@ bool DeauthScreen::handleInput(char key)
     return false;
 }
 
-void DeauthScreen::handleUp()
-{
-    if (screenState_ == DeauthScreenState::CONFIG) {
-        configList_.setItemCount(CONFIG_OPTION_COUNT);
-        configList_.moveUp();  // wraps to last; model keeps the selection on screen
-        needsRedraw_ = true;
-    }
-}
-
-void DeauthScreen::handleDown()
-{
-    if (screenState_ == DeauthScreenState::CONFIG) {
-        configList_.setItemCount(CONFIG_OPTION_COUNT);
-        configList_.moveDown();  // wraps to first; model keeps the selection on screen
-        needsRedraw_ = true;
-    }
-}
-
 void DeauthScreen::handleSelect()
 {
     switch (screenState_) {
         case DeauthScreenState::CONFIG:
-            // Toggle/modify selected option or start attack
-            if (configList_.selectedIndex() == CONFIG_OPTION_COUNT - 1) {
-                // Last option is "Start Attack"
-                if (hasTarget_) {
-                    startAttack();
-                }
-            } else {
-                handleEdit(+1);  // value row: ENTER advances the field (ADR-0092)
-            }
-            needsRedraw_ = true;
+            // ENTER in CONFIG is handled by the classifier in handleInput; this path is only
+            // reached in the attack states below.
             break;
-            
+
         case DeauthScreenState::RUNNING:
             // Stop attack
             stopAttack();

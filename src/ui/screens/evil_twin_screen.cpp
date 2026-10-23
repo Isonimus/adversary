@@ -6,6 +6,7 @@
 #include "evil_twin_screen.h"
 #include "ui/components/action_button.h"
 #include "ui/components/config_row.h"
+#include "ui/components/config_input.h"
 #include "ui/screen_manager.h"
 #include "core/event_bus.h"
 
@@ -250,36 +251,28 @@ bool EvilTwinScreen::handleInput(char key) {
         }
         return true;
     }
-    
-    switch (key) {
-        case '`':  // Back/ESC
-            if (screenState_ == EvilTwinScreenState::CREDENTIALS ||
-                screenState_ == EvilTwinScreenState::CLIENTS) {
-                screenState_ = (EvilTwinScreenState::SNIFFER == screenState_ || 
-                               (EvilTwinScreenState::RUNNING == screenState_)) ? 
-                               screenState_ : // Should not happen
-                               (TrafficProxy::getInstance().isRunning() ?
-                                EvilTwinScreenState::SNIFFER : EvilTwinScreenState::RUNNING);
-                // Fix: previous state logic was a bit flawed, let's just go back to main attack screen
-                if (TrafficProxy::getInstance().isRunning()) screenState_ = EvilTwinScreenState::SNIFFER;
-                else screenState_ = EvilTwinScreenState::RUNNING;
+
+    // Canonical config-form input in the CONFIG state, from the shared classifier (ADR-0107).
+    // Row 0 (Target) is the navigation row -> WiFi scanner; the last row is the terminal START
+    // button; the rest (including Fixed SSID, whose EditNext opens the SSID popup) are value
+    // rows. Letter hotkeys (m/p/s), back, and the other states fall through below.
+    if (screenState_ == EvilTwinScreenState::CONFIG) {
+        const int sel = configList_.selectedIndex();
+        const ui::ConfigRowKind kind =
+            (sel == 0)                        ? ui::ConfigRowKind::Navigation :
+            (sel == CONFIG_OPTION_COUNT - 1)  ? ui::ConfigRowKind::Terminal :
+                                                ui::ConfigRowKind::Value;
+        switch (ui::classifyConfigKey(key, kind)) {
+            case ui::ConfigKeyAction::NavUp:
+                configList_.setItemCount(CONFIG_OPTION_COUNT);
+                configList_.moveUp();  // wraps to last; model keeps the selection on screen
                 return true;
-            }
-            if (screenState_ == EvilTwinScreenState::RUNNING ||
-                screenState_ == EvilTwinScreenState::SNIFFER) {
-                stop();
+            case ui::ConfigKeyAction::NavDown:
+                configList_.setItemCount(CONFIG_OPTION_COUNT);
+                configList_.moveDown();  // wraps to first; model keeps the selection on screen
                 return true;
-            }
-            if (screenState_ == EvilTwinScreenState::CONFIG) {
-                shouldExit_ = true;
-                return true;
-            }
-            return false;
-            
-        case ',':
-        case '<':
-            if (screenState_ == EvilTwinScreenState::CONFIG) {
-                switch (configList_.selectedIndex()) {
+            case ui::ConfigKeyAction::EditPrev:
+                switch (sel) {
                     case 0: break;  // Target: navigation row, nothing to edit in place (ADR-0092)
                     case 1: if (configMode_ > 0) configMode_--; break;
                     case 2: configPortal_ = 0; break;
@@ -292,13 +285,8 @@ bool EvilTwinScreen::handleInput(char key) {
                     case 6: configLogSD_ = false; break;
                 }
                 return true;
-            }
-            break;
-            
-        case '/':
-        case '>':
-            if (screenState_ == EvilTwinScreenState::CONFIG) {
-                switch (configList_.selectedIndex()) {
+            case ui::ConfigKeyAction::EditNext:  // also ENTER on a value row (never inert, ADR-0092)
+                switch (sel) {
                     case 0: break;  // Target: navigation row, nothing to edit in place (ADR-0092)
                     case 1: if (configMode_ < 1) configMode_++; break;
                     case 2: configPortal_ = (configPortal_ == 0) ? 1 : 0; break;
@@ -330,9 +318,44 @@ bool EvilTwinScreen::handleInput(char key) {
                     case 6: configLogSD_ = true; break;
                 }
                 return true;
-            }
-            break;
+            case ui::ConfigKeyAction::Activate:
+                return startWithConfig();  // ENTER on the terminal START row
+            case ui::ConfigKeyAction::Navigate:
+                // Target row: route to the WiFi scanner to pick a target; it returns via
+                // ATTACK_TARGET_SELECTED -> setTarget (like handshake, ADR-0092).
+                ScreenManager::getInstance().navigateTo(ScreenId::SCANNER);
+                return true;
+            case ui::ConfigKeyAction::Popup:
+            case ui::ConfigKeyAction::None:
+                break;  // no dedicated popup row (Fixed SSID edits via EditNext); fall through
+        }
+    }
 
+    switch (key) {
+        case '`':  // Back/ESC
+            if (screenState_ == EvilTwinScreenState::CREDENTIALS ||
+                screenState_ == EvilTwinScreenState::CLIENTS) {
+                screenState_ = (EvilTwinScreenState::SNIFFER == screenState_ || 
+                               (EvilTwinScreenState::RUNNING == screenState_)) ? 
+                               screenState_ : // Should not happen
+                               (TrafficProxy::getInstance().isRunning() ?
+                                EvilTwinScreenState::SNIFFER : EvilTwinScreenState::RUNNING);
+                // Fix: previous state logic was a bit flawed, let's just go back to main attack screen
+                if (TrafficProxy::getInstance().isRunning()) screenState_ = EvilTwinScreenState::SNIFFER;
+                else screenState_ = EvilTwinScreenState::RUNNING;
+                return true;
+            }
+            if (screenState_ == EvilTwinScreenState::RUNNING ||
+                screenState_ == EvilTwinScreenState::SNIFFER) {
+                stop();
+                return true;
+            }
+            if (screenState_ == EvilTwinScreenState::CONFIG) {
+                shouldExit_ = true;
+                return true;
+            }
+            return false;
+            
         case 'm':
         case 'M':
             if (screenState_ == EvilTwinScreenState::CONFIG) {
@@ -388,11 +411,6 @@ bool EvilTwinScreen::handleInput(char key) {
             break;
             
         case ';':  // Up
-            if (screenState_ == EvilTwinScreenState::CONFIG) {
-                configList_.setItemCount(CONFIG_OPTION_COUNT);
-                configList_.moveUp();  // wraps to last; model keeps the selection on screen
-                return true;
-            }
             if (screenState_ == EvilTwinScreenState::CREDENTIALS && credentialScrollPos_ > 0) {
                 credentialScrollPos_--;
                 return true;
@@ -405,11 +423,6 @@ bool EvilTwinScreen::handleInput(char key) {
             break;
 
         case '.':  // Down
-            if (screenState_ == EvilTwinScreenState::CONFIG) {
-                configList_.setItemCount(CONFIG_OPTION_COUNT);
-                configList_.moveDown();  // wraps to first; model keeps the selection on screen
-                return true;
-            }
             if (screenState_ == EvilTwinScreenState::CREDENTIALS) {
                 size_t maxScroll = evilTwin_.getCredentials().size();
                 if (credentialScrollPos_ < maxScroll - 1) {
@@ -423,21 +436,6 @@ bool EvilTwinScreen::handleInput(char key) {
             }
             break;
             
-        case '\n':
-        case '\r':
-            if (screenState_ == EvilTwinScreenState::CONFIG) {
-                if (configList_.selectedIndex() == 0) {
-                    // Target row: route to the WiFi scanner to pick a target; it returns via
-                    // ATTACK_TARGET_SELECTED -> setTarget (like handshake, ADR-0092).
-                    ScreenManager::getInstance().navigateTo(ScreenId::SCANNER);
-                    return true;
-                }
-                if (configList_.selectedIndex() == CONFIG_OPTION_COUNT - 1) {
-                    return startWithConfig();
-                }
-                return handleInput('/');  // value row: ENTER advances the field (ADR-0092)
-            }
-            break;
     }
     return false;
 }

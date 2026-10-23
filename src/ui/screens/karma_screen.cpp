@@ -6,6 +6,7 @@
 #include "karma_screen.h"
 #include "ui/components/action_button.h"
 #include "ui/components/config_row.h"
+#include "ui/components/config_input.h"
 
 #ifdef ESP32
 #include <WiFi.h>
@@ -234,6 +235,45 @@ bool KarmaScreen::handleInput(char key) {
         }
     }
 
+    // Canonical config-form input in the CONFIG state, from the shared classifier (ADR-0107).
+    // It runs before the per-state switch because ;/./ENTER also scroll the result views below;
+    // in CONFIG the classifier owns them, in every other state the switch does. m/p stay as
+    // additive hotkeys (None here, handled below). Terminal is the last row (START KARMA).
+    if (screenState_ == KarmaScreenState::CONFIG) {
+        const ui::ConfigRowKind kind = (configList_.selectedIndex() == CONFIG_OPTION_COUNT - 1)
+            ? ui::ConfigRowKind::Terminal : ui::ConfigRowKind::Value;
+        switch (ui::classifyConfigKey(key, kind)) {
+            case ui::ConfigKeyAction::NavUp:
+                configList_.setItemCount(CONFIG_OPTION_COUNT);
+                configList_.moveUp();  // wraps to last; model keeps the selection on screen
+                return true;
+            case ui::ConfigKeyAction::NavDown:
+                configList_.setItemCount(CONFIG_OPTION_COUNT);
+                configList_.moveDown();  // wraps to first; model keeps the selection on screen
+                return true;
+            case ui::ConfigKeyAction::EditPrev:
+                switch (configList_.selectedIndex()) {
+                    case 0: if (configMode_ > 0) configMode_--; break;
+                    case 1: configPortal_ = (configPortal_ == 0) ? 1 : 0; break;
+                    case 2: configLogSD_ = false; break;
+                }
+                return true;
+            case ui::ConfigKeyAction::EditNext:  // also ENTER on a value row (never inert, ADR-0092)
+                switch (configList_.selectedIndex()) {
+                    case 0: if (configMode_ < 2) configMode_++; break;
+                    case 1: configPortal_ = (configPortal_ == 0) ? 1 : 0; break;
+                    case 2: configLogSD_ = true; break;
+                }
+                return true;
+            case ui::ConfigKeyAction::Activate:
+                return startWithConfig();  // ENTER on the terminal START row
+            case ui::ConfigKeyAction::Navigate:
+            case ui::ConfigKeyAction::Popup:
+            case ui::ConfigKeyAction::None:
+                break;  // m/p hotkeys etc fall through to the per-state switch below
+        }
+    }
+
     switch (key) {
         case '`':
         case 27:
@@ -263,18 +303,6 @@ bool KarmaScreen::handleInput(char key) {
             }
             return false;
             
-        case ',':
-        case '<':
-            if (screenState_ == KarmaScreenState::CONFIG) {
-                switch (configList_.selectedIndex()) {
-                    case 0: if (configMode_ > 0) configMode_--; break;
-                    case 1: configPortal_ = (configPortal_ == 0) ? 1 : 0; break;
-                    case 2: configLogSD_ = false; break;
-                }
-                return true;
-            }
-            break;
-            
         case 'm':
         case 'M':
             if (screenState_ == KarmaScreenState::CONFIG) {
@@ -299,18 +327,6 @@ bool KarmaScreen::handleInput(char key) {
             }
             break;
             
-        case '/':
-        case '>':
-            if (screenState_ == KarmaScreenState::CONFIG) {
-                switch (configList_.selectedIndex()) {
-                    case 0: if (configMode_ < 2) configMode_++; break;
-                    case 1: configPortal_ = (configPortal_ == 0) ? 1 : 0; break;
-                    case 2: configLogSD_ = true; break;
-                }
-                return true;
-            }
-            break;
-            
         case 'c':
         case 'C':
             if (screenState_ == KarmaScreenState::SNIFFER) {
@@ -329,11 +345,6 @@ bool KarmaScreen::handleInput(char key) {
             break;
             
         case ';':
-            if (screenState_ == KarmaScreenState::CONFIG) {
-                configList_.setItemCount(CONFIG_OPTION_COUNT);
-                configList_.moveUp();  // wraps to last; model keeps the selection on screen
-                return true;
-            }
             if (screenState_ == KarmaScreenState::PROBES && probeScrollPos_ > 0) {
                 probeScrollPos_--;
                 return true;
@@ -357,11 +368,6 @@ bool KarmaScreen::handleInput(char key) {
             break;
             
         case '.':
-            if (screenState_ == KarmaScreenState::CONFIG) {
-                configList_.setItemCount(CONFIG_OPTION_COUNT);
-                configList_.moveDown();  // wraps to first; model keeps the selection on screen
-                return true;
-            }
             if (screenState_ == KarmaScreenState::PROBES) {
                 size_t maxScroll = karma_.getProbes().size();
                 if (maxScroll > 0 && probeScrollPos_ < maxScroll - 1) {
@@ -395,12 +401,6 @@ bool KarmaScreen::handleInput(char key) {
             
         case '\n':
         case '\r':
-            if (screenState_ == KarmaScreenState::CONFIG) {
-                if (configList_.selectedIndex() == CONFIG_OPTION_COUNT - 1) {
-                    return startWithConfig();
-                }
-                return handleInput('/');  // value row: ENTER advances the field (ADR-0092)
-            }
             if (screenState_ == KarmaScreenState::CLIENTS) {
                 auto macs = TrafficProxy::getInstance().getClientMacList();
                 size_t idx = (size_t)clientList_.selectedIndex();

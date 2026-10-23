@@ -9,6 +9,7 @@
 #include "ui/components/status_bar.h"
 #include "ui/components/action_button.h"
 #include "ui/components/config_row.h"
+#include "ui/components/config_input.h"
 #include "modules/storage/settings_manager.h"
 #include "modules/ble/ble_scanner.h"
 #include "config/config.h"
@@ -486,62 +487,70 @@ bool BleBadBleScreen::handleInput(char key) {
         return true;
     }
 
-    // IDLE MENU HANDLING
+    // IDLE MENU HANDLING. Canonical config-form input from the shared classifier (ADR-0107):
+    // row 0 (Name) is the popup row (ENTER opens the name popup), the last row is the terminal
+    // START button, rows 1-2 (Type, Target) are value rows. This also gains the '<'/'>' edit
+    // aliases the canonical model defines, which this screen lacked before (additive, ADR-0092).
     if (m_state == State::IDLE) {
-        switch (key) {
-            case ';': // UP
+        const int sel = m_configList.selectedIndex();
+        const ui::ConfigRowKind kind =
+            (sel == 0)                      ? ui::ConfigRowKind::Popup :
+            (sel == IDLE_OPTION_COUNT - 1)  ? ui::ConfigRowKind::Terminal :
+                                              ui::ConfigRowKind::Value;
+        switch (ui::classifyConfigKey(key, kind)) {
+            case ui::ConfigKeyAction::NavUp:
                 m_configList.setItemCount(IDLE_OPTION_COUNT);
                 m_configList.moveUp();  // wraps to last; model keeps the selection on screen
                 return true;
-            case '.': // DOWN
+            case ui::ConfigKeyAction::NavDown:
                 m_configList.setItemCount(IDLE_OPTION_COUNT);
                 m_configList.moveDown();  // wraps to first; model keeps the selection on screen
                 return true;
-            case ',': // LEFT
-                if (m_configList.selectedIndex() == 1) { // Appearance
+            case ui::ConfigKeyAction::EditPrev:
+                if (sel == 1) { // Appearance
                     if (m_appearance == 0x03C1) m_appearance = 0x03C4; // Key -> Gamepad
                     else if (m_appearance == 0x03C4) m_appearance = 0x03C3;
                     else if (m_appearance == 0x03C3) m_appearance = 0x03C2;
                     else if (m_appearance == 0x03C2) m_appearance = 0x03C1;
-                } else if (m_configList.selectedIndex() == 2) { // OS
+                } else if (sel == 2) { // OS
                     int os = (int)m_targetOs - 1;
                     if (os < 0) os = 2;
                     m_targetOs = (TargetOS)os;
                 }
                 return true;
-            case '/': // RIGHT
-                if (m_configList.selectedIndex() == 1) { // Appearance
+            case ui::ConfigKeyAction::EditNext:  // also ENTER on a value row (never inert, ADR-0092)
+                if (sel == 1) { // Appearance
                     if (m_appearance == 0x03C1) m_appearance = 0x03C2; // Key -> Mouse
                     else if (m_appearance == 0x03C2) m_appearance = 0x03C3;
                     else if (m_appearance == 0x03C3) m_appearance = 0x03C4;
                     else if (m_appearance == 0x03C4) m_appearance = 0x03C1;
-                } else if (m_configList.selectedIndex() == 2) { // OS
+                } else if (sel == 2) { // OS
                     int os = (int)m_targetOs + 1;
                     if (os > 2) os = 0;
                     m_targetOs = (TargetOS)os;
                 }
                 return true;
-            case '\n': // ENTER
-            case '\r':
-                if (m_configList.selectedIndex() == 0) { // Name (popup row)
-                    m_namePopup.show("Session Name", m_sessionName, false, 31);
-                    m_namePopup.setOnSubmit([this](const char* text) {
-                        strncpy(m_sessionName, text, 32);
-                        m_sessionName[32] = '\0';
-                        m_needsRedraw = true;
-                    });
-                    m_namePopup.setOnCancel([this]() {
-                        m_needsRedraw = true;
-                    });
-                } else if (m_configList.selectedIndex() == IDLE_OPTION_COUNT - 1) { // Start
-                    startAdvertising();
-                } else {
-                    return handleInput('/');  // value row: ENTER advances the field (ADR-0092)
-                }
+            case ui::ConfigKeyAction::Activate:
+                startAdvertising();  // ENTER on the terminal START row
                 return true;
-            case '`': // BACK
-                m_shouldExit = true;
+            case ui::ConfigKeyAction::Popup:  // Name row: open the session-name popup
+                m_namePopup.show("Session Name", m_sessionName, false, 31);
+                m_namePopup.setOnSubmit([this](const char* text) {
+                    strncpy(m_sessionName, text, 32);
+                    m_sessionName[32] = '\0';
+                    m_needsRedraw = true;
+                });
+                m_namePopup.setOnCancel([this]() {
+                    m_needsRedraw = true;
+                });
                 return true;
+            case ui::ConfigKeyAction::Navigate:
+            case ui::ConfigKeyAction::None:
+                break;  // no navigation row; Back ('`') handled just below
+        }
+        if (key == '`') { // BACK
+            m_shouldExit = true;
+            return true;
         }
         return false;
     }

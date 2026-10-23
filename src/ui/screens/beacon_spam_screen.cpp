@@ -6,6 +6,7 @@
 #include "beacon_spam_screen.h"
 #include "ui/components/action_button.h"
 #include "ui/components/config_row.h"
+#include "ui/components/config_input.h"
 
 #ifdef ESP32
 #include <Arduino.h>
@@ -412,80 +413,76 @@ bool BeaconSpamScreen::handleInput(char key) {
         return true;
     }
     
+    // Canonical config-form input in the CONFIG state, from the shared classifier (ADR-0107):
+    // the last row is the terminal START button, every other row is a value row. The classifier
+    // owns ;/./,/</>/ENTER; any other key (space, s, back) returns None and falls through below.
+    if (screenState_ == BeaconSpamScreenState::CONFIG) {
+        const ui::ConfigRowKind kind = (configList_.selectedIndex() == CONFIG_OPTION_COUNT - 1)
+            ? ui::ConfigRowKind::Terminal : ui::ConfigRowKind::Value;
+        switch (ui::classifyConfigKey(key, kind)) {
+            case ui::ConfigKeyAction::NavUp:
+                configList_.setItemCount(CONFIG_OPTION_COUNT);
+                configList_.moveUp();  // wraps to last; model keeps the selection on screen
+                needsRedraw_ = true;
+                return true;
+            case ui::ConfigKeyAction::NavDown:
+                configList_.setItemCount(CONFIG_OPTION_COUNT);
+                configList_.moveDown();  // wraps to first; model keeps the selection on screen
+                needsRedraw_ = true;
+                return true;
+            case ui::ConfigKeyAction::EditPrev:
+                handleEdit(-1);
+                return true;
+            case ui::ConfigKeyAction::EditNext:
+                handleEdit(+1);  // also ENTER on a value row (never inert, ADR-0092)
+                return true;
+            case ui::ConfigKeyAction::Activate:
+                startAttack();  // ENTER on the terminal START row
+                needsRedraw_ = true;
+                return true;
+            case ui::ConfigKeyAction::Navigate:
+            case ui::ConfigKeyAction::Popup:
+            case ui::ConfigKeyAction::None:
+                break;  // beacon has no navigation/popup rows; fall through to the keys below
+        }
+    }
+
     switch (key) {
-        case ';':  // Up
-            handleUp();
-            return true;
-
-        case '.':  // Down
-            handleDown();
-            return true;
-
-        case ',':  // Edit previous (ADR-0092)
-        case '<':
-            handleEdit(-1);
-            return true;
-
-        case '/':  // Edit next (ADR-0092)
-        case '>':
-            handleEdit(+1);
-            return true;
-
-        case '\n':  // Enter/Select
+        case '\n':  // Enter/Select (non-CONFIG states: stop / continue)
         case '\r':
             handleSelect();
             return true;
-            
+
         case '`':   // Back
             handleBack();
             return true;
-            
+
         case ' ':   // Space - pause/resume
             if (screenState_ == BeaconSpamScreenState::RUNNING ||
                 screenState_ == BeaconSpamScreenState::PAUSED) {
                 togglePause();
             }
             return true;
-            
+
         case 's':
         case 'S':
             if (screenState_ == BeaconSpamScreenState::CONFIG) {
                 startAttack();
             }
             return true;
-            
+
         default:
             return false;
-    }
-}
-
-void BeaconSpamScreen::handleUp() {
-    if (screenState_ == BeaconSpamScreenState::CONFIG) {
-        configList_.setItemCount(CONFIG_OPTION_COUNT);
-        configList_.moveUp();  // wraps to last; model keeps the selection on screen
-        needsRedraw_ = true;
-    }
-}
-
-void BeaconSpamScreen::handleDown() {
-    if (screenState_ == BeaconSpamScreenState::CONFIG) {
-        configList_.setItemCount(CONFIG_OPTION_COUNT);
-        configList_.moveDown();  // wraps to first; model keeps the selection on screen
-        needsRedraw_ = true;
     }
 }
 
 void BeaconSpamScreen::handleSelect() {
     switch (screenState_) {
         case BeaconSpamScreenState::CONFIG:
-            if (configList_.selectedIndex() == CONFIG_OPTION_COUNT - 1) {
-                startAttack();
-            } else {
-                handleEdit(+1);  // value row: ENTER advances the field (ADR-0092)
-            }
-            needsRedraw_ = true;
+            // ENTER in CONFIG is handled by the classifier in handleInput; this path is only
+            // reached in the attack states below.
             break;
-            
+
         case BeaconSpamScreenState::RUNNING:
         case BeaconSpamScreenState::PAUSED:
             // Stop attack
