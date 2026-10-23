@@ -81,7 +81,6 @@ public:
     bool isAttackRunning() const;
 
 private:
-    void drawHeader(Canvas& canvas, const char* title);
     void drawFooter(Canvas& canvas);
     void drawConfig(Canvas& canvas);
     void drawRunning(Canvas& canvas);
@@ -111,8 +110,9 @@ private:
     uint8_t targetChannel_;
     
     // Config options. The shared model owns selection + scroll window + wrap; the renderer
-    // feeds it the live viewport each frame so the two can't drift (slice-0062).
-    static constexpr int CONFIG_OPTION_COUNT = 5;
+    // feeds it the live viewport each frame so the two can't drift (slice-0062). Row 0 is the
+    // Target navigation row (routes to the scanner, ADR-0092 / slice-0109).
+    static constexpr int CONFIG_OPTION_COUNT = 6;
     ListScrollModel configList_;
     
     // Config values
