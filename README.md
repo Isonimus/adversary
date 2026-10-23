@@ -403,20 +403,23 @@ Main Carousel
 
 #### Handshake Capture
 
-**Manual Mode:**
-1. Select target from scanner or configure manually
+Reached from **Wireless -> Handshake**, which offers two modes:
+
+**Manual Capture** (single target):
+1. Select a target from the scanner (the Target row opens the scanner, or launch
+   Handshake straight from a scanned network)
 2. Set options: Auto Deauth, Deauth Count, Timeout
-3. Press `ENTER` to start capture
+3. Navigate to **START CAPTURE** and press `ENTER`
 4. Wait for SUCCESS or TIMEOUT
 5. Handshake auto-saves to SD card
 
-**Auto Hunt Mode:**
-1. Toggle Auto Hunt in config screen
+**Auto Hunt** (autonomous, multi-target):
+1. Open **Wireless -> Handshake -> Auto Hunt**
 2. Press `ENTER` to start autonomous hunting
 3. Device scans, targets, and captures automatically
 4. Press `` ` `` to stop at any time
-5. Press `h` to view handshake list during hunt
-6. Press `w` to whitelist current target
+5. Press `h` to view the handshake list during the hunt
+6. Press `w` to whitelist the current target
 
 **Handshake List (during Auto Hunt):**
 - Press `h` to enter list view

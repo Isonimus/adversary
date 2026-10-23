@@ -7,6 +7,17 @@ releases, this can be replaced by a git-tag-generated changelog.
 ---
 
 
+## 2026-10-23 (v0.5.0-alpha)
+- **One model behind every attack-config screen.** Deauth, Evil Twin, Karma, Probe Flood, Beacon Spam and Handshake now share the same config form: identical row chrome (label left, value right), the same selection and scrolling behaviour as the lists, one green start-button style, and one keyboard model for navigating, editing values and activating a row. (slices 0097, 0106, 0108; ADR-0092, 0096, 0107)
+- **Handshake is now two screens: Auto Hunt and Manual.** The mode is chosen from the Wireless -> Handshake menu instead of toggled inside the screen, so each presents only the controls it needs. (slice-0095; ADR-0094)
+- **Deauth and Handshake Manual take their target from the scanner.** The Target row shows `(select from scanner)` until set; selecting it opens the WiFi scanner and returns with the chosen AP. Manual capture shows the target SSID, channel and BSSID on the capturing screen. (slices 0109, 0110)
+- **Destructive confirms are consistent everywhere.** Every delete / clear / discard / forget prompt now routes through one shared confirm dialog. (ADR-0085)
+- **Menus grouped by purpose, with a unified footer style.** The Wireless and BLE menus are banded into Recon / Attacks / Data sections, and footer hints and key glyphs follow one house style across the UI. (slices 0099, 0101)
+- **New Tron electric-cyan theme preset.** (slice-0102)
+- **Wardriving is steadier in BOTH (WiFi+BLE) mode.** A fixed-size Bloom filter bounds deduplication memory and a passive BLE scan flattens the heap-usage slope, so long BOTH-mode sessions no longer trend toward out-of-memory; the live log reserves per-type slots and the network count survives Stop for the save screen. (ADR-0103)
+- **Optional heap-fragmentation readout.** The heap badge can show the largest free block alongside free heap, the tell that classified the BOTH-mode OOM. (ADR-0103)
+- **Sniffer capture controls moved into a config block** for a consistent setup flow before capture.
+
 ## 2026-10-19 (v0.4.0-alpha)
 - **Wardriving now observes BLE as well as WiFi.** A BLE observation source feeds both the live network log and the WiGLE CSV export, selectable with a radio-mode setting (WiFi / BLE / both); deduplication is type-aware so a WiFi AP and a BLE peripheral never collapse into one row. WiFi and BLE run at the same time via radio coexistence. (slices 0061, 0075; ADR-0060)
 - **Sniffer capture no longer corrupts the heap.** The WiFi-driver-task callback mutated containers the main loop also touched with no synchronization, so under load the dual-core chip smashed allocator metadata and rebooted (`CORRUPT HEAP`), usually caught on exit-to-menu. Each frame is now copied into a POD and handed to the main loop over a FreeRTOS queue, which does all stats/log/pcap work on one task. (slice-0078)
