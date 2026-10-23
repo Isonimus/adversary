@@ -14,6 +14,7 @@
 #include "hal/expansion/expansion_cap.h"
 #include "ui/components/action_button.h"
 #include "ui/components/config_row.h"
+#include "ui/components/config_input.h"
 #include "ui/components/status_bar.h"
 #include "ui/components/toast_manager.h"
 #include "ui/screen_manager.h"
@@ -40,7 +41,6 @@ HandshakeScreen::HandshakeScreen(HandshakeMode mode)
     , initialized_(false)
     , hasTarget_(false)
     , targetChannel_(1)
-    , configSelection_(0)
     , autoDeauth_(true)
     , deauthCount_(5)
     , timeoutSecs_(60)
@@ -115,6 +115,7 @@ void HandshakeScreen::show() {
     screenState_ = HandshakeScreenState::CONFIG;
     handshakeSaved_ = false;
     confirmDialog_.hide();
+    configList_.setItemCount(0);  // reset config selection + scroll to the top (slice-0110)
     
     // If GPS not detected, start non-blocking background detection
     // This avoids the 3-second blocking delay that causes UI lag
@@ -199,56 +200,49 @@ bool HandshakeScreen::handleInput(char key) {
     }
     
     switch (screenState_) {
-        case HandshakeScreenState::CONFIG:
-            switch (key) {
-                case ';':  // Up
-                    if (configSelection_ > 0) configSelection_--;
+        case HandshakeScreenState::CONFIG: {
+            // Canonical config-form input via the shared classifier (ADR-0092 / 0107), the same
+            // path evil_twin and deauth use. Auto Hunt's single row is the START button, a Terminal
+            // row; Manual is Target (0, Navigation) + value rows (1-3) + START (last, Terminal).
+            const int count = configItemCount();
+            const int sel = configList_.selectedIndex();
+            const ui::ConfigRowKind kind =
+                isAutoHunt()          ? ui::ConfigRowKind::Terminal   :
+                (sel == 0)            ? ui::ConfigRowKind::Navigation  :  // Target -> scanner
+                (sel == count - 1)    ? ui::ConfigRowKind::Terminal   :   // START CAPTURE
+                                        ui::ConfigRowKind::Value;         // Auto Deauth / Count / Timeout
+            switch (ui::classifyConfigKey(key, kind)) {
+                case ui::ConfigKeyAction::NavUp:
+                    configList_.setItemCount(count);
+                    configList_.moveUp();  // wraps to last; model keeps the selection on screen
                     return true;
-
-                case '.':  // Down
-                    if (configSelection_ < configItemCount() - 1) configSelection_++;
+                case ui::ConfigKeyAction::NavDown:
+                    configList_.setItemCount(count);
+                    configList_.moveDown();  // wraps to first; model keeps the selection on screen
                     return true;
-
-                // Left/right step a value row, identical to the other config forms
-                // (ADR-0092). Manual value rows are 1-3; inert in Auto Hunt and on the
-                // Target (0) and START (4) rows.
-                case ',':
-                case '<':
-                    if (!isAutoHunt()) handleConfigEdit(-1);
+                case ui::ConfigKeyAction::EditPrev:  // inert unless a Manual value row is selected
+                    handleConfigEdit(-1);
                     return true;
-                case '/':
-                case '>':
-                    if (!isAutoHunt()) handleConfigEdit(+1);
+                case ui::ConfigKeyAction::EditNext:  // also ENTER on a value row (never inert, ADR-0092)
+                    handleConfigEdit(+1);
                     return true;
-
-                case '\n':
-                case '\r':
-                    if (isAutoHunt()) {
-                        startCapture();  // Auto Hunt: START is the only row
-                        return true;
-                    }
-                    // Manual: ENTER dispatches by row kind (ADR-0092)
-                    switch (configSelection_) {
-                        case 0:  // Target (navigation): open the WiFi scanner to pick one
-                            ScreenManager::getInstance().navigateTo(ScreenId::SCANNER);
-                            break;
-                        case 1:  // Auto Deauth
-                        case 2:  // Deauth Count
-                        case 3:  // Timeout
-                            handleConfigEdit(+1);  // value row: ENTER advances, same as '/'
-                            break;
-                        case 4:  // START CAPTURE (terminal)
-                            if (hasTarget_) startCapture();
-                            break;
-                    }
+                case ui::ConfigKeyAction::Activate:  // ENTER on START
+                    if (isAutoHunt() || hasTarget_) startCapture();
                     return true;
-
-                case '`':  // Back - return to the Handshake submenu
-                    shouldExit_ = true;
-                    hide();
+                case ui::ConfigKeyAction::Navigate:  // ENTER on Target: open the WiFi scanner
+                    ScreenManager::getInstance().navigateTo(ScreenId::SCANNER);
                     return true;
+                case ui::ConfigKeyAction::Popup:
+                case ui::ConfigKeyAction::None:
+                    break;  // back / unhandled keys fall through below
+            }
+            if (key == '`') {  // Back - return to the Handshake submenu
+                shouldExit_ = true;
+                hide();
+                return true;
             }
             break;
+        }
             
         case HandshakeScreenState::CAPTURING:
             switch (key) {
@@ -367,9 +361,9 @@ bool HandshakeScreen::handleInput(char key) {
 }
 
 void HandshakeScreen::handleConfigEdit(int delta) {
-    // Only Manual value rows (1-3) are editable; Target (0) and START (4) have nothing
-    // to step. delta>0 advances (ENTER / '/' / '>'), delta<0 steps back (',' / '<').
-    switch (configSelection_) {
+    // Only Manual value rows (1-3) are editable; Target (0), START (4), and Auto Hunt's single
+    // row have nothing to step. delta>0 advances (ENTER / '/' / '>'), delta<0 steps back (',' / '<').
+    switch (configList_.selectedIndex()) {
         case 1:  // Auto Deauth: a toggle flips either direction
             autoDeauth_ = !autoDeauth_;
             break;
@@ -1055,12 +1049,10 @@ void HandshakeScreen::drawHeader(Canvas& canvas, const char* title) {
 
 
 void HandshakeScreen::drawConfig(Canvas& canvas) {
-    int16_t y = HEADER_HEIGHT + 4;
-    int16_t screenWidth = canvas.width();
-
     if (isAutoHunt()) {
         // Auto Hunt finds its own targets, so there is no Target row: describe what it
-        // does, then render START as the single selectable row (index 0).
+        // does, then render START as the single selectable row (always focused).
+        int16_t y = HEADER_HEIGHT + 4;
         canvas.setTextColor(theme::TEXT_SECONDARY());
         canvas.setTextSize(1);
         canvas.setCursor(4, y);
@@ -1076,117 +1068,117 @@ void HandshakeScreen::drawConfig(Canvas& canvas) {
         canvas.print("handshakes automatically");
         y += 20;
 
-        // Start button - shared ActionButton (ADR-0087)
-        ui::ActionButton::render(canvas, y, "START AUTO HUNT", configSelection_ == 0);
+        // Start button - shared ActionButton (ADR-0087). Its one row always has focus.
+        ui::ActionButton::render(canvas, y, "START AUTO HUNT", true);
         return;
     }
 
-    // Manual mode: Target (row 0) + three option rows + START.
-    bool targetSelected = (configSelection_ == 0);
-    if (targetSelected) {
-        canvas.fillRect(0, y - 1, screenWidth, 12, theme::BG_SELECTED());
-    }
-    canvas.setTextColor(theme::TEXT_SECONDARY());
-    canvas.setTextSize(1);
-    canvas.setCursor(4, y);
-    canvas.print("Target: ");
-    canvas.setTextColor(targetSelected ? theme::TEXT_PRIMARY() : theme::ACCENT());
-    if (hasTarget_) {
-        canvas.print(targetSsid_);
-    } else {
-        canvas.setTextColor(theme::WARNING());
-        canvas.print("[Select from scanner]");
-    }
-    y += 12;
-
-    if (hasTarget_) {
-        char bssidStr[18];
-        utils::formatMacBytes(targetBssid_, bssidStr, sizeof(bssidStr));
-        canvas.setCursor(4, y);
-        canvas.setTextColor(theme::TEXT_SECONDARY());
-        canvas.printf("CH:%d  %s", targetChannel_, bssidStr);
-        y += 12;
-    }
-
-    y += 4;
+    // Manual mode: Target (row 0, navigation) + three value rows + START, all on the shared
+    // ScrollableList (ADR-0092 / 0096), matching evil_twin and deauth. Target is list row 0, not
+    // a separate header, so the list starts right below the status bar; its CH/BSSID identity now
+    // lives on the CAPTURING screen (slice-0110).
+    const int16_t listTop = HEADER_HEIGHT + 6;
+    const int16_t availableHeight = canvas.height() - listTop - FOOTER_HEIGHT - 4;
 
     const char* labels[] = {
-        "Auto Deauth:",
-        "Deauth Count:",
-        "Timeout:"
+        "Target:", "Auto Deauth:", "Deauth Count:", "Timeout:"
     };
 
-    for (int i = 0; i < 4; i++) {
-        bool selected = ((i + 1) == configSelection_);
-
-        if (i == 3) { // Terminal start row: shared green ActionButton (slice-0089)
-            ui::ActionButton::render(canvas, y - 1, "START CAPTURE", selected);
-            y += 14;
-            continue;
-        }
-
-        if (selected) {
-            canvas.fillRect(0, y - 1, screenWidth, 12, theme::BG_SELECTED());
-        }
-
-        char valueStr[16];
-        switch (i) {
-            case 0: snprintf(valueStr, sizeof(valueStr), "%s", autoDeauth_ ? "ON" : "OFF"); break;
-            case 1: snprintf(valueStr, sizeof(valueStr), "%d", deauthCount_); break;
-            case 2: snprintf(valueStr, sizeof(valueStr), "%lus", timeoutSecs_); break;
-        }
-
-        // Row content via the shared ConfigRow (ADR-0096): label left, value right-aligned
-        // dim. Pass the row top (y - DY) so ConfigRow's house baseline lands on this screen's
-        // existing per-row baseline y, keeping the hand-tuned spacing untouched.
-        ui::ConfigRow::render(canvas, y - theme::LIST_ROW_TEXT_DY, labels[i], valueStr);
-
-        y += 14;
-    }
+    // The shared component owns scroll, the proportional thumb, the selection band and keeping the
+    // cursor on screen; the callback paints one row (the terminal start row is the shared
+    // ActionButton, slice-0089).
+    configList_.setItemCount(CONFIG_ITEMS);
+    ScrollableList::render(canvas, configList_, 0, listTop, canvas.width(), availableHeight,
+        theme::LIST_ROW_HEIGHT, [this, &labels](Canvas& c, int idx, int16_t rowY, bool selected) {
+            if (idx == CONFIG_ITEMS - 1) {  // terminal start row: shared green ActionButton
+                ui::ActionButton::render(c, rowY, "START CAPTURE", selected);
+                return;
+            }
+            char valueStr[28] = "";
+            switch (idx) {
+                case 0: {
+                    // Target row value: the current SSID, or the shared scanner placeholder. Capped
+                    // at 26 (an SSID can be 32; the "Target:" label leaves room for ~29 on a 240px
+                    // row at FONT_CELL_WIDTH=6), matching deauth and evil_twin (slice-0109/0110).
+                    constexpr size_t TARGET_VALUE_MAX = 26;
+                    const char* t = (hasTarget_ && targetSsid_[0] != '\0') ? targetSsid_
+                                                                           : "(select from scanner)";
+                    if (strlen(t) > TARGET_VALUE_MAX) {
+                        strncpy(valueStr, t, TARGET_VALUE_MAX - 3);
+                        strcpy(valueStr + (TARGET_VALUE_MAX - 3), "...");
+                    } else {
+                        strncpy(valueStr, t, sizeof(valueStr) - 1);
+                        valueStr[sizeof(valueStr) - 1] = '\0';
+                    }
+                    break;
+                }
+                case 1: snprintf(valueStr, sizeof(valueStr), "%s", autoDeauth_ ? "ON" : "OFF"); break;
+                case 2: snprintf(valueStr, sizeof(valueStr), "%d", deauthCount_); break;
+                case 3: snprintf(valueStr, sizeof(valueStr), "%lus", (unsigned long)timeoutSecs_); break;
+            }
+            ui::ConfigRow::render(c, rowY, labels[idx], valueStr);
+        },
+        !footerHints_.hasFocus());
 }
 
 
 void HandshakeScreen::drawCapturing(Canvas& canvas) {
-    int16_t screenWidth = canvas.width();
     int16_t screenHeight = canvas.height();
-    int16_t centerX = screenWidth / 2;
-    int16_t centerY = (HEADER_HEIGHT + screenHeight - FOOTER_HEIGHT) / 2;
-    
+    int16_t centerX = canvas.width() / 2;
+
     const auto& stats = capture_.getStats();
     const auto& hs = capture_.getHandshake();
-    
-    // Progress ring
+
+    // Target identity header (slice-0110): the SSID + CH/BSSID that used to sit on the Manual
+    // config screen. Target became a navigation row there, so this screen is where the operator
+    // now confirms which AP is under attack. Nothing is lost by dropping it from config.
+    int16_t y = HEADER_HEIGHT + 4;
+    canvas.setTextSize(1);
+    canvas.setTextColor(theme::TEXT_PRIMARY());
+    canvas.setCursor(4, y);
+    canvas.print((hasTarget_ && targetSsid_[0] != '\0') ? targetSsid_ : "(no target)");
+    y += 11;
+    char bssidStr[18];
+    utils::formatMacBytes(targetBssid_, bssidStr, sizeof(bssidStr));
+    canvas.setTextColor(theme::TEXT_SECONDARY());
+    canvas.setCursor(4, y);
+    canvas.printf("CH:%d  %s", targetChannel_, bssidStr);
+    const int16_t headerBottom = y + 10;
+
+    // Progress ring. Radius shrinks 20 -> 16 to make room for the target header above and the three
+    // stat lines anchored above the footer, so everything stays on the 135px screen (slice-0110).
+    constexpr int16_t RING_RADIUS = 16;
+    const int16_t statsHeight = 3 * 12;
+    const int16_t footerTop = screenHeight - FOOTER_HEIGHT;
+    const int16_t ringCenterY = headerBottom + RING_RADIUS + 4;
+
     float progress = 0.0f;
     if (hs.hasMsg1) progress += 0.25f;
     if (hs.hasMsg2) progress += 0.25f;
     if (hs.hasMsg3) progress += 0.25f;
     if (hs.hasMsg4) progress += 0.25f;
-    
-    drawProgressRing(canvas, centerX, centerY - 10, 20, progress);
-    
-    // State text
+
+    drawProgressRing(canvas, centerX, ringCenterY, RING_RADIUS, progress);
+
+    // State text centred inside the ring
     canvas.setTextColor(theme::TEXT_PRIMARY());
-    canvas.setTextSize(1);
     const char* stateStr = HandshakeCapture::getStateString(capture_.getState());
     int16_t stateLen = strlen(stateStr) * theme::FONT_CELL_WIDTH;
-    canvas.setCursor(centerX - stateLen / 2, centerY - 5);
+    canvas.setCursor(centerX - stateLen / 2, ringCenterY - 4);
     canvas.print(stateStr);
-    
-    // Stats below
-    int16_t y = centerY + 20;
+
+    // Stats anchored just above the footer
+    int16_t sy = footerTop - statsHeight;
     canvas.setTextColor(theme::TEXT_SECONDARY());
-    canvas.setCursor(4, y);
+    canvas.setCursor(4, sy);
     canvas.printf("EAPOL: %lu  Deauth: %lu", stats.eapolFrames, stats.deauthsSent);
-    
-    y += 12;
-    canvas.setCursor(4, y);
-    canvas.printf("M1:%lu M2:%lu M3:%lu M4:%lu", 
+    sy += 12;
+    canvas.setCursor(4, sy);
+    canvas.printf("M1:%lu M2:%lu M3:%lu M4:%lu",
                   stats.msg1Count, stats.msg2Count, stats.msg3Count, stats.msg4Count);
-    
-    // Elapsed time
-    y += 12;
+    sy += 12;
     uint32_t elapsed = stats.getDurationMs() / 1000;
-    canvas.setCursor(4, y);
+    canvas.setCursor(4, sy);
     canvas.printf("Time: %lus / %lus", elapsed, timeoutSecs_);
 }
 
