@@ -4,6 +4,7 @@
  */
 
 #include "deauth_screen.h"
+#include "ui/components/config_row.h"
 
 namespace adversary {
 
@@ -277,18 +278,12 @@ void DeauthScreen::drawConfig(Canvas& canvas)
     int16_t footerY = canvas.height() - ui::FOOTER_HEIGHT;
     configList_.setItemCount(CONFIG_OPTION_COUNT);
     ScrollableList::render(canvas, configList_, 0, y, canvas.width(), footerY - y, lineHeight,
-        [&options](Canvas& c, int idx, int16_t rowY, bool selected) {
-            // Config field: the selected field reddens to ACCENT (the "editing this field" cue);
-            // the band is drawn by the component and dims when the footer holds focus, via the
-            // focused flag passed below (slice-0063).
-            c.setTextColor(selected ? theme::ACCENT() : theme::TEXT_PRIMARY());
-            c.setCursor(4, rowY + theme::LIST_ROW_TEXT_DY);
-            c.print(options[idx].label);
-
-            // Right-align value
-            int16_t valueWidth = strlen(options[idx].value) * theme::FONT_CELL_WIDTH;
-            c.setCursor(c.width() - valueWidth - 4, rowY + theme::LIST_ROW_TEXT_DY);
-            c.print(options[idx].value);
+        [&options](Canvas& c, int idx, int16_t rowY, bool /*selected*/) {
+            // Every deauth row is a label/value row (including Start Attack, whose value is
+            // ">" / "(no target)"), routed through the shared chrome-only ConfigRow: label left,
+            // value right-aligned and dim, selection shown by the band alone. The deauth
+            // start-affordance redesign stays its own LEDGER item (ADR-0096, slice-0106).
+            ui::ConfigRow::render(c, rowY, options[idx].label, options[idx].value);
         },
         !footerHints_.hasFocus());
 

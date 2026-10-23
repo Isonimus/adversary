@@ -8,6 +8,7 @@
 #include "config/config.h"
 #include "ui/components/toast_manager.h"
 #include "ui/components/action_button.h"
+#include "ui/components/config_row.h"
 #include "modules/system/system_manager.h"
 #include "modules/ble/ble_scanner.h"
 #include "modules/wifi/wifi_scanner.h"
@@ -88,20 +89,13 @@ void BleSpamScreen::drawConfig(Canvas& canvas) {
                 ui::ActionButton::render(c, rowY, "START SPAM", selected);
                 return;
             }
-            // Config field: selected field reddens to ACCENT (the edit cue); band drawn by the
-            // component (BG_SELECTED, dimmed on footer focus via the flag below) (slice-0063).
-            c.setTextColor(selected ? theme::ACCENT() : theme::TEXT_PRIMARY());
-            c.setCursor(MARGIN_LEFT, rowY + theme::LIST_ROW_TEXT_DY);
-            c.print(optionLabels[idx]);
-
             const char* val = nullptr;
             if (idx == 0) val = providers[(int)m_config.provider];
             else if (idx == 1) val = prompts[(int)m_config.prompt];
             else if (idx == 2) val = intStr;
-            if (val) {
-                c.setCursor(80, rowY + theme::LIST_ROW_TEXT_DY);
-                c.print(val);
-            }
+            // Shared chrome-only ConfigRow: label left, value right-aligned and dim, selection
+            // shown by the band alone (was a fixed value column at x=80) (ADR-0096, slice-0106).
+            ui::ConfigRow::render(c, rowY, optionLabels[idx], val);
         },
         !footerHints_.hasFocus());
 }
