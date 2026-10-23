@@ -35,7 +35,6 @@ public:
 
 private:
     void drawList(Canvas& canvas);
-    void drawHeader(Canvas& canvas);
     void drawFooter(Canvas& canvas);
     
     void setupActionMenu(const BLEDeviceInfo& device);

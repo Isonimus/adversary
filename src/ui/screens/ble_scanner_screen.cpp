@@ -134,25 +134,6 @@ void BleScannerScreen::render(Canvas& canvas) {
     m_needsRedraw = false;
 }
 
-void BleScannerScreen::drawHeader(Canvas& canvas) {
-    canvas.fillRect(0, 0, config::SCREEN_WIDTH, config::STATUS_BAR_HEIGHT, theme::BG_SECONDARY());
-    canvas.setTextColor(theme::ACCENT());
-    canvas.setTextSize(1);
-    canvas.setCursor(5, 5);
-    canvas.print("BLE SCANNER");
-    
-    char countBuf[16];
-    snprintf(countBuf, sizeof(countBuf), "DEVS: %d", (int)m_deviceList.size());
-    canvas.setCursor(config::SCREEN_WIDTH - 60, 5);
-    canvas.print(countBuf);
-    
-    if (m_scanner.isScanning()) {
-        canvas.setTextColor(theme::SUCCESS());
-        canvas.setCursor(config::SCREEN_WIDTH - 110, 5);
-        canvas.print("SCANNING...");
-    }
-}
-
 void BleScannerScreen::drawList(Canvas& canvas) {
     int startY = config::STATUS_BAR_HEIGHT + 5;
     const int16_t itemHeight = 22;
