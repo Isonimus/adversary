@@ -269,7 +269,11 @@ private:
 
         uint32_t freeHeap = ESP.getFreeHeap() / 1024;  // KB
 
-        char badge[16];
+        // Sized for the worst-case "H%u/%u" of two uint32 values (22 chars + NUL). The heap
+        // figures are far smaller in practice (KB on a ~205 KB device, 3 digits), but
+        // -Wformat-truncation sizes on UINT_MAX, so the buffer must fit 2x10 digits to keep
+        // our src/ warning-clean (ADR-0083).
+        char badge[24];
         if (settings.system.showHeapLargestBlock) {
             // "H<free>/<largest>": free heap alone reads as a gentle slope under
             // fragmentation; the gap to the largest free block is the fragmentation tell
