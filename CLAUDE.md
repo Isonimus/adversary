@@ -643,5 +643,4 @@ fix(sd): handle missing SD card gracefully
 
 ---
 
-*Last Updated: January 3, 2026*  
-*Project Version: 0.1.0-alpha*
+*Last Updated: January 3, 2026*
