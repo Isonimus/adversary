@@ -6,6 +6,7 @@
 #include "deauth_screen.h"
 #include "ui/components/config_row.h"
 #include "ui/components/config_input.h"
+#include "ui/screen_manager.h"  // navigate to the scanner from the Target row (slice-0109)
 
 namespace adversary {
 
@@ -184,22 +185,6 @@ void DeauthScreen::render(Canvas& canvas)
 #endif
 }
 
-void DeauthScreen::drawHeader(Canvas& canvas, const char* title)
-{
-#ifdef ESP32
-    canvas.setTextColor(theme::TEXT_PRIMARY());
-    canvas.setTextSize(1);
-    canvas.setCursor(4, 4);
-    canvas.print(title);
-    
-    // Draw separator line
-    canvas.drawLine(0, HEADER_HEIGHT - 2, canvas.width(), HEADER_HEIGHT - 2, theme::ACCENT_DARK());
-#else
-    (void)canvas;
-    (void)title;
-#endif
-}
-
 void DeauthScreen::drawFooter(Canvas& canvas)
 {
 #ifdef ESP32
@@ -212,41 +197,33 @@ void DeauthScreen::drawFooter(Canvas& canvas)
 void DeauthScreen::drawConfig(Canvas& canvas)
 {
 #ifdef ESP32
-    drawHeader(canvas, "DEAUTH CONFIG");
+    ui::StatusBar::render(canvas, "DEAUTH CONFIG");
 
+    // Target is now the first selectable list row (ENTER routes to the scanner, ADR-0092 /
+    // slice-0109), not a separate header, so the list starts right below the header, exactly
+    // like Evil Twin. The old 3-line SSID/BSSID/Channel block and its separators are gone; the
+    // target identity now lives in the running view where it is actually useful.
     int16_t y = HEADER_HEIGHT + 4;
     int16_t lineHeight = theme::LIST_ROW_HEIGHT;
-    
-    // Target info
-    canvas.setTextColor(theme::TEXT_SECONDARY());
-    canvas.setCursor(4, y);
-    canvas.print("Target: ");
-    
-    if (hasTarget_) {
-        canvas.setTextColor(theme::TEXT_PRIMARY());
-        canvas.print(targetSsid_);
-        y += lineHeight;
-        
-        canvas.setTextColor(theme::TEXT_SECONDARY());
-        canvas.setCursor(4, y);
-        canvas.printf("BSSID: %02X:%02X:%02X:%02X:%02X:%02X",
-            targetBssid_[0], targetBssid_[1], targetBssid_[2],
-            targetBssid_[3], targetBssid_[4], targetBssid_[5]);
-        y += lineHeight;
-        
-        canvas.setCursor(4, y);
-        canvas.printf("Channel: %d", targetChannel_);
+
+    // Target row value: the SSID (capped so it clears the "Target" label on the shared row, an
+    // SSID can be up to 32), or the shared scanner placeholder (slice-0109). The 21-char
+    // placeholder is under the cap and shows in full. Cap matches evil_twin's Target row.
+    constexpr size_t TARGET_VALUE_MAX = 26;
+    char targetStr[28];
+    if (hasTarget_ && targetSsid_[0] != '\0') {
+        if (strlen(targetSsid_) > TARGET_VALUE_MAX) {
+            strncpy(targetStr, targetSsid_, TARGET_VALUE_MAX - 3);
+            strcpy(targetStr + (TARGET_VALUE_MAX - 3), "...");
+        } else {
+            strncpy(targetStr, targetSsid_, sizeof(targetStr) - 1);
+            targetStr[sizeof(targetStr) - 1] = '\0';
+        }
     } else {
-        canvas.setTextColor(theme::ERROR());
-        canvas.print("No target selected");
+        strncpy(targetStr, "(select from scanner)", sizeof(targetStr) - 1);
+        targetStr[sizeof(targetStr) - 1] = '\0';
     }
-    
-    y += lineHeight + 4;
-    
-    // Draw separator
-    canvas.drawLine(0, y, canvas.width(), y, theme::ACCENT_DARK());
-    y += 6;
-    
+
     // Config options
     const char* targetTypeStr = "All Clients";
     if (targetType_ == DeauthTargetType::SINGLE_CLIENT) targetTypeStr = "Single Client";
@@ -266,6 +243,7 @@ void DeauthScreen::drawConfig(Canvas& canvas)
         const char* label;
         const char* value;
     } options[] = {
+        {"Target", targetStr},
         {"Target Type", targetTypeStr},
         {"Packets", packetStr},
         {"Delay", delayStr},
@@ -273,17 +251,18 @@ void DeauthScreen::drawConfig(Canvas& canvas)
         {"Start Attack", hasTarget_ ? ">" : "(no target)"}
     };
     
-    // The shared component derives the visible-row count from the list rect (below the target
-    // block, down to the footer), keeps the selection on screen, and draws the unified thumb in
-    // place of the old ^/v markers; this callback paints one option row.
+    // The shared component derives the visible-row count from the list rect (below the header,
+    // down to the footer), keeps the selection on screen, and draws the unified thumb in place
+    // of the old ^/v markers; this callback paints one option row.
     int16_t footerY = canvas.height() - ui::FOOTER_HEIGHT;
     configList_.setItemCount(CONFIG_OPTION_COUNT);
     ScrollableList::render(canvas, configList_, 0, y, canvas.width(), footerY - y, lineHeight,
         [&options](Canvas& c, int idx, int16_t rowY, bool /*selected*/) {
-            // Every deauth row is a label/value row (including Start Attack, whose value is
-            // ">" / "(no target)"), routed through the shared chrome-only ConfigRow: label left,
-            // value right-aligned and dim, selection shown by the band alone. The deauth
-            // start-affordance redesign stays its own LEDGER item (ADR-0096, slice-0106).
+            // Every deauth row renders through the shared chrome-only ConfigRow (label left,
+            // value right-aligned and dim, selection shown by the band alone): the Target
+            // navigation row (value = SSID or the scanner placeholder), the value rows, and the
+            // terminal Start Attack row (value ">" / "(no target)"). The deauth start-affordance
+            // redesign stays its own LEDGER item (ADR-0096, slice-0106).
             ui::ConfigRow::render(c, rowY, options[idx].label, options[idx].value);
         },
         !footerHints_.hasFocus());
@@ -297,7 +276,7 @@ void DeauthScreen::drawConfig(Canvas& canvas)
 void DeauthScreen::drawRunning(Canvas& canvas)
 {
 #ifdef ESP32
-    drawHeader(canvas, "DEAUTH RUNNING");
+    ui::StatusBar::render(canvas, "DEAUTH RUNNING");
     
     auto& attack = DeauthAttack::getInstance();
     const auto& stats = attack.getStats();
@@ -364,7 +343,7 @@ void DeauthScreen::drawRunning(Canvas& canvas)
 void DeauthScreen::drawResults(Canvas& canvas)
 {
 #ifdef ESP32
-    drawHeader(canvas, "DEAUTH RESULTS");
+    ui::StatusBar::render(canvas, "DEAUTH RESULTS");
     
     const auto& stats = DeauthAttack::getInstance().getStats();
     
@@ -466,12 +445,15 @@ bool DeauthScreen::handleInput(char key)
         return true;
     }
     
-    // Canonical config-form input in the CONFIG state, from the shared classifier (ADR-0107):
-    // the last row is the terminal "Start Attack" row (activates only with a target), every
-    // other row is a value row.
+    // Canonical config-form input in the CONFIG state, from the shared classifier (ADR-0107).
+    // Row 0 (Target) is the navigation row -> WiFi scanner; the last row is the terminal
+    // "Start Attack" row (activates only with a target); the rest are value rows.
     if (screenState_ == DeauthScreenState::CONFIG) {
-        const ui::ConfigRowKind kind = (configList_.selectedIndex() == CONFIG_OPTION_COUNT - 1)
-            ? ui::ConfigRowKind::Terminal : ui::ConfigRowKind::Value;
+        const int sel = configList_.selectedIndex();
+        const ui::ConfigRowKind kind =
+            (sel == 0)                        ? ui::ConfigRowKind::Navigation :
+            (sel == CONFIG_OPTION_COUNT - 1)  ? ui::ConfigRowKind::Terminal :
+                                                ui::ConfigRowKind::Value;
         switch (ui::classifyConfigKey(key, kind)) {
             case ui::ConfigKeyAction::NavUp:
                 configList_.setItemCount(CONFIG_OPTION_COUNT);
@@ -494,9 +476,14 @@ bool DeauthScreen::handleInput(char key)
                 needsRedraw_ = true;
                 return true;
             case ui::ConfigKeyAction::Navigate:
+                // Target row: route to the WiFi scanner to pick a target (always, with or
+                // without an existing one). It returns via ATTACK_TARGET_SELECTED -> setTarget
+                // (like Evil Twin / handshake, ADR-0092).
+                ScreenManager::getInstance().navigateTo(ScreenId::SCANNER);
+                return true;
             case ui::ConfigKeyAction::Popup:
             case ui::ConfigKeyAction::None:
-                break;  // deauth has no navigation/popup rows; fall through to the keys below
+                break;  // deauth has no popup row; fall through to the keys below
         }
     }
 
@@ -556,7 +543,8 @@ void DeauthScreen::handleEdit(int delta)
     if (screenState_ != DeauthScreenState::CONFIG) return;
     const bool fwd = delta > 0;
     switch (configList_.selectedIndex()) {
-        case 0:  // Target type: 3-state ring ALL -> SINGLE -> AP_ONLY
+        // case 0 (Target) is a navigation row: nothing to edit in place (ADR-0092).
+        case 1:  // Target type: 3-state ring ALL -> SINGLE -> AP_ONLY
             if (fwd) {
                 targetType_ = (targetType_ == DeauthTargetType::ALL_CLIENTS)  ? DeauthTargetType::SINGLE_CLIENT
                             : (targetType_ == DeauthTargetType::SINGLE_CLIENT) ? DeauthTargetType::AP_ONLY
@@ -567,7 +555,7 @@ void DeauthScreen::handleEdit(int delta)
                             :                                                  DeauthTargetType::ALL_CLIENTS;
             }
             break;
-        case 1:  // Packet count ring: 0(infinite), 50, 100, 500, 1000
+        case 2:  // Packet count ring: 0(infinite), 50, 100, 500, 1000
             if (fwd) {
                 if (packetCount_ == 0) packetCount_ = 50;
                 else if (packetCount_ < 100) packetCount_ = 100;
@@ -582,7 +570,7 @@ void DeauthScreen::handleEdit(int delta)
                 else packetCount_ = 500;
             }
             break;
-        case 2:  // Delay ring: 10, 50, 100, 200 ms
+        case 3:  // Delay ring: 10, 50, 100, 200 ms
             if (fwd) {
                 if (delayMs_ <= 10) delayMs_ = 50;
                 else if (delayMs_ <= 50) delayMs_ = 100;
@@ -595,7 +583,7 @@ void DeauthScreen::handleEdit(int delta)
                 else delayMs_ = 100;
             }
             break;
-        case 3:  // Send disassoc: toggle (prev and next both flip)
+        case 4:  // Send disassoc: toggle (prev and next both flip)
             sendDisassoc_ = !sendDisassoc_;
             break;
     }

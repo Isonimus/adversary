@@ -222,8 +222,8 @@ const char* EvilTwinScreen::getSSIDDisplay() const {
     if (configUseFixedSSID_ && configFixedSSID_[0] != '\0') {
         return configFixedSSID_;
     }
-    return evilTwin_.getTargetSSID()[0] != '\0' ? 
-           evilTwin_.getTargetSSID() : "(from scanner)";
+    return evilTwin_.getTargetSSID()[0] != '\0' ?
+           evilTwin_.getTargetSSID() : "(select from scanner)";
 }
 
 // =============================================================================
@@ -501,16 +501,22 @@ void EvilTwinScreen::renderConfig(Canvas& canvas) {
                 ui::ActionButton::render(c, rowY, "START TWIN", selected);
                 return;
             }
-            char valueStr[24] = "";
+            char valueStr[28] = "";
             switch (idx) {
                 case 0: {
-                    // Target row: show the current target SSID (or "(from scanner)"), truncated.
+                    // Target row value: the current SSID, or the scanner placeholder. It shares
+                    // the row with the "Target:" label (7 chars from x=8); at FONT_CELL_WIDTH=6 on
+                    // a 240px row a right-aligned value has room for ~29 chars before it reaches
+                    // the label, so cap the SSID at 26 (an SSID can be up to 32). The 21-char
+                    // "(select from scanner)" placeholder is well under the cap and shows in full.
+                    constexpr size_t TARGET_VALUE_MAX = 26;
                     const char* t = getSSIDDisplay();
-                    if (strlen(t) > 16) {
-                        strncpy(valueStr, t, 13);
-                        strcpy(valueStr + 13, "...");
+                    if (strlen(t) > TARGET_VALUE_MAX) {
+                        strncpy(valueStr, t, TARGET_VALUE_MAX - 3);
+                        strcpy(valueStr + (TARGET_VALUE_MAX - 3), "...");
                     } else {
                         strncpy(valueStr, t, sizeof(valueStr) - 1);
+                        valueStr[sizeof(valueStr) - 1] = '\0';
                     }
                     break;
                 }

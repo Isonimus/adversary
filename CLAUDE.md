@@ -175,6 +175,14 @@ same everywhere (chosen 2026-10-20; applied in slice-0086, dialogs standardized 
 networks (iOS/Android/Windows/macOS), so it stays. Do **not** use "Remove", "Erase", "Wipe",
 or "Drop" in user-facing copy for these actions.
 
+### UI copy: scanner-target placeholder
+
+A config-form Target row that has no target yet shows **`(select from scanner)`** as its dim
+`ConfigRow` value (chosen 2026-10-23; slice-0109, applied to deauth and evil_twin; handshake
+Manual joins in slice-0110). It is a navigation row: ENTER routes to the WiFi scanner (ADR-0092).
+Reuse this exact phrase for any new scanner-routed Target row; do not invent a variant like
+"(from scanner)" or "No target selected", and do not render the empty state in red.
+
 ### File Organization
 
 ```cpp
