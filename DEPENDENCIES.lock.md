@@ -20,10 +20,10 @@ listed here, that is drift — investigate before trusting the build.
   below predates the latest release tag, so a release can't be cut on an unverified
   snapshot (slice-0080). Keeping this stamp current on every release keeps the gate green.
 
-Last verified: 2026-10-20 — native 844/844, cardputer + m5stick builds SUCCESS.
+Last verified: 2026-10-23 — native 902/902, cardputer + m5stick builds SUCCESS.
 Re-resolved all three envs: the trees below are unchanged since the previous stamp (no
-version drift), only the date and native count moved (706 → 844 over the 0.3.0 / 0.4.0
-cycles, which added the RFID-in-`hal/` and wardriving-BLE suites).
+version drift), only the date and native count moved (844 → 902 over the 0.5.0 cycle,
+which added the config-form classifier and row suites).
 
 ---
 
