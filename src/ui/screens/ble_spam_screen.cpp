@@ -9,6 +9,7 @@
 #include "ui/components/toast_manager.h"
 #include "ui/components/action_button.h"
 #include "ui/components/config_row.h"
+#include "ui/components/config_input.h"
 #include "modules/system/system_manager.h"
 #include "modules/ble/ble_scanner.h"
 #include "modules/wifi/wifi_scanner.h"
@@ -176,20 +177,24 @@ bool BleSpamScreen::handleInput(char key) {
         return true;
     }
 
+    // Canonical config-form input in the CONFIG state, from the shared classifier (ADR-0107):
+    // the last row is the terminal START button, every other row is a value row. Back/ESC is
+    // not a classifier key and is handled below (exit from CONFIG, stop from the attack state).
     if (m_state == State::CONFIG) {
-        switch (key) {
-            case ';': // Nav UP
+        const ui::ConfigRowKind kind = (m_configList.selectedIndex() == CONFIG_OPTION_COUNT - 1)
+            ? ui::ConfigRowKind::Terminal : ui::ConfigRowKind::Value;
+        switch (ui::classifyConfigKey(key, kind)) {
+            case ui::ConfigKeyAction::NavUp:
                 m_configList.setItemCount(CONFIG_OPTION_COUNT);
                 m_configList.moveUp();  // wraps to last; model keeps the selection on screen
                 m_needsRedraw = true;
                 return true;
-            case '.': // Nav DOWN
+            case ui::ConfigKeyAction::NavDown:
                 m_configList.setItemCount(CONFIG_OPTION_COUNT);
                 m_configList.moveDown();  // wraps to first; model keeps the selection on screen
                 m_needsRedraw = true;
                 return true;
-            case ',': // Toggle/Edit PREV
-            case '<':
+            case ui::ConfigKeyAction::EditPrev:
                 if (m_configList.selectedIndex() == 0) {
                     m_config.provider = (BleSpamProvider)((int)m_config.provider == 0 ? 4 : (int)m_config.provider - 1);
                 } else if (m_configList.selectedIndex() == 1) {
@@ -199,8 +204,7 @@ bool BleSpamScreen::handleInput(char key) {
                 }
                 m_needsRedraw = true;
                 return true;
-            case '/': // Toggle/Edit NEXT
-            case '>':
+            case ui::ConfigKeyAction::EditNext:  // also ENTER on a value row (never inert, ADR-0092)
                 if (m_configList.selectedIndex() == 0) {
                     m_config.provider = (BleSpamProvider)(((int)m_config.provider + 1) % 5);
                 } else if (m_configList.selectedIndex() == 1) {
@@ -210,26 +214,24 @@ bool BleSpamScreen::handleInput(char key) {
                 }
                 m_needsRedraw = true;
                 return true;
-            case '\n':
-            case '\r':
-                if (m_configList.selectedIndex() == CONFIG_OPTION_COUNT - 1) {
-                    startAttack();
-                } else {
-                    // Logic to toggle next if applicable
-                    return handleInput('/'); 
-                }
+            case ui::ConfigKeyAction::Activate:
+                startAttack();  // ENTER on the terminal START row
                 return true;
-            case '`': // ESC
-            case 27:
-                m_shouldExit = true;
-                return true;
+            case ui::ConfigKeyAction::Navigate:
+            case ui::ConfigKeyAction::Popup:
+            case ui::ConfigKeyAction::None:
+                break;  // ble_spam has no navigation/popup rows; fall through to Back below
         }
-    } else {
-        // Attack state
-        if (key == '`' || key == 27) { // ESC/Stop
+    }
+
+    // Back/ESC: exit from the config list, stop from the attack state.
+    if (key == '`' || key == 27) {
+        if (m_state == State::CONFIG) {
+            m_shouldExit = true;
+        } else {
             stopAttack();
-            return true;
         }
+        return true;
     }
     return false;
 }
