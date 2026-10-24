@@ -41,6 +41,13 @@ static bool isSelectableRow(SettingType t) {
     return t != SettingType::HEADER && t != SettingType::SEPARATOR;
 }
 
+// A row the cursor can land on *right now*: structurally selectable and, for a live-gated
+// action, currently enabled. One notion shared by the selection predicate, the selectable
+// tally, and the scrollbar position scan, so a greyed-off row is uniformly skipped (slice-0120).
+static bool isSelectableItem(const SettingItem& item) {
+    return isSelectableRow(item.type) && item.isEnabled();
+}
+
 SettingsScreen::SettingsScreen()
     : visible_(false)
     , shouldExit_(false)
@@ -212,13 +219,18 @@ void SettingsScreen::buildSettingsList() {
 
     // Storage section
     items_[itemCount_++] = SettingItem::header("-- Storage --");
-    items_[itemCount_++] = SettingItem::action("Rebuild Index");
+    // Rebuild Index is a pure SD operation: greyed + unselectable with no card so the operator
+    // sees it is unavailable instead of triggering a scan that reports a false "Index rebuilt: 0"
+    // success (slice-0120). Same isReady() bool the root menu gates on. Retry SD Mount stays
+    // ungated: it is the recovery path, so gating it on SD presence would be a deadlock.
+    items_[itemCount_++] = SettingItem::gatedAction(
+        "Rebuild Index", "No SD", []{ return SDManager::getInstance().isReady(); });
     items_[itemCount_++] = SettingItem::action("Retry SD Mount");
 
     // Count selectable items (non-headers)
     selectableCount_ = 0;
     for (int i = 0; i < itemCount_; i++) {
-        if (isSelectableRow(items_[i].type)) {
+        if (isSelectableItem(items_[i])) {
             selectableCount_++;
         }
     }
@@ -229,7 +241,7 @@ void SettingsScreen::buildSettingsList() {
     // stays correct across rebuilds.
     itemList_.setItemCount(itemCount_);
     itemList_.setSelectablePredicate([this](int i) {
-        return i >= 0 && i < itemCount_ && isSelectableRow(items_[i].type);
+        return i >= 0 && i < itemCount_ && isSelectableItem(items_[i]);
     });
 }
 
@@ -747,9 +759,9 @@ void SettingsScreen::drawFooter(Canvas& canvas) {
     int sel = itemList_.selectedIndex();
     int selectablePos = 0;
     for (int i = 0; i < sel && i < itemCount_; i++) {
-        if (isSelectableRow(items_[i].type)) selectablePos++;
+        if (isSelectableItem(items_[i])) selectablePos++;
     }
-    if (isSelectableRow(items_[sel].type)) selectablePos++;
+    if (isSelectableItem(items_[sel])) selectablePos++;
     snprintf(countBuf, sizeof(countBuf), "%d/%d", selectablePos, selectableCount_);
     footerHints_.setRightContent(countBuf);
     
@@ -824,11 +836,26 @@ void SettingsScreen::drawSettingRow(Canvas& canvas, const SettingItem& item, int
         }
 
         case SettingType::INFO:
-        case SettingType::ACTION:
-            canvas.setTextColor(rowEditing ? theme::BG_PRIMARY() : theme::TEXT_PRIMARY());
+        case SettingType::ACTION: {
+            // A live-gated action that is currently off (e.g. "Rebuild Index" with no SD, slice-0120)
+            // greys its label and shows the reason right-aligned in the value slot; the selection
+            // predicate already keeps the cursor off it. INFO rows carry no gate, so isEnabled() is
+            // always true for them and this renders exactly as before.
+            const bool enabled = item.isEnabled();
+            canvas.setTextColor(!enabled ? theme::TEXT_DISABLED()
+                                         : (rowEditing ? theme::BG_PRIMARY() : theme::TEXT_PRIMARY()));
             canvas.setCursor(ROW_TEXT_X, textY);
             canvas.print(item.label);
+            if (!enabled && item.disabledHint) {
+                char hint[24];
+                snprintf(hint, sizeof(hint), "(%s)", item.disabledHint);
+                const int16_t hintWidth = static_cast<int16_t>(strlen(hint)) * theme::FONT_CELL_WIDTH;
+                canvas.setCursor(screenWidth - VALUE_RIGHT_MARGIN - hintWidth, textY);
+                canvas.setTextColor(theme::TEXT_DISABLED());
+                canvas.print(hint);
+            }
             break;
+        }
 
         case SettingType::SEPARATOR:
             break;

@@ -9,6 +9,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include "config/config.h"
 #include "../theme.h"
 #include "../components/status_bar.h"
@@ -59,17 +60,26 @@ struct SettingItem {
     int32_t maxVal;
     int32_t step;
     const char* suffix;     // e.g., "ms", "%", ""
-    
+    /// Live availability gate, mirroring MenuItem::enabledFn (slice-0042): when set it is
+    /// consulted every frame so an SD/hardware-gated action reflects the current state (e.g.
+    /// after a Retry SD Mount) instead of a boot-frozen flag. Unset = always enabled.
+    std::function<bool()> enabledFn;
+    const char* disabledHint;  ///< Right-aligned reason shown greyed when the gate is off (e.g. "No SD")
+
     // Default constructor for array initialization
-    SettingItem() 
-        : label(""), type(SettingType::SEPARATOR), valuePtr(nullptr), minVal(0), maxVal(0), step(1), suffix("") {}
-    
-    SettingItem(const char* lbl, SettingType t) 
-        : label(lbl), type(t), valuePtr(nullptr), minVal(0), maxVal(0), step(1), suffix("") {}
-    
+    SettingItem()
+        : label(""), type(SettingType::SEPARATOR), valuePtr(nullptr), minVal(0), maxVal(0), step(1), suffix(""), disabledHint(nullptr) {}
+
+    SettingItem(const char* lbl, SettingType t)
+        : label(lbl), type(t), valuePtr(nullptr), minVal(0), maxVal(0), step(1), suffix(""), disabledHint(nullptr) {}
+
     SettingItem(const char* lbl, int32_t* val, int32_t min, int32_t max, int32_t stp = 1, const char* sfx = "")
-        : label(lbl), type(SettingType::NUMBER), valuePtr(val), minVal(min), maxVal(max), step(stp), suffix(sfx) {}
-    
+        : label(lbl), type(SettingType::NUMBER), valuePtr(val), minVal(min), maxVal(max), step(stp), suffix(sfx), disabledHint(nullptr) {}
+
+    /// True when the action is currently available: a live gate wins, otherwise always enabled.
+    /// Mirrors MenuItem::isEnabled so navigation and rendering share one notion of "available".
+    bool isEnabled() const { return !enabledFn || enabledFn(); }
+
     static SettingItem header(const char* lbl) {
         return SettingItem(lbl, SettingType::HEADER);
     }
@@ -90,6 +100,16 @@ struct SettingItem {
     
     static SettingItem action(const char* lbl) {
         return SettingItem(lbl, SettingType::ACTION);
+    }
+
+    /// Live-gated action (slice-0120): selectable and shown normally while enabledFn() holds;
+    /// otherwise greyed, unselectable (skip-nav steps over it), with disabledHint shown as the
+    /// right-aligned reason. Re-evaluated every frame, so a card mounted after boot un-greys it.
+    static SettingItem gatedAction(const char* lbl, const char* disabledHint, std::function<bool()> enabledFn) {
+        SettingItem item(lbl, SettingType::ACTION);
+        item.disabledHint = disabledHint;
+        item.enabledFn = std::move(enabledFn);
+        return item;
     }
 };
 
