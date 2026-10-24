@@ -4,10 +4,12 @@
 #include <WiFi.h>
 #include <esp_wifi.h>
 #include "../storage/capture_registry.h"
+#include "../storage/settings_manager.h"
 #include "../wifi/wifi_scanner.h"
 #include "../ble/ble_scanner.h"
 #include "../ble/ble_spanner.h"
 #include "core/heap_policy.h"
+#include "inactivity.h"
 #include "utils/log.h"
 
 #if defined(TARGET_CARDPUTER)
@@ -29,7 +31,9 @@ RTC_DATA_ATTR static uint16_t rtcCrashCount = 0;
 
 SystemManager::SystemManager()
     : m_isStabilized(false)
-    , m_canvasPurged(false) {
+    , m_canvasPurged(false)
+    , lastActivityMs_(millis())
+    , displayDimmed_(false) {
     crashCount_ = rtcCrashCount;
 }
 
@@ -223,12 +227,34 @@ void SystemManager::logHeapStatus(const char* tag) {
 void SystemManager::setDisplayBrightness(uint8_t percentage) {
 #ifdef ESP32
     if (percentage > 100) percentage = 100;
-    
+
     // Apply brightness to display - range 0-255, our setting is 0-100%
     uint8_t brightness = (percentage * 255) / 100;
     M5.Display.setBrightness(brightness);
     LOG_D("SYSTEM", "Brightness set to %d%% (%d/255)", (int)percentage, brightness);
 #endif
+}
+
+bool SystemManager::noteActivityAndWake() {
+    lastActivityMs_ = millis();
+    if (!displayDimmed_) {
+        return false;
+    }
+    // Wake: restore the operator's configured brightness and swallow the triggering input.
+    setDisplayBrightness(SettingsManager::getInstance().get().display.brightness);
+    displayDimmed_ = false;
+    LOG_D("SYSTEM", "Screen woken from inactivity sleep");
+    return true;
+}
+
+void SystemManager::updateScreenSleep() {
+    const uint16_t timeoutSec = SettingsManager::getInstance().get().display.screenTimeoutSec;
+    if (inactivityShouldDim(millis(), lastActivityMs_, timeoutSec, displayDimmed_)) {
+        // Backlight only (ADR-0114): loop() keeps running, so any active session continues.
+        setDisplayBrightness(0);
+        displayDimmed_ = true;
+        LOG_D("SYSTEM", "Screen dimmed after %us inactivity", (unsigned)timeoutSec);
+    }
 }
 
 } // namespace adversary

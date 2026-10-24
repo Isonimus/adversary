@@ -66,6 +66,7 @@ void SettingsScreen::buildSettingsList() {
     tempWardrivingScanInterval_ = settings.wireless.wardrivingScanIntervalMs;
     tempWardrivingRadioMode_ = settings.wireless.wardrivingRadioMode;
     tempBrightness_ = settings.display.brightness;
+    tempScreenTimeoutSec_ = settings.display.screenTimeoutSec;
     tempToastPosition_ = settings.display.toastPosition;
     tempThemePreset_ = settings.display.themePreset;
     tempCapOverride_ = static_cast<int32_t>(settings.wireless.capOverride);
@@ -119,6 +120,7 @@ void SettingsScreen::buildSettingsList() {
     // Display section
     items_[itemCount_++] = SettingItem::header("-- Display --");
     items_[itemCount_++] = SettingItem("Brightness", &tempBrightness_, 10, 100, 10, "%");
+    items_[itemCount_++] = SettingItem("Screen Sleep", &tempScreenTimeoutSec_, 0, 300, 30, "s");
     items_[itemCount_++] = SettingItem("Toast Position", &tempToastPosition_, 0, 2, 1, "");
     
     // Theme selector with label showing current theme name. Max is the last non-custom
@@ -258,6 +260,7 @@ void SettingsScreen::hide() {
         settings.wireless.wardrivingScanIntervalMs = tempWardrivingScanInterval_;
         settings.wireless.wardrivingRadioMode = tempWardrivingRadioMode_;
         settings.display.brightness = tempBrightness_;
+        settings.display.screenTimeoutSec = static_cast<uint16_t>(tempScreenTimeoutSec_);
         settings.display.toastPosition = tempToastPosition_;
         settings.display.themePreset = tempThemePreset_;
         settings.wireless.capOverride = static_cast<hal::CapOverride>(
@@ -833,6 +836,17 @@ void SettingsScreen::formatNumberValue(const SettingItem& item, char* out,
     } else if (item.valuePtr == &tempWardrivingRadioMode_) {
         static const char* kLabels[] = {"WiFi", "BLE", "Both"};
         if (idx >= 0 && idx <= 2) word = kLabels[idx];
+    } else if (item.valuePtr == &tempScreenTimeoutSec_) {
+        // 0 = Off; whole minutes read as "Nm", otherwise seconds (ADR-0114).
+        if (idx <= 0) {
+            strncpy(out, "Off", outSize - 1);
+            out[outSize - 1] = '\0';
+        } else if (idx % 60 == 0) {
+            snprintf(out, outSize, "%dm", idx / 60);
+        } else {
+            snprintf(out, outSize, "%ds", idx);
+        }
+        return;
     }
     if (word) {
         strncpy(out, word, outSize - 1);

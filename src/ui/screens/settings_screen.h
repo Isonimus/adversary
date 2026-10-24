@@ -185,6 +185,7 @@ private:
     int32_t tempWardrivingScanInterval_;
     int32_t tempWardrivingRadioMode_;   // 0=WiFi, 1=BLE, 2=Both (ADR-0060)
     int32_t tempBrightness_;
+    int32_t tempScreenTimeoutSec_;   // inactivity screen-sleep timeout, 0 = Off (ADR-0114)
     int32_t tempSerialDebug_;
     int32_t tempNotifySounds_;
     int32_t tempNotifyLeds_;

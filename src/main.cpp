@@ -472,7 +472,11 @@ void loop() {
 #endif
 
     handleInput();
-    
+
+    // Dim the backlight after the configured inactivity timeout (ADR-0114). Backlight only:
+    // the loop keeps running, so any active attack/scan/wardriving session continues in the dark.
+    adversary::SystemManager::getInstance().updateScreenSleep();
+
     // Update system components
     adversary::NotificationManager::getInstance().update();
     adversary::WiFiConnection::getInstance().update();
@@ -692,6 +696,11 @@ void handleInput() {
         
         // Normalize modifier state + pressed key into the routing char (slice-0030).
         char key = adversary::normalizeCardputerKey(state.enter, state.del, pressedKey);
+
+        // Any keypress resets the inactivity timer; if the screen was dimmed for inactivity
+        // this press only wakes it and is not routed to a screen (ADR-0114).
+        if (adversary::SystemManager::getInstance().noteActivityAndWake()) return;
+
         if (key == 0) return;  // No valid key
 
         // Global hotkey: Fn+S captures the canvas to SD from any screen. Hooked
@@ -737,6 +746,11 @@ void handleInput() {
         
         // Map the logical action to the routing char (slice-0030).
         char pressedKey = adversary::inputActionToKey(action);
+
+        // Any input resets the inactivity timer; a screen dimmed for inactivity wakes on this
+        // input and swallows it rather than routing it to a screen (ADR-0114).
+        if (adversary::SystemManager::getInstance().noteActivityAndWake()) return;
+
         if (pressedKey == '\0') return;
         
         // Route to active screen via adversary::ScreenManager (handles all non-menu screens)

@@ -62,6 +62,25 @@ public:
      */
     void setDisplayBrightness(uint8_t percentage);
 
+    /**
+     * @brief Report an input event for inactivity screen sleep (ADR-0114).
+     *
+     * Resets the inactivity timer. If the screen is currently dimmed for inactivity, this
+     * restores the backlight to the configured brightness and returns true, signalling the
+     * caller to swallow the triggering input so a wake tap on a dark screen does not also
+     * fire an action. Returns false otherwise (the input routes normally).
+     */
+    bool noteActivityAndWake();
+
+    /**
+     * @brief Dim the backlight if the inactivity timeout has elapsed (ADR-0114).
+     *
+     * Called once per main loop. Reads DisplaySettings::screenTimeoutSec live (0 = never)
+     * and, on the transition into idle, sets the backlight to 0. Backlight only: the loop
+     * keeps running so an active attack/scan/wardriving session continues in the dark.
+     */
+    void updateScreenSleep();
+
 private:
     SystemManager();
     ~SystemManager() = default;
@@ -71,6 +90,11 @@ private:
     uint16_t crashCount_;
     bool m_isStabilized;
     bool m_canvasPurged;
+
+    // Inactivity screen sleep (ADR-0114). lastActivityMs_ is stamped on every input;
+    // displayDimmed_ gates the one-shot dim transition and the wake.
+    uint32_t lastActivityMs_;
+    bool displayDimmed_;
 };
 
 } // namespace adversary
