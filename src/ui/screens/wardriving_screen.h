@@ -86,6 +86,14 @@ private:
     String formatDistance(float km);
     uint16_t getRSSIColor(int8_t rssi);
 
+    // Per-run radio-mode quick-config on the idle screen (ADR-0111). These bind to the
+    // canonical WirelessSettings::wardrivingRadioMode field rather than a screen-local
+    // copy: currentRadioMode reads (clamping a corrupt value), cycleRadioMode advances
+    // and persists, radioModeLabel renders the operator-facing name.
+    wardriving::RadioMode currentRadioMode() const;
+    void cycleRadioMode();
+    static const char* radioModeLabel(wardriving::RadioMode mode);
+
     // Heap readout for the status-bar centre. Returns nullptr when the global heap
     // badge is on, so the two never show heap at once (the badge already does, with
     // health colouring); writes "<n>K" into `buf` and returns it when the badge is off.

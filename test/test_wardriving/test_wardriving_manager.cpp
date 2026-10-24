@@ -413,8 +413,29 @@ void test_count_survives_stop(void) {
     TEST_ASSERT_EQUAL(0, manager.getSession().networksFound);
 }
 
+/**
+ * @brief nextRadioMode cycles WiFi -> BLE -> Both -> WiFi and recovers a corrupt value.
+ *
+ * This is the logic behind the wardriving idle screen's per-run radio-mode selector
+ * (ADR-0111): one key advances the mode, wrapping after BOTH, and an out-of-range stored
+ * value must resolve to a valid mode rather than advancing from garbage.
+ */
+void test_next_radio_mode_cycles_and_recovers(void) {
+    TEST_ASSERT_EQUAL(static_cast<int>(RadioMode::BLE_ONLY),
+                      static_cast<int>(nextRadioMode(RadioMode::WIFI_ONLY)));
+    TEST_ASSERT_EQUAL(static_cast<int>(RadioMode::BOTH),
+                      static_cast<int>(nextRadioMode(RadioMode::BLE_ONLY)));
+    // Wrap after the last mode.
+    TEST_ASSERT_EQUAL(static_cast<int>(RadioMode::WIFI_ONLY),
+                      static_cast<int>(nextRadioMode(RadioMode::BOTH)));
+    // A corrupt out-of-range value recovers to the first mode, not raw+1.
+    TEST_ASSERT_EQUAL(static_cast<int>(RadioMode::WIFI_ONLY),
+                      static_cast<int>(nextRadioMode(static_cast<RadioMode>(7))));
+}
+
 int main(int argc, char **argv) {
     UNITY_BEGIN();
+    RUN_TEST(test_next_radio_mode_cycles_and_recovers);
     RUN_TEST(test_bssid_deduplication);
     RUN_TEST(test_count_survives_stop);
     RUN_TEST(test_scan_skip_logic);

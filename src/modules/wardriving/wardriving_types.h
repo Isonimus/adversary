@@ -44,6 +44,24 @@ enum class RadioMode : uint8_t {
     BOTH      = 2,  ///< WiFi + BLE concurrently (coexistence)
 };
 
+/// Number of selectable radio modes, so the cycle/clamp logic below never hard-codes
+/// the enum cardinality.
+constexpr uint8_t RADIO_MODE_COUNT = 3;
+
+/**
+ * @brief Advance to the next radio mode, wrapping after the last one.
+ *
+ * Drives the wardriving idle screen's per-run quick-config (ADR-0111), which cycles the
+ * mode with a single key. A stored value outside [0, RADIO_MODE_COUNT) (corrupt settings)
+ * resolves to WIFI_ONLY rather than propagating the bad value, so the selector always
+ * recovers to a valid state instead of advancing from garbage.
+ */
+constexpr RadioMode nextRadioMode(RadioMode current) {
+    const uint8_t raw = static_cast<uint8_t>(current);
+    return raw >= RADIO_MODE_COUNT - 1 ? RadioMode::WIFI_ONLY
+                                       : static_cast<RadioMode>(raw + 1);
+}
+
 /**
  * @brief Single network entry with GPS data
  */

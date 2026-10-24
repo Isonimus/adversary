@@ -209,6 +209,9 @@ bool WardrivingScreen::handleInput(char key) {
                     state_ = WardrivingState::SCANNING;
                 }
                 return true;
+            } else if (key == 'm' || key == 'M') {  // Cycle per-run radio mode
+                cycleRadioMode();
+                return true;
             } else if (key == '`' || key == 27) {  // Esc (backtick or ESC char)
                 exitToMenu_ = true;
                 return true;
@@ -318,6 +321,36 @@ const char* WardrivingScreen::statusHeapText(char* buf, size_t len) const {
     return buf;
 }
 
+wardriving::RadioMode WardrivingScreen::currentRadioMode() const {
+    // Clamp on read: a corrupt stored value renders as WiFi rather than indexing the
+    // label array out of bounds (nextRadioMode applies the same recovery on cycle).
+    const uint8_t raw = SettingsManager::getInstance().get().wireless.wardrivingRadioMode;
+    return raw < wardriving::RADIO_MODE_COUNT ? static_cast<wardriving::RadioMode>(raw)
+                                              : wardriving::RadioMode::WIFI_ONLY;
+}
+
+const char* WardrivingScreen::radioModeLabel(wardriving::RadioMode mode) {
+    // Operator-facing names for the ADR-0060 modes; the Settings editor shows the same
+    // three words (settings_screen.cpp formatNumberValue).
+    switch (mode) {
+        case wardriving::RadioMode::BLE_ONLY: return "BLE";
+        case wardriving::RadioMode::BOTH:     return "Both";
+        case wardriving::RadioMode::WIFI_ONLY:
+        default:                              return "WiFi";
+    }
+}
+
+void WardrivingScreen::cycleRadioMode() {
+    // ADR-0111: write straight through to the canonical field (no screen-local copy) and
+    // persist, so the change is live for the next session start and shows identically in
+    // the Settings editor. The manager reads this field at startSession, so the pre-start
+    // idle screen is the correct place to set it.
+    auto& settings = SettingsManager::getInstance().getMutable();
+    const wardriving::RadioMode next = wardriving::nextRadioMode(currentRadioMode());
+    settings.wireless.wardrivingRadioMode = static_cast<uint8_t>(next);
+    SettingsManager::getInstance().save();
+}
+
 uint16_t WardrivingScreen::getRSSIColor(int8_t rssi) {
     // Color-code signal strength
     if (rssi > -50) {
@@ -391,17 +424,30 @@ void WardrivingScreen::drawIdle(Canvas& canvas) {
     y += 10;
     canvas.setCursor(4, y);
     canvas.print("and network analysis.");
-    y += 18;
-    
+    y += 16;
+
+    // Per-run radio-mode quick-config (ADR-0111): this reads and writes the canonical
+    // WirelessSettings field the manager already consults at session start, so Settings
+    // stays the full editor and there is no screen-local copy to drift. Mode is the most
+    // run-contextual wardriving knob, chosen from the RF environment right before a walk.
+    canvas.setTextColor(theme::TEXT_SECONDARY());
+    canvas.setCursor(4, y);
+    canvas.print("Radio:");
+    canvas.setTextColor(theme::ACCENT());
+    canvas.setCursor(45, y);
+    canvas.print(radioModeLabel(currentRadioMode()));
+    y += 16;
+
     drawGPSStatus(canvas, y);
-    
+
     // Status message above footer
     canvas.setTextColor(theme::TEXT_PRIMARY());
     canvas.setCursor(4, canvas.height() - 32);
     canvas.print("Ready to start!");
-    
+
     footerHints_.setHints({
         {'\r', "Start", true},
+        {'m', "Radio", true},
         {'`', "Back", true}
     });
     footerHints_.render(canvas);
