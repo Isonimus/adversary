@@ -9,6 +9,7 @@
 #include "modules/storage/capture_registry.h"
 #include "hal/storage/sd_manager.h"
 #include "core/module_detection.h"  // adversary::initializeMenu() — rebuild menu on retry-mount
+#include "utils/time_format.h"      // utils::formatUtcOffset — Time Zone row label (ADR-0118)
 
 #ifdef ESP32
 #include <Arduino.h>
@@ -76,6 +77,7 @@ void SettingsScreen::buildSettingsList() {
     tempNotifyLeds_ = settings.system.notifyLeds ? 1 : 0;
     tempShowHeapBadge_ = settings.system.showHeapBadge ? 1 : 0;
     tempShowHeapLargestBlock_ = settings.system.showHeapLargestBlock ? 1 : 0;
+    tempTzOffsetMinutes_ = settings.system.tzOffsetMinutes;
     tempDashboardAuthEnabled_ = settings.system.dashboardAuthEnabled ? 1 : 0;
     
     // Build items list
@@ -205,6 +207,8 @@ void SettingsScreen::buildSettingsList() {
              TimeManager::getInstance().getSourceName());
     items_[itemCount_++] = SettingItem::info(timeSyncLabelBuf_);
     items_[itemCount_++] = SettingItem::action("Sync Time (NTP)");
+    // Display-only local offset, 15-min steps across UTC-12:00..+14:00 (ADR-0118).
+    items_[itemCount_++] = SettingItem("Time Zone", &tempTzOffsetMinutes_, -720, 840, 15, "");
 
     // Storage section
     items_[itemCount_++] = SettingItem::header("-- Storage --");
@@ -279,6 +283,7 @@ void SettingsScreen::hide() {
         settings.system.notifyLeds = (tempNotifyLeds_ != 0);
         settings.system.showHeapBadge = (tempShowHeapBadge_ != 0);
         settings.system.showHeapLargestBlock = (tempShowHeapLargestBlock_ != 0);
+        settings.system.tzOffsetMinutes = static_cast<int16_t>(tempTzOffsetMinutes_);
         settings.system.dashboardAuthEnabled = (tempDashboardAuthEnabled_ != 0);
         
         // Apply notification settings immediately
@@ -856,6 +861,10 @@ void SettingsScreen::formatNumberValue(const SettingItem& item, char* out,
         } else {
             snprintf(out, outSize, "%ds", idx);
         }
+        return;
+    } else if (item.valuePtr == &tempTzOffsetMinutes_) {
+        // Signed minute offset shown as "UTC" / "UTC+5:30" / "UTC-3:00" (ADR-0118).
+        utils::formatUtcOffset(static_cast<int16_t>(idx), out, outSize);
         return;
     }
     if (word) {

@@ -97,6 +97,11 @@ struct SystemSettings {
     // WPA2 key for the dashboard SoftAP link (slice-0036). Empty = auto-generate a
     // per-device key on next AP start; there is no open-AP path. 63-char WPA2 max + NUL.
     char dashboardApPassword[64] = "";
+
+    // Display-only local-time offset, signed minutes, 15-min granularity (ADR-0118).
+    // 0 = UTC (default). Applied ONLY where time is rendered on-screen; every persisted or
+    // exported timestamp (WiGLE CSV, session ids, filenames, stored epochs) stays UTC.
+    int16_t tzOffsetMinutes = 0;
 };
 
 struct ApiKeys {
@@ -512,8 +517,10 @@ inline bool SettingsManager::load() {
         const char* dashApPass = system["dashboardApPassword"] | "";
         strncpy(settings_.system.dashboardApPassword, dashApPass, 63);
         settings_.system.dashboardApPassword[63] = '\0';
+
+        settings_.system.tzOffsetMinutes = system["tzOffsetMinutes"] | 0;
     }
-    
+
     // Load API keys
     JsonObject apiKeys = doc["apiKeys"];
     if (apiKeys) {
@@ -631,6 +638,7 @@ inline bool SettingsManager::save() {
     if (settings_.system.dashboardApPassword[0] != '\0') {
         system["dashboardApPassword"] = settings_.system.dashboardApPassword;
     }
+    system["tzOffsetMinutes"] = settings_.system.tzOffsetMinutes;
 
     // API keys
     if (settings_.apiKeys.hasWpaSec() || settings_.apiKeys.hasWigle() ||

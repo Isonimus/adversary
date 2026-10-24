@@ -428,10 +428,13 @@ FileResult SDManager::readFile(const char* path, uint8_t* buffer, size_t bufferS
 
 void SDManager::generateTimestampFilename(const char* prefix, const char* extension,
                                            char* outBuffer, size_t bufferSize) {
+    // UTC, not local: filenames are persisted artifacts and stay UTC so they sort unambiguously
+    // regardless of any display offset (ADR-0118). localtime_r resolved to UTC anyway (TZ unset);
+    // gmtime_r makes that intent explicit and immune to a future TZ set.
     time_t now;
     struct tm timeinfo;
     time(&now);
-    localtime_r(&now, &timeinfo);
+    gmtime_r(&now, &timeinfo);
 
     snprintf(outBuffer, bufferSize, "%s_%04d%02d%02d_%02d%02d%02d%s",
              prefix,

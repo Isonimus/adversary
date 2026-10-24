@@ -603,9 +603,12 @@ void WardrivingScreen::drawTime(Canvas& canvas, int16_t y) {
     auto& timeManager = TimeManager::getInstance();
     if (!timeManager.isSynced()) return;
     
+    // Render the operator's local time (display-only offset, ADR-0118); the canonical clock
+    // and every persisted/exported stamp stay UTC.
     time_t now = timeManager.now();
     struct tm timeinfo;
-    if (gmtime_r(&now, &timeinfo) == nullptr) return;  // unparseable epoch: nothing to draw
+    const int16_t tzOffsetMinutes = SettingsManager::getInstance().get().system.tzOffsetMinutes;
+    if (!utils::localTimeFields(now, tzOffsetMinutes, &timeinfo)) return;  // unparseable: nothing to draw
 
     // Show time source so user knows reliability:
     // NTP/GPS = accurate, SD = stale (off-time is lost without RTC)

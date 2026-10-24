@@ -192,6 +192,7 @@ private:
     int32_t tempNotifyLeds_;
     int32_t tempShowHeapBadge_;
     int32_t tempShowHeapLargestBlock_;
+    int32_t tempTzOffsetMinutes_;  // display-only local-time offset, signed minutes (ADR-0118)
     int32_t tempToastPosition_;
     int32_t tempThemePreset_;
     char themeLabelBuf_[32];
