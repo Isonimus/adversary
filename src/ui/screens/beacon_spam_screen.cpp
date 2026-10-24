@@ -195,9 +195,10 @@ void BeaconSpamScreen::render(Canvas& canvas)
 void BeaconSpamScreen::drawHeader(Canvas& canvas, const char* title)
 {
 #ifdef ESP32
-    // Show mode name as center content
-    const char* modeName = getModeName(mode_);
-    ui::StatusBar::render(canvas, title, modeName, theme::BG_SECONDARY(), theme::TEXT_PRIMARY());
+    // Mode is shown by the "Mode:" config row (slice-0106); it is not echoed in the status
+    // bar, which only crowded the bar and forced a per-frame text overpaint (slice-0113). The
+    // explicit colors matched the render defaults, so the bar's look is unchanged.
+    ui::StatusBar::render(canvas, title);
 #else
     (void)canvas;
     (void)title;
