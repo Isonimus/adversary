@@ -33,7 +33,7 @@ SystemManager::SystemManager()
     : m_isStabilized(false)
     , m_canvasPurged(false)
     , lastActivityMs_(millis())
-    , displayDimmed_(false) {
+    , currentStage_(ScreenSleepStage::ACTIVE) {
     crashCount_ = rtcCrashCount;
 }
 
@@ -237,24 +237,35 @@ void SystemManager::setDisplayBrightness(uint8_t percentage) {
 
 bool SystemManager::noteActivityAndWake() {
     lastActivityMs_ = millis();
-    if (!displayDimmed_) {
+    if (currentStage_ == ScreenSleepStage::ACTIVE) {
         return false;
     }
-    // Wake: restore the operator's configured brightness and swallow the triggering input.
+    // Any input restores full brightness. Swallow the input only when the screen was fully
+    // OFF (blind), so a wake tap there cannot also fire an action; at the readable DIMMED
+    // stage the operator can see the screen, so the tap wakes it and still routes (ADR-0116).
+    const bool wasOff = (currentStage_ == ScreenSleepStage::OFF);
     setDisplayBrightness(SettingsManager::getInstance().get().display.brightness);
-    displayDimmed_ = false;
-    LOG_D("SYSTEM", "Screen woken from inactivity sleep");
-    return true;
+    currentStage_ = ScreenSleepStage::ACTIVE;
+    LOG_D("SYSTEM", "Screen woken from inactivity (was %s)", wasOff ? "off" : "dimmed");
+    return wasOff;
 }
 
 void SystemManager::updateScreenSleep() {
-    const uint16_t timeoutSec = SettingsManager::getInstance().get().display.screenTimeoutSec;
-    if (inactivityShouldDim(millis(), lastActivityMs_, timeoutSec, displayDimmed_)) {
-        // Backlight only (ADR-0114): loop() keeps running, so any active session continues.
-        setDisplayBrightness(0);
-        displayDimmed_ = true;
-        LOG_D("SYSTEM", "Screen dimmed after %us inactivity", (unsigned)timeoutSec);
+    const auto& disp = SettingsManager::getInstance().get().display;
+    const ScreenSleepStage target = inactivityStage(
+        millis(), lastActivityMs_, disp.screenDimAfterSec, disp.screenOffAfterSec);
+    if (target == currentStage_) {
+        return;
     }
+
+    // Backlight only (ADR-0116): loop() keeps running, so any active session continues.
+    switch (target) {
+        case ScreenSleepStage::ACTIVE: setDisplayBrightness(disp.brightness); break;
+        case ScreenSleepStage::DIMMED: setDisplayBrightness(SCREEN_DIM_BRIGHTNESS_PCT); break;
+        case ScreenSleepStage::OFF:    setDisplayBrightness(0); break;
+    }
+    currentStage_ = target;
+    LOG_D("SYSTEM", "Screen sleep stage -> %d", (int)target);
 }
 
 } // namespace adversary

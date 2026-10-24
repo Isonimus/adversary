@@ -66,7 +66,8 @@ void SettingsScreen::buildSettingsList() {
     tempWardrivingScanInterval_ = settings.wireless.wardrivingScanIntervalMs;
     tempWardrivingRadioMode_ = settings.wireless.wardrivingRadioMode;
     tempBrightness_ = settings.display.brightness;
-    tempScreenTimeoutSec_ = settings.display.screenTimeoutSec;
+    tempScreenDimAfterSec_ = settings.display.screenDimAfterSec;
+    tempScreenOffAfterSec_ = settings.display.screenOffAfterSec;
     tempToastPosition_ = settings.display.toastPosition;
     tempThemePreset_ = settings.display.themePreset;
     tempCapOverride_ = static_cast<int32_t>(settings.wireless.capOverride);
@@ -120,7 +121,8 @@ void SettingsScreen::buildSettingsList() {
     // Display section
     items_[itemCount_++] = SettingItem::header("-- Display --");
     items_[itemCount_++] = SettingItem("Brightness", &tempBrightness_, 10, 100, 10, "%");
-    items_[itemCount_++] = SettingItem("Screen Sleep", &tempScreenTimeoutSec_, 0, 300, 30, "s");
+    items_[itemCount_++] = SettingItem("Dim After", &tempScreenDimAfterSec_, 0, 300, 30, "s");
+    items_[itemCount_++] = SettingItem("Screen Off", &tempScreenOffAfterSec_, 0, 600, 30, "s");
     items_[itemCount_++] = SettingItem("Toast Position", &tempToastPosition_, 0, 2, 1, "");
     
     // Theme selector with label showing current theme name. Max is the last non-custom
@@ -260,7 +262,14 @@ void SettingsScreen::hide() {
         settings.wireless.wardrivingScanIntervalMs = tempWardrivingScanInterval_;
         settings.wireless.wardrivingRadioMode = tempWardrivingRadioMode_;
         settings.display.brightness = tempBrightness_;
-        settings.display.screenTimeoutSec = static_cast<uint16_t>(tempScreenTimeoutSec_);
+        settings.display.screenDimAfterSec = static_cast<uint16_t>(tempScreenDimAfterSec_);
+        // Keep OFF at or after DIM so the readable stage is never skipped (ADR-0116); a
+        // nonzero off below dim is clamped up to dim (the two stages then coincide).
+        {
+            const int32_t off = tempScreenOffAfterSec_;
+            settings.display.screenOffAfterSec = static_cast<uint16_t>(
+                (off != 0 && off < tempScreenDimAfterSec_) ? tempScreenDimAfterSec_ : off);
+        }
         settings.display.toastPosition = tempToastPosition_;
         settings.display.themePreset = tempThemePreset_;
         settings.wireless.capOverride = static_cast<hal::CapOverride>(
@@ -836,8 +845,9 @@ void SettingsScreen::formatNumberValue(const SettingItem& item, char* out,
     } else if (item.valuePtr == &tempWardrivingRadioMode_) {
         static const char* kLabels[] = {"WiFi", "BLE", "Both"};
         if (idx >= 0 && idx <= 2) word = kLabels[idx];
-    } else if (item.valuePtr == &tempScreenTimeoutSec_) {
-        // 0 = Off; whole minutes read as "Nm", otherwise seconds (ADR-0114).
+    } else if (item.valuePtr == &tempScreenDimAfterSec_ ||
+               item.valuePtr == &tempScreenOffAfterSec_) {
+        // 0 = Off; whole minutes read as "Nm", otherwise seconds (ADR-0116).
         if (idx <= 0) {
             strncpy(out, "Off", outSize - 1);
             out[outSize - 1] = '\0';

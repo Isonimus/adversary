@@ -2,10 +2,10 @@
 id: '0114'
 title: "Inactivity screen sleep dims the backlight only and never sleeps the CPU"
 type: architecture
-status: accepted
+status: superseded
 date: 2026-10-24
 supersedes: []
-superseded_by: []
+superseded_by: ['0116']
 ---
 
 ## Context

@@ -69,7 +69,11 @@ struct WirelessSettings {
 
 struct DisplaySettings {
     uint8_t brightness = 100;
-    uint16_t screenTimeoutSec = 0;  // 0 = never
+    // Inactivity screen sleep, two-stage (ADR-0116). screenDimAfterSec is the master
+    // switch: 0 = feature off. screenOffAfterSec = 0 means dim-only (never fully off);
+    // when nonzero it is kept >= screenDimAfterSec so OFF cannot precede DIMMED.
+    uint16_t screenDimAfterSec = 0;
+    uint16_t screenOffAfterSec = 0;
     uint8_t toastPosition = 0;      // 0=TOP, 1=CENTER, 2=BOTTOM
     uint8_t themePreset = 0;        // 0=Red Team, 1=Matrix, 2=T800, 3=Fallout, 4=Cyberpunk, 5=M5Stick, 6=Tron
 };
@@ -479,7 +483,8 @@ inline bool SettingsManager::load() {
     JsonObject display = doc["display"];
     if (display) {
         settings_.display.brightness = display["brightness"] | 100;
-        settings_.display.screenTimeoutSec = display["screenTimeoutSec"] | 0;
+        settings_.display.screenDimAfterSec = display["screenDimAfterSec"] | 0;
+        settings_.display.screenOffAfterSec = display["screenOffAfterSec"] | 0;
         settings_.display.toastPosition = display["toastPosition"] | 0;
         settings_.display.themePreset = display["themePreset"] | 0;
     }
@@ -603,7 +608,8 @@ inline bool SettingsManager::save() {
     // Display
     JsonObject display = doc["display"].to<JsonObject>();
     display["brightness"] = settings_.display.brightness;
-    display["screenTimeoutSec"] = settings_.display.screenTimeoutSec;
+    display["screenDimAfterSec"] = settings_.display.screenDimAfterSec;
+    display["screenOffAfterSec"] = settings_.display.screenOffAfterSec;
     display["toastPosition"] = settings_.display.toastPosition;
     display["themePreset"] = settings_.display.themePreset;
     

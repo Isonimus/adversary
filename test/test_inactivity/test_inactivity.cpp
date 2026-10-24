@@ -1,62 +1,66 @@
 /**
  * @file test_inactivity.cpp
- * @brief Regression for the pure inactivity-dim policy (ADR-0114, slice-0115).
+ * @brief Regression for the pure two-stage inactivity policy (ADR-0116, slice-0117).
  *
- * inactivityShouldDim() is the one host-testable seam of screen sleep: the backlight
- * and input wiring are device-only. It must dim only on the transition into the dimmed
- * state, treat timeout 0 as "never", not re-dim when already dark, and survive a millis()
+ * inactivityStage() is the one host-testable seam of screen sleep: the backlight and input
+ * wiring are device-only. It must stay ACTIVE when disabled (dim-after 0), reach DIMMED then
+ * OFF at the two configured thresholds, treat off-after 0 as dim-only, and survive a millis()
  * wraparound (unsigned subtraction). Getting the truth table wrong either dims a screen the
- * operator is actively using or never dims at all, defeating the battery saving.
+ * operator is using or skips the readable stage straight to black.
  */
 
 #include <unity.h>
 
 #include "modules/system/inactivity.h"
 
-using adversary::inactivityShouldDim;
+using adversary::inactivityStage;
+using adversary::ScreenSleepStage;
 using adversary::SCREEN_SLEEP_DISABLED;
 
 void setUp(void) {}
 void tearDown(void) {}
 
-// Timeout 0 (the default) disables dimming no matter how long idle.
-void test_disabled_never_dims(void) {
-    TEST_ASSERT_FALSE(inactivityShouldDim(1000000u, 0u, SCREEN_SLEEP_DISABLED, false));
+// dim-after 0 (the default) disables the feature no matter how long idle.
+void test_disabled_stays_active(void) {
+    TEST_ASSERT_TRUE(ScreenSleepStage::ACTIVE ==
+                     inactivityStage(1000000u, 0u, SCREEN_SLEEP_DISABLED, 0u));
 }
 
-// Before the timeout elapses, the screen stays lit.
-void test_does_not_dim_before_timeout(void) {
-    // 29 s idle, 30 s timeout: not yet.
-    TEST_ASSERT_FALSE(inactivityShouldDim(29000u, 0u, 30u, false));
+// Dim after 30 s, off after 60 s: walk the three stages across the thresholds.
+void test_three_stage_progression(void) {
+    const uint16_t dim = 30, off = 60;
+    TEST_ASSERT_TRUE(ScreenSleepStage::ACTIVE == inactivityStage(29000u, 0u, dim, off));
+    TEST_ASSERT_TRUE(ScreenSleepStage::DIMMED == inactivityStage(30000u, 0u, dim, off));
+    TEST_ASSERT_TRUE(ScreenSleepStage::DIMMED == inactivityStage(59000u, 0u, dim, off));
+    TEST_ASSERT_TRUE(ScreenSleepStage::OFF    == inactivityStage(60000u, 0u, dim, off));
+    TEST_ASSERT_TRUE(ScreenSleepStage::OFF    == inactivityStage(90000u, 0u, dim, off));
 }
 
-// At and past the timeout, the dim transition fires.
-void test_dims_at_and_after_timeout(void) {
-    TEST_ASSERT_TRUE(inactivityShouldDim(30000u, 0u, 30u, false));
-    TEST_ASSERT_TRUE(inactivityShouldDim(45000u, 0u, 30u, false));
+// off-after 0 means dim-only: the screen dims and never goes fully off.
+void test_off_zero_is_dim_only(void) {
+    TEST_ASSERT_TRUE(ScreenSleepStage::DIMMED == inactivityStage(300000u, 0u, 30u, 0u));
 }
 
-// Already dimmed: the predicate must not re-fire (the dim is a one-shot transition;
-// the input hook, not this predicate, clears the dimmed state).
-void test_does_not_redim_when_already_dimmed(void) {
-    TEST_ASSERT_FALSE(inactivityShouldDim(999999u, 0u, 30u, true));
+// Degenerate config (off < dim) must not strand the screen: OFF past its threshold wins,
+// the readable stage is simply skipped. Callers clamp off >= dim, but the policy is safe.
+void test_off_below_dim_prefers_off(void) {
+    TEST_ASSERT_TRUE(ScreenSleepStage::OFF == inactivityStage(20000u, 0u, 30u, 10u));
 }
 
 // millis() wraparound: lastActivity just before the 32-bit rollover, now just after.
-// Unsigned subtraction yields the true small elapsed time, so a 30 s timer does not
-// dim one tick after a 49-day rollover.
+// Unsigned subtraction yields the true small elapsed time, so neither stage fires.
 void test_wraparound_elapsed_is_small(void) {
     const uint32_t lastActivity = 0xFFFFFF00u;  // ~256 ms before rollover
     const uint32_t now = 0x00000100u;           // ~256 ms after rollover => ~512 ms elapsed
-    TEST_ASSERT_FALSE(inactivityShouldDim(now, lastActivity, 30u, false));
+    TEST_ASSERT_TRUE(ScreenSleepStage::ACTIVE == inactivityStage(now, lastActivity, 30u, 60u));
 }
 
 int main(int, char **) {
     UNITY_BEGIN();
-    RUN_TEST(test_disabled_never_dims);
-    RUN_TEST(test_does_not_dim_before_timeout);
-    RUN_TEST(test_dims_at_and_after_timeout);
-    RUN_TEST(test_does_not_redim_when_already_dimmed);
+    RUN_TEST(test_disabled_stays_active);
+    RUN_TEST(test_three_stage_progression);
+    RUN_TEST(test_off_zero_is_dim_only);
+    RUN_TEST(test_off_below_dim_prefers_off);
     RUN_TEST(test_wraparound_elapsed_is_small);
     return UNITY_END();
 }
