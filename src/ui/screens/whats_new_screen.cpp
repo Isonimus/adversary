@@ -100,9 +100,9 @@ void WhatsNewScreen::render(Canvas& canvas) {
 }
 
 void WhatsNewScreen::drawHeader(Canvas& canvas) {
-    // Running version as the right-hand subtitle, so the notes are unambiguously "for this
-    // build" (and so a stale whats_new.h shows under the correct version during release test).
-    ui::StatusBar::render(canvas, "WHAT'S NEW", config::VERSION,
+    // Version is not shown here: it reads once in the title line, which drawContent composes
+    // as "v<VERSION> - <codename>" live (slice-0124). The status bar carries the name only.
+    ui::StatusBar::render(canvas, "WHAT'S NEW", nullptr,
                           theme::BG_SECONDARY(), theme::TEXT_PRIMARY());
 }
 
@@ -121,7 +121,18 @@ void WhatsNewScreen::drawContent(Canvas& canvas) {
         const char* line = WHATS_NEW_LINES[i];
 
         if (i == 0) {
-            canvas.setTextColor(theme::ACCENT());  // section title
+            // Release title line: the live version (config::VERSION, never hard-coded into the
+            // notes body per ADR-0121) + the codename from whats_new.h line 0, composed by
+            // chained prints on one line. The version shows only here now (the status bar no
+            // longer carries a version subtitle), so it reads as one title (slice-0124).
+            canvas.setTextColor(theme::ACCENT());
+            canvas.setCursor(x, y);
+            canvas.print("v");
+            canvas.print(config::VERSION);
+            canvas.print(" - ");
+            canvas.print(line);
+            y += LINE_HEIGHT;
+            continue;
         } else if (strcmp(line, "---") == 0) {
             canvas.drawLine(x, y + 3, canvas.width() - x, y + 3, theme::TEXT_DISABLED());
             y += LINE_HEIGHT;

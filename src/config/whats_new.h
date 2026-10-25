@@ -9,8 +9,9 @@
  * operator-facing, and generating it would couple the build to changelog markup for no gain.
  *
  * RELEASE CHECKLIST: when VERSION is bumped, rewrite these lines for the new release in the
- * same commit (see CLAUDE.md). The heading shows config::VERSION dynamically, so do not
- * repeat the version number in the body. Keep it to roughly a screenful (~34 chars/line).
+ * same commit (see CLAUDE.md). The title line is composed as "v<config::VERSION> - <line 0>",
+ * so line 0 is the release CODENAME only (e.g. "FIELD USABILITY"): do not put the version
+ * number anywhere in the body. Keep it to roughly a screenful (~34 chars/line).
  */
 
 namespace adversary {
