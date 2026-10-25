@@ -7,6 +7,14 @@ releases, this can be replaced by a git-tag-generated changelog.
 ---
 
 
+## 2026-10-25 (v0.6.0-alpha)
+- **The screen now sleeps on idle to save battery.** After a period of inactivity the display dims to a still-readable level, then turns off; any key wakes it. Both delays are configurable in Settings > Display (Dim After / Screen Off), and the dim stage is a readable intermediate so a glance does not require a keypress. (slices 0115, 0117; ADR-0114, ADR-0116)
+- **Clocks show your local time.** Set a UTC offset in Settings > Time Zone and the wardriving clock and on-screen times render local, while saved logs and exports stay in UTC so captures remain comparable across devices. (slice-0119; ADR-0118)
+- **Actions that need an SD card grey out when none is in.** Rebuild Index no longer runs a scan that reports a false success with no card present; it reads as disabled until a card is inserted, matching the rest of the SD-gated menu. (slice-0042)
+- **Wardriving radio mode is chosen per run from the idle screen.** The WiFi / BLE / both selector sits on the pre-run screen, so each session picks its radios without a trip into Settings. (slice-0112; ADR-0111)
+- **A what's-new screen shows once after an update.** The first boot on a new version opens a short summary of what changed; reopen it any time from Settings > What's New. The version is shown live from the build, so the notes never carry a stale number. (slices 0122, 0124; ADR-0121)
+- **Handshake Auto Hunt describes itself accurately.** The config screen no longer claims Auto Hunt "uses values from the Settings menu": its timing is built in and the whitelist is its only Settings input, which the copy now states. (slice-0123; ADR-0111)
+
 ## 2026-10-23 (v0.5.0-alpha)
 - **One model behind every attack-config screen.** Deauth, Evil Twin, Karma, Probe Flood, Beacon Spam and Handshake now share the same config form: identical row chrome (label left, value right), the same selection and scrolling behaviour as the lists, one green start-button style, and one keyboard model for navigating, editing values and activating a row. (slices 0097, 0106, 0108; ADR-0092, 0096, 0107)
 - **Handshake is now two screens: Auto Hunt and Manual.** The mode is chosen from the Wireless -> Handshake menu instead of toggled inside the screen, so each presents only the controls it needs. (slice-0095; ADR-0094)

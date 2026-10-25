@@ -20,10 +20,18 @@ listed here, that is drift — investigate before trusting the build.
   below predates the latest release tag, so a release can't be cut on an unverified
   snapshot (slice-0080). Keeping this stamp current on every release keeps the gate green.
 
-Last verified: 2026-10-23 — native 902/902, cardputer + m5stick builds SUCCESS.
+Last verified: 2026-10-25 — native 920/920, cardputer + m5stick builds SUCCESS.
 Re-resolved all three envs: the trees below are unchanged since the previous stamp (no
-version drift), only the date and native count moved (844 → 902 over the 0.5.0 cycle,
-which added the config-form classifier and row suites).
+version drift), only the date and native count moved (902 → 920 over the 0.6.0 cycle,
+which added the config-input classifier and what's-new version-marker suites).
+
+Note on the shared package cache: `pio pkg list -e native` can report
+`framework-arduinoespressif32 @ 3.3.7` because resolving the host `native` platform pings
+the global package slot, but the `native` env builds with host gcc and never links that
+framework. The embedded envs pin platform `55.03.34`, which requires the 3.3.4 framework by
+exact URL; resolving either embedded env restores the slot to 3.3.4 + libs
+`sha.8410210c9a` (confirmed in the build metadata). CI builds the factory image in a clean
+cache, so the shipped bytes are the 3.3.4 tree recorded below.
 
 ---
 
