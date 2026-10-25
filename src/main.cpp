@@ -49,6 +49,7 @@
 #include "ui/screens/radio_screen.h"
 #include "ui/screens/modules_screen.h"
 #include "core/module_detection.h"
+#include "core/version_marker.h"
 #include "assets/generated_icons.h"
 #include "utils/bitmap_remapper.h"
 #include "utils/screenshot.h"
@@ -445,6 +446,16 @@ void setup() {
         [](const adversary::EventData& evt) { launchAttackTarget(evt); });
 
     showMenu();
+
+    // First boot after a version change surfaces the what's-new notes once, so OTA/M5Burner
+    // operators (who never open the GitHub changelog) notice shipped features. The marker is
+    // in NVS, not SD settings, so this still fires once on a cardless device (ADR-0121). Done
+    // after the no-SD toast above so the storage advisory is not skipped, and the marker is
+    // advanced here (not on dismiss) so a power cut before reading simply re-shows next boot.
+    if (adversary::VersionMarker::currentVersionIsNew()) {
+        navigateToScreen(adversary::ScreenId::WHATS_NEW);
+        adversary::VersionMarker::markCurrentVersionSeen();
+    }
 
     LOG_I("INIT", "Initialization complete. Entering main loop.");
 }

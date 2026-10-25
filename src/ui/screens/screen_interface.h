@@ -48,7 +48,8 @@ enum class ScreenId : uint8_t {
     USB_BADUSB,
     HID_MOUSE_JIGGLER,
     RADIO,
-    MODULES
+    MODULES,
+    WHATS_NEW
 };
 
 /**

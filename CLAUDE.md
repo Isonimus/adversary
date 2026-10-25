@@ -621,6 +621,10 @@ constexpr const char* SD_BASE_PATH = "/adversary";
 >    sections.
 > 3. Add the `CHANGELOG.md` section (newest first) with curated, user-facing bullets citing the
 >    slices/ADRs; update `README.md` feature/usage text only if the release changed it.
+>    **Rewrite `src/config/whats_new.h` for this release in the same commit** (ADR-0121): the
+>    on-device what's-new screen auto-shows these lines once after the update, so stale notes
+>    ship a wrong "what's new". Keep it operator-pitched and ~a screenful; do not repeat the
+>    version number (the heading shows `VERSION`).
 > 4. Verify before tagging: build all three envs **serially** and run `pio test -e native`; all
 >    green.
 > 5. Annotated tag — `git tag -a vX.Y.Z-alpha -m "Release vX.Y.Z-alpha"` on that commit — then

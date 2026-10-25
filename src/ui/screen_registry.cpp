@@ -27,6 +27,7 @@
 #include "ui/screens/settings_screen.h"
 #include "ui/screens/saved_networks_screen.h"
 #include "ui/screens/about_screen.h"
+#include "ui/screens/whats_new_screen.h"
 #include "ui/screens/whitelist_screen.h"
 #include "ui/screens/wardriving_screen.h"
 #include "ui/screens/ble_scanner_screen.h"
@@ -109,10 +110,16 @@ void registerAllScreens(ScreenManager& manager) {
                 LOG_D("SCREEN", "Navigating to Saved Networks");
                 ScreenManager::getInstance().setActiveScreen(ScreenId::SAVED_NETWORKS);
             });
+            s->setOnWhatsNewRequested([]() {
+                LOG_D("SCREEN", "Navigating to What's New");
+                ScreenManager::getInstance().setActiveScreen(ScreenId::WHATS_NEW);
+            });
             return s;
         });
     manager.registerFactory(ScreenId::SAVED_NETWORKS,
         []() -> IScreen* { return new SavedNetworksScreen(); });
+    manager.registerFactory(ScreenId::WHATS_NEW,
+        []() -> IScreen* { return new WhatsNewScreen(); });
     manager.registerFactory(ScreenId::WARDRIVING,
         []() -> IScreen* { return new WardrivingScreen(); });
     manager.registerFactory(ScreenId::BLE_SPAM,

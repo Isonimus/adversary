@@ -154,6 +154,11 @@ public:
         onSavedNetworksRequested_ = callback;
     }
 
+    using WhatsNewCallback = std::function<void()>;
+    void setOnWhatsNewRequested(WhatsNewCallback callback) {
+        onWhatsNewRequested_ = callback;
+    }
+
 private:
     void drawHeader(Canvas& canvas, const char* title);
     void drawFooter(Canvas& canvas);
@@ -193,6 +198,7 @@ private:
     TextInputPopup deviceNamePopup_;
     TextInputPopup macPopup_;
     SavedNetworksCallback onSavedNetworksRequested_;
+    WhatsNewCallback onWhatsNewRequested_;
     
     // Temporary values for editing (cast from Settings fields)
     int32_t tempKarmaChannel_;

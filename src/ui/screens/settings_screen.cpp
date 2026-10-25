@@ -147,7 +147,11 @@ void SettingsScreen::buildSettingsList() {
     
     // System section
     items_[itemCount_++] = SettingItem::header("-- System --");
-    
+
+    // On-demand re-read of the release notes auto-shown once after an update (slice-0122).
+    items_[itemCount_++] = SettingItem::action("What's New");
+
+
     // Device Name (editable via text input popup)
     auto& sysSettings = SettingsManager::getInstance().getMutable();
     snprintf(deviceNameLabel_, sizeof(deviceNameLabel_), "Device: %s", sysSettings.system.deviceName);
@@ -412,6 +416,10 @@ bool SettingsScreen::handleInput(char key) {
                     if (strcmp(label, "Saved Networks") == 0) {
                         if (onSavedNetworksRequested_) {
                             onSavedNetworksRequested_();
+                        }
+                    } else if (strcmp(label, "What's New") == 0) {
+                        if (onWhatsNewRequested_) {
+                            onWhatsNewRequested_();
                         }
                     } else if (strncmp(label, "Device:", 7) == 0) {
                         auto& settings = SettingsManager::getInstance().getMutable();
