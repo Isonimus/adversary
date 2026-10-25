@@ -1058,14 +1058,18 @@ void HandshakeScreen::drawConfig(Canvas& canvas) {
         canvas.setCursor(4, y);
         canvas.print("-- Auto Hunt --");
         y += 14;
-        canvas.setCursor(4, y);
-        canvas.print("Uses values from Settings menu");
-        y += 14;
+        // Auto Hunt runs on built-in timing (the AUTO_*_TIME constants, not Settings) and the
+        // only Settings input it honors is the whitelist (selectNextTarget skips matches). The
+        // copy says that, replacing the old, false "Uses values from Settings menu" which
+        // implied its scan/attack tuning came from Settings (ADR-0111 / slice-0123).
         canvas.setCursor(4, y);
         canvas.print("Scans, targets, and captures");
         y += 14;
         canvas.setCursor(4, y);
-        canvas.print("handshakes automatically");
+        canvas.print("handshakes automatically.");
+        y += 14;
+        canvas.setCursor(4, y);
+        canvas.print("Skips whitelisted networks.");
         y += 20;
 
         // Start button - shared ActionButton (ADR-0087). Its one row always has focus.
