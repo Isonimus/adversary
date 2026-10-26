@@ -611,6 +611,13 @@ void DeauthScreen::handleBack()
 
 void DeauthScreen::startAttack()
 {
+    // Precondition: a target must be selected. Every caller already guards on
+    // hasTarget_; this fail-safe refuses rather than fabricating a bogus target
+    // if a future caller ever forgets that guard (replaces a dead test-BSSID path).
+    if (!hasTarget_) {
+        return;
+    }
+
     DeauthConfig config;
     config.setApBssid(targetBssid_);
     config.targetType = targetType_;
@@ -619,13 +626,7 @@ void DeauthScreen::startAttack()
     config.delayMs = delayMs_;
     config.channel = targetChannel_;
     config.sendDisassoc = sendDisassoc_;
-    
-    // Use a test BSSID if no target set
-    if (!hasTarget_) {
-        uint8_t testBssid[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
-        config.setApBssid(testBssid);
-    }
-    
+
     if (DeauthAttack::getInstance().start(config)) {
         screenState_ = DeauthScreenState::RUNNING;
         needsRedraw_ = true;
