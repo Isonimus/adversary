@@ -23,6 +23,19 @@ void BleSpoofScreen::setTarget(const BLEDeviceInfo& device) {
     m_target = device;
 }
 
+void BleSpoofScreen::setParams(const ScreenParams& params) {
+    // Rebuild a minimal clone target from the params. NimBLEAddress(uint8_t[6]) reverse-copies
+    // its input, so feed it the reversed bytes to get an address whose getNative() matches the
+    // original device's (the order the scanner copied into params.bssid). name must be
+    // non-empty: it is what gates and labels the CLONE advertisement (ble_spanner.cpp).
+    uint8_t rev[6];
+    for (int i = 0; i < 6; ++i) rev[i] = params.bssid[5 - i];
+    BLEDeviceInfo device{};
+    device.address = NimBLEAddress(rev);
+    device.name = params.ssid;
+    setTarget(device);
+}
+
 void BleSpoofScreen::show() {
     m_active = true;
     m_shouldExit = false;

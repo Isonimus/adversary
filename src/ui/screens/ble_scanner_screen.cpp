@@ -11,7 +11,6 @@
 #include "modules/system/system_manager.h"
 
 #include "ui/screens/ble_apple_attack_screen.h"
-#include "ui/screens/ble_spoof_screen.h"
 #include "ui/screen_manager.h"
 #include "core/event_bus.h"
 #include "core/event_types.h"
@@ -304,11 +303,20 @@ void BleScannerScreen::handleAction(char action) {
         }
         case 'S':
         case 's': {
-            auto* spoofScreen = static_cast<BleSpoofScreen*>(ScreenManager::getInstance().getScreen(ScreenId::BLE_SPOOF));
-            if (spoofScreen) {
-                spoofScreen->setTarget(m_contextDevice);
-                ScreenManager::getInstance().setActiveScreen(ScreenId::BLE_SPOOF);
-            }
+            // Hand the locked device to the identity spoofer. Queued, like the tracker above:
+            // getScreen() only resolves statically-registered screens, but BLE_SPOOF is
+            // factory-registered, so the old direct getScreen()->setTarget() path returned
+            // nullptr and did nothing. The main loop drains this after input unwinds, so
+            // navigating away cannot delete this screen mid-call (ADR-0128 launch pattern).
+            EventData evt(EventType::BLE_SPOOF_TARGET_SELECTED);
+            evt.payload.attackTarget.targetScreen = static_cast<int16_t>(ScreenId::BLE_SPOOF);
+            memcpy(evt.payload.attackTarget.bssid, m_contextDevice.address.getNative(), 6);
+            const std::string& name = hasAdvertisedName(m_contextDevice)
+                                          ? m_contextDevice.name
+                                          : ble::addressToString(m_contextDevice.address);
+            strncpy(evt.payload.attackTarget.ssid, name.c_str(), 32);
+            evt.payload.attackTarget.ssid[32] = '\0';
+            EventBus::getInstance().queue(evt);
             break;
         }
         case 'A':

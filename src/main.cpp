@@ -224,6 +224,25 @@ static void launchWifiApTracker(const adversary::EventData& evt) {
 }
 
 /**
+ * @brief Navigate to the BLE identity spoofer for the device chosen in the BLE scanner.
+ *
+ * Handles BLE_SPOOF_TARGET_SELECTED. The old scanner path reached into the spoof screen with
+ * getScreen()->setTarget(), but getScreen() resolves only statically-registered screens and
+ * BLE_SPOOF is factory-registered, so it returned nullptr and the action did nothing. Routing
+ * through a queued event + navigateWithParams (like the trackers) injects the target via the
+ * params DI channel and removes the setActiveScreen-mid-input use-after-free. Passive: the
+ * spoofer only advertises, so no stopAllAttacks and no ATTACKING transition.
+ */
+static void launchBleSpoof(const adversary::EventData& evt) {
+    screenMgr.setReturnTarget(screenMgr.getActiveScreenId(), stateMachine.getState());
+    adversary::IScreen::ScreenParams p;
+    memcpy(p.bssid, evt.payload.attackTarget.bssid, 6);
+    strncpy(p.ssid, evt.payload.attackTarget.ssid, 32);
+    p.ssid[32] = '\0';
+    screenMgr.navigateWithParams(adversary::ScreenId::BLE_SPOOF, p);
+}
+
+/**
  * @brief Log reset reason to SD card if it was a crash
  * 
  * Checks esp_reset_reason() on boot and appends crash info to 
@@ -490,6 +509,12 @@ void setup() {
     adversary::EventBus::getInstance().subscribe(
         adversary::EventType::WIFI_TRACK_TARGET_SELECTED,
         [](const adversary::EventData& evt) { launchWifiApTracker(evt); });
+
+    // Route a BLE scanner "Spoof Identity" selection to the identity spoofer. Previously a
+    // dead no-op (factory screen unreachable via getScreen); now a queued target event.
+    adversary::EventBus::getInstance().subscribe(
+        adversary::EventType::BLE_SPOOF_TARGET_SELECTED,
+        [](const adversary::EventData& evt) { launchBleSpoof(evt); });
 
     showMenu();
 

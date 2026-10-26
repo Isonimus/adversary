@@ -73,6 +73,7 @@ enum class EventType : uint16_t {
     BLE_CONNECTED = 305,
     BLE_DISCONNECTED = 306,
     BLE_TRACK_TARGET_SELECTED = 307,  // BLE scanner: operator chose a device to proximity-track
+    BLE_SPOOF_TARGET_SELECTED = 308,  // BLE scanner: operator chose a device to clone/spoof
 
     // =========================================================================
     // RFID (320-329)

@@ -27,6 +27,11 @@ public:
     
     void setTarget(const BLEDeviceInfo& device);
 
+    /// The target arrives via the navigation params when launched from the BLE scanner:
+    /// bssid = the device address bytes (NimBLEAddress::getNative order), ssid = the name.
+    /// Only name + address are carried because the CLONE path uses nothing else.
+    void setParams(const ScreenParams& params) override;
+
     const char* getName() const override { return "BLE Spoof"; }
     ScreenId getId() const override { return ScreenId::BLE_SPOOF; }
     bool isVisible() const override { return m_active; }
