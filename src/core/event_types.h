@@ -35,7 +35,8 @@ enum class EventType : uint16_t {
     BEACON_SPAM_TICK = 204,
     PROBE_FLOOD_TICK = 205,
     ATTACK_TARGET_SELECTED = 206,  // Scanner/Sniffer: operator chose an attack + its target
-    
+    WIFI_TRACK_TARGET_SELECTED = 207,  // Scanner: operator chose an AP to proximity-track
+
     // =========================================================================
     // Handshake Capture (220-229)
     // =========================================================================

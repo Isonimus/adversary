@@ -25,6 +25,19 @@ static void publishAttackTarget(ScreenId target, const NetworkInfo& net) {
     EventBus::getInstance().publish(evt);
 }
 
+// Hand the selected AP to the proximity tracker. Queued, not published: the main loop drains
+// it after this input unwinds, so navigating away cannot delete this screen mid-call (the
+// UAF the published attack path above is latent for, tracked separately). ADR-0130/slice-0131.
+static void queueTrackTarget(const NetworkInfo& net) {
+    EventData evt(EventType::WIFI_TRACK_TARGET_SELECTED);
+    evt.payload.attackTarget.targetScreen = static_cast<int16_t>(ScreenId::WIFI_AP_TRACKER);
+    memcpy(evt.payload.attackTarget.bssid, net.bssid, 6);
+    strncpy(evt.payload.attackTarget.ssid, net.ssid.c_str(), 32);
+    evt.payload.attackTarget.ssid[32] = '\0';
+    evt.payload.attackTarget.channel = net.channel;
+    EventBus::getInstance().queue(evt);
+}
+
 ScannerScreen::ScannerScreen()
     : m_scanner(WiFiScanner::getInstance())
     , m_sortMode(SortMode::SIGNAL)
@@ -259,7 +272,8 @@ void ScannerScreen::setupActionMenu() {
     m_actionMenu.addItem('H', "Handshake Capture", true);
     m_actionMenu.addItem('T', "Evil Twin AP", true);
     m_actionMenu.addItem('P', "Probe Flood", true);
-    
+    m_actionMenu.addItem('L', "Locate AP", true);
+
     // Connect/Disconnect option
     bool isConnected = WiFiConnection::getInstance().isConnectedTo(m_selectedNetwork.ssid.c_str());
     if (isConnected) {
@@ -306,7 +320,13 @@ void ScannerScreen::handleAction(char action) {
             LOG_I("SCANNER", "Probe Flood selected for %s", m_selectedNetwork.ssid.c_str());
             publishAttackTarget(ScreenId::PROBE_FLOOD, m_selectedNetwork);
             break;
-            
+
+        case 'L':  // Locate AP (proximity tracker)
+        case 'l':
+            LOG_I("SCANNER", "Locate selected for %s", m_selectedNetwork.ssid.c_str());
+            queueTrackTarget(m_selectedNetwork);
+            break;
+
         case 'C':  // Connect/Disconnect
         case 'c': {
             bool isConnected = WiFiConnection::getInstance().isConnectedTo(m_selectedNetwork.ssid.c_str());

@@ -22,6 +22,7 @@ enum class ScreenId : uint8_t {
     MENU,
     SCANNER,
     SNIFFER,
+    WIFI_AP_TRACKER,
     DEAUTH,
     HANDSHAKE_AUTO,
     HANDSHAKE_MANUAL,

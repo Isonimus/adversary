@@ -206,6 +206,24 @@ static void launchBleTracker(const adversary::EventData& evt) {
 }
 
 /**
+ * @brief Navigate to the WiFi-AP proximity tracker for the AP chosen in the WiFi scanner.
+ *
+ * Handles WIFI_TRACK_TARGET_SELECTED (ADR-0130, slice-0131). Passive like launchBleTracker:
+ * no stopAllAttacks and no ATTACKING transition, since the tracker only listens to beacons.
+ * The BSSID rides bssid, the SSID rides ssid, and the AP's channel rides channel so the
+ * tracker can lock to it. The breadcrumb sends ESC / a dropped lock back to the scanner.
+ */
+static void launchWifiApTracker(const adversary::EventData& evt) {
+    screenMgr.setReturnTarget(screenMgr.getActiveScreenId(), stateMachine.getState());
+    adversary::IScreen::ScreenParams p;
+    memcpy(p.bssid, evt.payload.attackTarget.bssid, 6);
+    strncpy(p.ssid, evt.payload.attackTarget.ssid, 32);
+    p.ssid[32] = '\0';
+    p.channel = evt.payload.attackTarget.channel;
+    screenMgr.navigateWithParams(adversary::ScreenId::WIFI_AP_TRACKER, p);
+}
+
+/**
  * @brief Log reset reason to SD card if it was a crash
  * 
  * Checks esp_reset_reason() on boot and appends crash info to 
@@ -467,6 +485,11 @@ void setup() {
     adversary::EventBus::getInstance().subscribe(
         adversary::EventType::BLE_TRACK_TARGET_SELECTED,
         [](const adversary::EventData& evt) { launchBleTracker(evt); });
+
+    // Route a WiFi scanner "Locate AP" selection to the proximity tracker (ADR-0130).
+    adversary::EventBus::getInstance().subscribe(
+        adversary::EventType::WIFI_TRACK_TARGET_SELECTED,
+        [](const adversary::EventData& evt) { launchWifiApTracker(evt); });
 
     showMenu();
 

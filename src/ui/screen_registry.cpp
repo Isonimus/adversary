@@ -45,6 +45,7 @@
 #include "ui/screens/server_status_screen.h"
 #include "ui/screens/radio_screen.h"
 #include "ui/screens/modules_screen.h"
+#include "ui/screens/wifi_ap_tracker_screen.h"
 
 namespace adversary {
 
@@ -54,6 +55,8 @@ void registerAllScreens(ScreenManager& manager) {
         []() -> IScreen* { return new ScannerScreen(); });
     manager.registerFactory(ScreenId::SNIFFER,
         []() -> IScreen* { return new SnifferScreen(); });
+    manager.registerFactory(ScreenId::WIFI_AP_TRACKER,
+        []() -> IScreen* { return new WifiApTrackerScreen(); });
 
     manager.registerFactory(ScreenId::BLE_SCANNER,
         []() -> IScreen* { return new BleScannerScreen(); });
