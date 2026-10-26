@@ -513,6 +513,9 @@ void loop() {
     if (millis() - lastHeartbeat > 5000) {
         lastHeartbeat = millis();
         LOG_D("MAIN", "Loop heartbeat. Heap: %u", (unsigned int)ESP.getFreeHeap());
+        // Snapshot the live heap into RTC so a later crash logs the dying heap, not a
+        // boot-time reading (ADR-0126).
+        adversary::SystemManager::getInstance().recordHeapSnapshot();
     }
 
     // Screen-specific updates via adversary::ScreenManager

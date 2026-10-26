@@ -28,6 +28,15 @@ public:
     void logResetReason();
 
     /**
+     * @brief Sample the live heap into the RTC flight recorder (ADR-0126).
+     *
+     * Called periodically from the main loop. RTC memory survives a soft reset (PANIC/
+     * WDT), so the last sample taken before a crash is what logResetReason writes to
+     * crash.log on the next boot: the dying heap, not a healthy boot-time snapshot.
+     */
+    void recordHeapSnapshot();
+
+    /**
      * @brief Get the cumulative crash count (resets on POWERON)
      */
     uint16_t getCrashCount() const { return crashCount_; }

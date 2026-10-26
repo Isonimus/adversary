@@ -3,13 +3,17 @@
 #include <SD.h>
 #include <WiFi.h>
 #include <esp_wifi.h>
+#include <ctime>
+#include <cstring>
 #include "../storage/capture_registry.h"
 #include "../storage/settings_manager.h"
 #include "../wifi/wifi_scanner.h"
 #include "../ble/ble_scanner.h"
 #include "../ble/ble_spanner.h"
+#include "core/crash_report.h"
 #include "core/heap_policy.h"
 #include "inactivity.h"
+#include "time_manager.h"
 #include "utils/log.h"
 
 #if defined(TARGET_CARDPUTER)
@@ -29,6 +33,38 @@ namespace adversary {
 // RTC memory survives soft resets but not power cycles
 RTC_DATA_ATTR static uint16_t rtcCrashCount = 0;
 
+// RTC flight recorder (ADR-0126): the last heap sample the main loop took. NOINIT so
+// it survives a soft reset (PANIC/WDT) untouched by the C runtime; a magic sentinel
+// tells a genuine sample from the garbage left in RTC RAM after a cold power-on or
+// brownout, so logResetReason never reports stale numbers as crash state.
+namespace {
+constexpr uint32_t HEAP_RECORDER_MAGIC = 0xAD5A11ED;
+struct HeapRecorder {
+    uint32_t magic;
+    adversary::HeapSnapshot snapshot;
+    uint32_t epochSec;  ///< Wall clock at the sample, 0 when the clock was unsynced
+};
+
+// Translate the IDF reset enum into the firmware's host-testable ResetReason
+// (ADR-0126). Thin by design: all classification lives in classifyReset.
+adversary::ResetReason mapResetReason(esp_reset_reason_t reason) {
+    switch (reason) {
+        case ESP_RST_PANIC:     return adversary::ResetReason::Panic;
+        case ESP_RST_INT_WDT:   return adversary::ResetReason::IntWdt;
+        case ESP_RST_TASK_WDT:  return adversary::ResetReason::TaskWdt;
+        case ESP_RST_WDT:       return adversary::ResetReason::OtherWdt;
+        case ESP_RST_BROWNOUT:  return adversary::ResetReason::Brownout;
+        case ESP_RST_SDIO:      return adversary::ResetReason::ExternalSdio;
+        case ESP_RST_POWERON:   return adversary::ResetReason::PowerOn;
+        case ESP_RST_SW:        return adversary::ResetReason::Software;
+        case ESP_RST_DEEPSLEEP: return adversary::ResetReason::DeepSleep;
+        default:                return adversary::ResetReason::Unknown;
+    }
+}
+} // namespace
+
+RTC_NOINIT_ATTR static HeapRecorder rtcHeapRecorder;
+
 SystemManager::SystemManager()
     : m_isStabilized(false)
     , m_canvasPurged(false)
@@ -37,101 +73,79 @@ SystemManager::SystemManager()
     crashCount_ = rtcCrashCount;
 }
 
+void SystemManager::recordHeapSnapshot() {
+    rtcHeapRecorder.snapshot.freeHeap = ESP.getFreeHeap();
+    rtcHeapRecorder.snapshot.largestFreeBlock =
+        heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    rtcHeapRecorder.snapshot.minFreeHeap = ESP.getMinFreeHeap();
+    rtcHeapRecorder.snapshot.uptimeMs = millis();
+
+    TimeManager& time = TimeManager::getInstance();
+    rtcHeapRecorder.epochSec =
+        time.isSynced() ? static_cast<uint32_t>(time.now()) : 0;
+
+    rtcHeapRecorder.magic = HEAP_RECORDER_MAGIC;
+}
+
 void SystemManager::logResetReason() {
-    esp_reset_reason_t reason = esp_reset_reason();
-    
-    // Only log abnormal resets (crashes)
-    bool isCrash = false;
-    const char* reasonStr = "";
-    
-    switch (reason) {
-        case ESP_RST_PANIC:
-            reasonStr = "PANIC (Exception/Crash)";
-            isCrash = true;
-            break;
-        case ESP_RST_INT_WDT:
-            reasonStr = "INT_WDT (Interrupt Watchdog)";
-            isCrash = true;
-            break;
-        case ESP_RST_TASK_WDT:
-            reasonStr = "TASK_WDT (Task Watchdog)";
-            isCrash = true;
-            break;
-        case ESP_RST_WDT:
-            reasonStr = "WDT (Other Watchdog)";
-            isCrash = true;
-            break;
-        case ESP_RST_BROWNOUT:
-            reasonStr = "BROWNOUT (Power Issue)";
-            isCrash = true;
-            break;
-        case ESP_RST_SDIO:
-            reasonStr = "SDIO (External Reset)";
-            isCrash = true;
-            break;
-        case ESP_RST_POWERON:
-            reasonStr = "POWERON (Normal)";
-            // Reset crash counter on clean power cycle
-            rtcCrashCount = 0;
-            crashCount_ = 0;
-            break;
-        case ESP_RST_SW:
-            reasonStr = "SW (Software Reset)";
-            break;
-        case ESP_RST_DEEPSLEEP:
-            reasonStr = "DEEPSLEEP (Wakeup)";
-            break;
-        default:
-            reasonStr = "UNKNOWN";
-            break;
-    }
-    
-    LOG_I("BOOT", "Reset reason: %s (crash count: %d)", reasonStr, rtcCrashCount);
-    
-    if (!isCrash) {
-        rtcCrashCount = 0;  // Reset on successful boot
+    const ResetClassification cls = classifyReset(mapResetReason(esp_reset_reason()));
+
+    // Consume the flight recorder: capture whether this boot's RTC survived, then
+    // invalidate it so a crash early in *this* session (before it has sampled) reports
+    // "unavailable" rather than the previous session's stale snapshot. The struct's
+    // fields stay readable below; only the validity magic is cleared.
+    const bool snapshotValid = rtcHeapRecorder.magic == HEAP_RECORDER_MAGIC;
+    rtcHeapRecorder.magic = 0;
+
+    LOG_I("BOOT", "Reset reason: %s (crash count: %d)", cls.name, rtcCrashCount);
+
+    if (!cls.isCrash) {
+        rtcCrashCount = 0;  // Reset streak on a clean boot
         crashCount_ = 0;
         return;
     }
-    
-    // Increment crash counter
+
     rtcCrashCount++;
     crashCount_ = rtcCrashCount;
-    
+
     // Bootloop protection: skip SD write if too many consecutive crashes
     if (rtcCrashCount > 3) {
         LOG_W("BOOT", "%d consecutive crashes! Skipping SD log to prevent bootloop.", rtcCrashCount);
         return;
     }
-    
-    // Log crash to SD card
-    LOG_W("BOOT", "CRASH DETECTED - Logging to SD card...");
-    
-    // Ensure logs directory exists (SD might not be mounted yet in main setup, 
+
+    LOG_W("BOOT", "CRASH DETECTED - logging to SD card...");
+
+    // Format the stored epoch into a readable stamp so entries correlate to a session.
+    char timestamp[32];
+    if (snapshotValid && rtcHeapRecorder.epochSec != 0) {
+        const time_t when = static_cast<time_t>(rtcHeapRecorder.epochSec);
+        struct tm utc;
+        gmtime_r(&when, &utc);
+        strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S UTC", &utc);
+    } else {
+        strncpy(timestamp, "unsynced", sizeof(timestamp));
+        timestamp[sizeof(timestamp) - 1] = '\0';
+    }
+
+    char entry[512];
+    formatCrashEntry(entry, sizeof(entry), cls, rtcCrashCount,
+                     snapshotValid, rtcHeapRecorder.snapshot, timestamp);
+
+    // Ensure logs directory exists (SD might not be mounted yet in main setup,
     // but logResetReason is called after SDManager::init in main.cpp)
     if (!SD.exists("/adversary/logs")) {
         SD.mkdir("/adversary/logs");
     }
-    
+
     File logFile = SD.open("/adversary/logs/crash.log", FILE_APPEND);
     if (!logFile) {
         LOG_E("BOOT", "Failed to open crash log file!");
         return;
     }
-    
-    // Write crash entry
-    logFile.printf("========================================\n");
-    logFile.printf("CRASH DETECTED (count: %d)\n", rtcCrashCount);
-    logFile.printf("Reason: %s\n", reasonStr);
-    logFile.printf("Boot Time: %lu ms since start\n", millis());
-    logFile.printf("Free Heap: %lu bytes\n", (unsigned long)ESP.getFreeHeap());
-    logFile.printf("Min Free Heap: %lu bytes\n", (unsigned long)ESP.getMinFreeHeap());
-    logFile.printf("Heap Size: %lu bytes\n", (unsigned long)ESP.getHeapSize());
-    logFile.printf("Free PSRAM: %lu bytes\n", (unsigned long)ESP.getFreePsram());
-    logFile.printf("========================================\n\n");
-    
+    logFile.print(entry);
     logFile.close();
-    
+
     LOG_I("BOOT", "Crash logged to /adversary/logs/crash.log");
 }
 
