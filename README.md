@@ -266,7 +266,7 @@ esptool --chip esp32s3 write-flash 0x0 adversary-cardputer-<tag>-factory.bin
 ```
 
 **With M5Burner**: search for **Adversary** in the
-[M5Burner catalog](https://burner.m5stack.com/F6936P) and burn it directly — no manual file
+[M5Burner catalog](https://burner.m5stack.com/) and burn it directly — no manual file
 handling. (Or add the `-factory.bin` as a *User Custom* firmware, the pre-catalog path.)
 
 **With M5Launcher**: point it at the `-app.bin` release URL to install over OTA.
