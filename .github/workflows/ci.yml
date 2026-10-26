@@ -174,3 +174,49 @@ jobs:
 
       - name: Lint src for new raw Serial.print*
         run: node scripts/lint-raw-serial.mjs src
+
+  # Verifies the two third-party patched build ZIPs (pioarduino platform, bruce arduino-libs)
+  # against the SHA256s in scripts/build-zip-checksums.json, so a swapped upstream release
+  # asset cannot enter a build unnoticed — the URL pins a location, not the bytes. See
+  # ADR-0125. The bruce ZIP is 549 MB and the build matrix already caches ~/.platformio, so
+  # this gate runs only when the bytes ship or change: a v* release tag, or a commit touching
+  # platformio.ini or the checksum/lint files. A first-party git diff makes that decision, so
+  # the integrity gate pulls in no third-party action of its own.
+  build-zip-integrity:
+    name: build-zip-integrity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Decide whether to run
+        id: decide
+        shell: bash
+        run: |
+          run=no
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            case "${{ github.ref_name }}" in v*) run=yes ;; esac
+          else
+            if [ -n "${{ github.event.pull_request.base.sha }}" ]; then
+              base="${{ github.event.pull_request.base.sha }}"
+            else
+              base="${{ github.event.before }}"
+            fi
+            watched='^(platformio\.ini|scripts/build-zip-checksums\.json|scripts/lint-build-zip-integrity\.(mjs|test\.mjs))$'
+            if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ] || ! git rev-parse -q --verify "$base^{commit}" >/dev/null; then
+              run=yes   # no usable base (new branch / force-push): verify to be safe
+            elif git diff --name-only "$base" "${{ github.sha }}" | grep -qE "$watched"; then
+              run=yes
+            fi
+          fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+          echo "build-zip-integrity will run: $run"
+
+      - name: Self-test the lint
+        if: steps.decide.outputs.run == 'yes'
+        run: node --test scripts/lint-build-zip-integrity.test.mjs
+
+      - name: Verify pinned ZIP checksums against platformio.ini
+        if: steps.decide.outputs.run == 'yes'
+        run: node scripts/lint-build-zip-integrity.mjs

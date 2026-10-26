@@ -13,9 +13,14 @@ listed here, that is drift — investigate before trusting the build.
 - **Verify:** `pio pkg list -e cardputer` (and `-e m5stick`, `-e native`) must match the
   trees below.
 - **Bump:** change the pin in `platformio.ini`, re-resolve, rebuild all three envs, run
-  `pio test -e native`, then update this snapshot **in the same commit**.
+  `pio test -e native`, then update this snapshot **in the same commit**. If the bump changes
+  a platform/arduino-libs release-ZIP URL, also re-fetch the asset, recompute its SHA256, and
+  update `scripts/build-zip-checksums.json` in the same commit (ADR-0125).
 - **Platform / arduino-libs** are pinned by exact release-ZIP URL in `platformio.ini`
-  (`[env:cardputer]` / `[env:m5stick]`); the resolved versions are recorded below.
+  (`[env:cardputer]` / `[env:m5stick]`); the resolved versions are recorded below. The bytes
+  at those two URLs are integrity-pinned by SHA256 in `scripts/build-zip-checksums.json`,
+  verified by CI's `build-zip-integrity` gate (ADR-0125), since a GitHub release asset can be
+  re-uploaded at a fixed URL.
 - **Gate:** CI's `dep-lock-staleness` job fails the build when the "Last verified" date
   below predates the latest release tag, so a release can't be cut on an unverified
   snapshot (slice-0080). Keeping this stamp current on every release keeps the gate green.

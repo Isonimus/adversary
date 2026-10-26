@@ -1,0 +1,7 @@
+{
+  "_comment": "Expected SHA256 of the third-party patched build ZIPs pinned by URL in platformio.ini. Verified by scripts/lint-build-zip-integrity.mjs (ADR-0125). On a pin change, re-fetch the asset, recompute its hash, and update the matching entry in the same commit.",
+  "checksums": {
+    "https://github.com/pioarduino/platform-espressif32/releases/download/55.03.34/platform-espressif32.zip": "sha256:16ba6095ed92eef98cb497df281bdcdf4cb4cd2f7d40671fb19df17f98517bb1",
+    "https://github.com/bmorcelli/esp32-arduino-lib-builder/releases/download/idf-release_v5.5/bruce_esp32-arduino-libs-20251205-131242.zip": "sha256:e1e8a953b37072470bacfd11d63a00579f600fbe4d20b43c5522feb47dfa32be"
+  }
+}
