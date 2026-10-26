@@ -31,6 +31,7 @@
 #include "ui/screens/whitelist_screen.h"
 #include "ui/screens/wardriving_screen.h"
 #include "ui/screens/ble_scanner_screen.h"
+#include "ui/screens/ble_tracker_screen.h"
 #include "ui/screens/rfid_screen.h"
 #include "ui/screens/ir_tvbgone_screen.h"
 #include "ui/screens/ir_record_screen.h"
@@ -56,6 +57,8 @@ void registerAllScreens(ScreenManager& manager) {
 
     manager.registerFactory(ScreenId::BLE_SCANNER,
         []() -> IScreen* { return new BleScannerScreen(); });
+    manager.registerFactory(ScreenId::BLE_TRACKER,
+        []() -> IScreen* { return new BleTrackerScreen(); });
 
     // Attack screens (setParams override for cross-screen target hand-off).
     manager.registerFactory(ScreenId::DEAUTH,

@@ -13,8 +13,12 @@
 #include "ui/screens/ble_apple_attack_screen.h"
 #include "ui/screens/ble_spoof_screen.h"
 #include "ui/screen_manager.h"
+#include "core/event_bus.h"
+#include "core/event_types.h"
+#include "core/event_data.h"
 #include "utils/log.h"
 #include <algorithm>
+#include <cstring>
 
 namespace adversary {
 
@@ -266,8 +270,9 @@ void BleScannerScreen::setupActionMenu(const BLEDeviceInfo& device) {
     actionMenu_.clearItems();
     actionMenu_.setTitle((hasAdvertisedName(device) ? device.name : ble::addressToString(device.address)).c_str());
     
+    actionMenu_.addItem('T', "Track device", true);
     actionMenu_.addItem('S', "Spoof Identity", true);
-    
+
     // Add vendor-specific attacks
     if (device.manufacturerId == 0x004C) { // Apple
         actionMenu_.addItem('A', "Apple Attack", true);
@@ -280,6 +285,23 @@ void BleScannerScreen::setupActionMenu(const BLEDeviceInfo& device) {
 
 void BleScannerScreen::handleAction(char action) {
     switch (action) {
+        case 'T':
+        case 't': {
+            // Hand the locked device to the proximity tracker. Queued (not published):
+            // the main loop drains it after this input unwinds, so navigating away cannot
+            // delete this screen mid-call. The 6-byte getNative() address rides bssid, the
+            // display name rides ssid (ADR-0128, slice-0129).
+            EventData evt(EventType::BLE_TRACK_TARGET_SELECTED);
+            evt.payload.attackTarget.targetScreen = static_cast<int16_t>(ScreenId::BLE_TRACKER);
+            memcpy(evt.payload.attackTarget.bssid, m_contextDevice.address.getNative(), 6);
+            const std::string& name = hasAdvertisedName(m_contextDevice)
+                                          ? m_contextDevice.name
+                                          : ble::addressToString(m_contextDevice.address);
+            strncpy(evt.payload.attackTarget.ssid, name.c_str(), 32);
+            evt.payload.attackTarget.ssid[32] = '\0';
+            EventBus::getInstance().queue(evt);
+            break;
+        }
         case 'S':
         case 's': {
             auto* spoofScreen = static_cast<BleSpoofScreen*>(ScreenManager::getInstance().getScreen(ScreenId::BLE_SPOOF));

@@ -188,6 +188,24 @@ static void launchAttackTarget(const adversary::EventData& evt) {
 }
 
 /**
+ * @brief Navigate to the BLE proximity tracker for the device chosen in the BLE scanner.
+ *
+ * Handles BLE_TRACK_TARGET_SELECTED (ADR-0128, slice-0129). Passive, unlike
+ * launchAttackTarget: no stopAllAttacks and no ATTACKING transition, since tracking only
+ * listens. The address rides bssid (NimBLEAddress::getNative order) and the name rides ssid.
+ * The breadcrumb sends ESC / a dropped lock back to the originating BLE scanner, not the root
+ * menu (slice-0031).
+ */
+static void launchBleTracker(const adversary::EventData& evt) {
+    screenMgr.setReturnTarget(screenMgr.getActiveScreenId(), stateMachine.getState());
+    adversary::IScreen::ScreenParams p;
+    memcpy(p.bssid, evt.payload.attackTarget.bssid, 6);
+    strncpy(p.ssid, evt.payload.attackTarget.ssid, 32);
+    p.ssid[32] = '\0';
+    screenMgr.navigateWithParams(adversary::ScreenId::BLE_TRACKER, p);
+}
+
+/**
  * @brief Log reset reason to SD card if it was a crash
  * 
  * Checks esp_reset_reason() on boot and appends crash info to 
@@ -444,6 +462,11 @@ void setup() {
     adversary::EventBus::getInstance().subscribe(
         adversary::EventType::ATTACK_TARGET_SELECTED,
         [](const adversary::EventData& evt) { launchAttackTarget(evt); });
+
+    // Route a BLE scanner "Track device" selection to the proximity tracker (ADR-0128).
+    adversary::EventBus::getInstance().subscribe(
+        adversary::EventType::BLE_TRACK_TARGET_SELECTED,
+        [](const adversary::EventData& evt) { launchBleTracker(evt); });
 
     showMenu();
 

@@ -35,6 +35,7 @@ enum class ScreenId : uint8_t {
     WHITELIST,
     WARDRIVING,
     BLE_SCANNER,
+    BLE_TRACKER,
     RFID,
     INFRARED_TVB_GONE,
     INFRARED_RECORD,
