@@ -6,12 +6,14 @@
 #include "ble_spoof_screen.h"
 #include "ui/theme.h"
 #include "ui/components/status_bar.h"
+#include "ui/screen_manager.h"  // cold launch with no target routes to the BLE scanner (ADR-0092 idiom)
 #include "modules/ble/ble_utils.h"
 
 namespace adversary {
 
 BleSpoofScreen::BleSpoofScreen()
-    : m_active(false)
+    : m_haveTarget(false)
+    , m_active(false)
     , m_spoofing(false)
     , m_shouldExit(false)
     , m_needsRedraw(true)
@@ -21,6 +23,7 @@ BleSpoofScreen::BleSpoofScreen()
 
 void BleSpoofScreen::setTarget(const BLEDeviceInfo& device) {
     m_target = device;
+    m_haveTarget = true;  // the single assignment point: both setParams and direct callers pass here
 }
 
 void BleSpoofScreen::setParams(const ScreenParams& params) {
@@ -41,9 +44,11 @@ void BleSpoofScreen::show() {
     m_shouldExit = false;
     m_needsRedraw = true;
     m_spoofing = false;
-    
+
+    // Without a target (cold launch from the BLE menu) ENTER cannot start a clone, so it offers
+    // to go pick one instead: the (select from scanner) navigation idiom (ADR-0092).
     footerHints_.setHints({
-        {'\n', "Start Spoof", true},
+        {'\n', m_haveTarget ? "Start Spoof" : "Select Target", true},
         {'`', "Back", true}
     });
 }
@@ -77,21 +82,44 @@ void BleSpoofScreen::render(Canvas& canvas) {
 
 void BleSpoofScreen::drawStatus(Canvas& canvas) {
     int y = 35;
+
+    // Cold launch: no device was injected, so there is no persona to clone. Show the scanner-target
+    // placeholder instead of a fake all-zero persona, and stop here (ENTER routes to the scanner).
+    if (!m_haveTarget) {
+        canvas.setTextColor(theme::TEXT_SECONDARY());
+        canvas.setCursor(10, y);
+        canvas.print("Active Persona:");
+        y += 15;
+
+        canvas.setTextColor(theme::TEXT_DISABLED());
+        canvas.setCursor(15, y);
+        canvas.print("(select from scanner)");
+        y += 20;
+
+        canvas.setTextColor(theme::TEXT_DISABLED());
+        canvas.setCursor(10, y);
+        canvas.print("Pick a device in the BLE Scanner");
+        y += 12;
+        canvas.setCursor(10, y);
+        canvas.print("to clone its identity.");
+        return;
+    }
+
     canvas.setTextColor(theme::TEXT_SECONDARY());
     canvas.setCursor(10, y);
     canvas.print("Active Persona:");
     y += 15;
-    
+
     canvas.setTextColor(theme::ACCENT());
     canvas.setCursor(15, y);
     canvas.print(m_target.name.empty() ? "Unlabeled Device" : m_target.name.c_str());
     y += 12;
-    
+
     canvas.setTextColor(theme::TEXT_PRIMARY());
     canvas.setCursor(15, y);
     canvas.print(ble::addressToString(m_target.address).c_str());
     y += 15;
-    
+
     if (m_spoofing) {
         canvas.setTextColor(theme::SUCCESS());
         canvas.setCursor(10, y);
@@ -122,6 +150,15 @@ bool BleSpoofScreen::handleInput(char key) {
 
     switch (key) {
         case '\n':
+            if (!m_haveTarget) {
+                // Nothing to clone. Hand off to the BLE scanner to pick a device, which will route
+                // back here with a target via BLE_SPOOF_TARGET_SELECTED. Done through the deferred
+                // exit breadcrumb (consumed after this input unwinds in exitActiveScreen()), never a
+                // mid-input setActiveScreen(), which would delete this factory-owned screen under us.
+                ScreenManager::getInstance().setReturnTarget(ScreenId::BLE_SCANNER, AppState::SCANNING);
+                m_shouldExit = true;
+                return true;
+            }
             if (!m_spoofing) {
                 m_spoofing = true;
                 

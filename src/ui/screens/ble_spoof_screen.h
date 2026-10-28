@@ -42,6 +42,7 @@ private:
     void drawStatus(Canvas& canvas);
 
     BLEDeviceInfo m_target;
+    bool m_haveTarget;  ///< false on a cold menu launch (no device injected via setParams/setTarget)
     bool m_active;
     bool m_spoofing;
     bool m_shouldExit;
