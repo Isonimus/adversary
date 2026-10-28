@@ -233,7 +233,14 @@ const char* EvilTwinScreen::getSSIDDisplay() const {
 bool EvilTwinScreen::handleInput(char key) {
     if (!visible_) return false;
     needsRedraw_ = true;  // any key press triggers redraw
-    
+
+    // The client ActionMenu is modal: while open it owns every key (nav, select, ESC), so no
+    // underlying list navigation or footer dispatch leaks through (ADR-0132).
+    if (clientActionMenu_.isVisible()) {
+        clientActionMenu_.handleInput(key);
+        return true;
+    }
+
     // Footer hints: focus navigation + action dispatch
     {
         char footerAction = 0;
@@ -410,6 +417,14 @@ bool EvilTwinScreen::handleInput(char key) {
             }
             break;
             
+        case '\n':  // ENTER: open the per-client action menu (CLIENTS view only)
+        case '\r':
+            if (screenState_ == EvilTwinScreenState::CLIENTS) {
+                openClientActionMenu();
+                return true;
+            }
+            break;
+
         case ';':  // Up
             if (screenState_ == EvilTwinScreenState::CREDENTIALS && credentialScrollPos_ > 0) {
                 credentialScrollPos_--;
@@ -737,6 +752,55 @@ void EvilTwinScreen::renderCredentials(Canvas& canvas) {
 #endif
 }
 
+void EvilTwinScreen::openClientActionMenu() {
+    // Resolve the selected row against the live client set (the list may have shrunk since the
+    // last frame). Nothing selectable -> do not open an empty menu.
+    ap::APClient clients[attack::EVIL_TWIN_MAX_CLIENTS];
+    uint8_t count = evilTwin_.getClients(clients, attack::EVIL_TWIN_MAX_CLIENTS);
+    int sel = clientList_.selectedIndex();
+    if (count == 0 || sel < 0 || sel >= static_cast<int>(count)) return;
+
+    memcpy(contextClientMac_, clients[sel].mac, 6);
+
+    char macStr[18];
+    utils::formatMacBytes(contextClientMac_, macStr, sizeof(macStr));
+
+    const bool blocked = evilTwin_.isClientBlocked(contextClientMac_);
+    clientActionMenu_.clearItems();
+    clientActionMenu_.setTitle(macStr);
+    clientActionMenu_.addItem('D', "Deauth once", true);
+    // The second item toggles on the client's current blocked state, so one row serves both.
+    clientActionMenu_.addItem(blocked ? 'U' : 'B', blocked ? "Unblock device" : "Block device", true);
+    clientActionMenu_.setOnAction([this](char action) { handleClientAction(action); });
+    clientActionMenu_.show();
+    needsRedraw_ = true;
+}
+
+void EvilTwinScreen::handleClientAction(char action) {
+    switch (action) {
+        case 'D':
+        case 'd':
+            // A single burst; honest copy, since the client reconnects to our open AP shortly.
+            evilTwin_.deauthClientOnce(contextClientMac_);
+            showSuccessToast("Deauth sent");
+            break;
+        case 'B':
+        case 'b':
+            if (evilTwin_.blockClient(contextClientMac_)) {
+                showSuccessToast("Client blocked");
+            } else {
+                showErrorToast("Blocklist full");
+            }
+            break;
+        case 'U':
+        case 'u':
+            evilTwin_.unblockClient(contextClientMac_);
+            showSuccessToast("Client unblocked");
+            break;
+    }
+    needsRedraw_ = true;
+}
+
 void EvilTwinScreen::renderClients(Canvas& canvas) {
 #ifdef ESP32
     canvas.fillScreen(theme::BG_PRIMARY());
@@ -768,7 +832,7 @@ void EvilTwinScreen::renderClients(Canvas& canvas) {
         // scrollbar; this callback paints one client row. No ENTER action yet (target-picker
         // feature is on the ledger), so the selection is navigation-only.
         ScrollableList::render(canvas, clientList_, 0, listY, canvas.width(), listHeight, itemHeight,
-            [&clients](Canvas& c, int idx, int16_t y, bool /*isSelected*/) {
+            [this, &clients](Canvas& c, int idx, int16_t y, bool /*isSelected*/) {
                 const auto& client = clients[idx];
 
                 // Row text is content-coloured, not selection-coloured (slice-0063 band-only
@@ -779,15 +843,30 @@ void EvilTwinScreen::renderClients(Canvas& canvas) {
                 c.setCursor(4, y + theme::LIST_ROW_TEXT_DY);
                 c.print(macStr);
 
+                // Tag blocklisted clients so the session blocklist is visible at a glance
+                // (ADR-0132); the tag sits just left of the RSSI column.
+                if (evilTwin_.isClientBlocked(client.mac)) {
+                    c.setTextColor(theme::ERROR());
+                    c.setCursor(c.width() - 76, y + theme::LIST_ROW_TEXT_DY);
+                    c.print("BLK");
+                }
+
                 c.setTextColor(theme::TEXT_SECONDARY());
                 c.setCursor(c.width() - 44, y + theme::LIST_ROW_TEXT_DY);
                 c.printf("%ddBm", client.rssi);
             });
     }
 
-    // Footer hints
-    footerHints_.setHints({});
+    // Footer hints: ENTER opens the per-client action menu (ADR-0132).
+    footerHints_.setHints({
+        {'\n', "Actions", clientCount > 0}
+    });
     footerHints_.render(canvas);
+
+    // The modal action menu draws over the list (its own backdrop), so it is painted last.
+    if (clientActionMenu_.isVisible()) {
+        clientActionMenu_.render(canvas);
+    }
 #else
     (void)canvas;
 #endif

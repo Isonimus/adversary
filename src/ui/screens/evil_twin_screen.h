@@ -19,6 +19,7 @@
 #include "ui/components/footer_hints.h"
 #include "ui/components/list_scroll_model.h"
 #include "ui/components/scrollable_list.h"
+#include "ui/components/action_menu.h"
 #include "config/config.h"
 #include "utils/mac_utils.h"
 #include "screen_interface.h"
@@ -94,6 +95,11 @@ private:
     void renderCredentials(Canvas& canvas);
     void renderClients(Canvas& canvas);
     
+    // Per-client ActionMenu in the CLIENTS view (ADR-0132): ENTER opens a modal with
+    // "Deauth once" and "Block/Unblock device" for the selected connected client.
+    void openClientActionMenu();
+    void handleClientAction(char action);
+
     const char* getModeStr() const;
     const char* getPortalStr() const;
     const char* getDeauthIntervalStr() const;
@@ -115,6 +121,10 @@ private:
     // keeps the selection on screen and wraps at the ends (slice-0076, replaces the dead
     // clientScrollPos_).
     ListScrollModel clientList_;
+
+    // Modal action menu for a selected connected client, and the MAC it was opened on (ADR-0132).
+    ui::ActionMenu clientActionMenu_;
+    uint8_t contextClientMac_[6] = {0};
 
     // Config options. Row 0 is the Target navigation row (ENTER routes to the WiFi scanner,
     // ADR-0092); rows 1..6 are the value options; the last row is the START TWIN terminal.

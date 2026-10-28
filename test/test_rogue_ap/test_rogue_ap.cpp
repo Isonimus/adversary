@@ -198,10 +198,61 @@ void test_evil_twin_portal_config() {
     CaptivePortalConfig config;
     config.setTitle("Company WiFi");
     config.pageType = PortalPageType::CORPORATE;
-    
+
     et.setPortalConfig(config);
     // Just ensure no crash
     TEST_ASSERT_TRUE(true);
+}
+
+// ---- Per-client blocklist (ADR-0132) ----
+
+void test_evil_twin_block_add_and_contains() {
+    EvilTwin et;
+    uint8_t mac[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
+
+    TEST_ASSERT_FALSE(et.isClientBlocked(mac));
+    TEST_ASSERT_TRUE(et.blockClient(mac));
+    TEST_ASSERT_TRUE(et.isClientBlocked(mac));
+    TEST_ASSERT_EQUAL(1, et.getBlockedCount());
+}
+
+void test_evil_twin_block_duplicate_rejected() {
+    EvilTwin et;
+    uint8_t mac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
+
+    TEST_ASSERT_TRUE(et.blockClient(mac));
+    TEST_ASSERT_FALSE(et.blockClient(mac));  // already blocked -> no duplicate
+    TEST_ASSERT_EQUAL(1, et.getBlockedCount());
+}
+
+void test_evil_twin_unblock_removes_and_compacts() {
+    EvilTwin et;
+    uint8_t a[6] = {1, 2, 3, 4, 5, 6};
+    uint8_t b[6] = {6, 5, 4, 3, 2, 1};
+
+    TEST_ASSERT_TRUE(et.blockClient(a));
+    TEST_ASSERT_TRUE(et.blockClient(b));
+    TEST_ASSERT_TRUE(et.unblockClient(a));
+
+    TEST_ASSERT_FALSE(et.isClientBlocked(a));
+    TEST_ASSERT_TRUE(et.isClientBlocked(b));  // survives the move-last-into-hole compaction
+    TEST_ASSERT_EQUAL(1, et.getBlockedCount());
+    TEST_ASSERT_FALSE(et.unblockClient(a));   // removing an absent MAC reports false
+}
+
+void test_evil_twin_block_capacity() {
+    EvilTwin et;
+    uint8_t mac[6] = {0, 0, 0, 0, 0, 0};
+
+    for (uint8_t i = 0; i < EVIL_TWIN_MAX_CLIENTS; i++) {
+        mac[5] = i;
+        TEST_ASSERT_TRUE(et.blockClient(mac));
+    }
+    TEST_ASSERT_EQUAL(EVIL_TWIN_MAX_CLIENTS, et.getBlockedCount());
+
+    mac[5] = 0xFF;
+    TEST_ASSERT_FALSE(et.blockClient(mac));  // full -> rejected, not silently dropped
+    TEST_ASSERT_EQUAL(EVIL_TWIN_MAX_CLIENTS, et.getBlockedCount());
 }
 
 // ============================================================================
@@ -371,6 +422,10 @@ int main(int argc, char **argv) {
     RUN_TEST(test_evil_twin_set_target);
     RUN_TEST(test_evil_twin_deauth_settings);
     RUN_TEST(test_evil_twin_portal_config);
+    RUN_TEST(test_evil_twin_block_add_and_contains);
+    RUN_TEST(test_evil_twin_block_duplicate_rejected);
+    RUN_TEST(test_evil_twin_unblock_removes_and_compacts);
+    RUN_TEST(test_evil_twin_block_capacity);
     
     // ProbeRequest
     RUN_TEST(test_probe_request_default_values);

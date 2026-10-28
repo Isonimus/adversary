@@ -135,7 +135,40 @@ public:
      * @return Number of clients
      */
     uint8_t getClients(ap::APClient* clients, uint8_t maxClients) const;
-    
+
+    // ===== Per-client actions (ADR-0132) =====
+    // The connected clients are stations on our own rogue AP, so eviction is deauth-on-sight,
+    // not a refused association (the Arduino softAP has no deny-list). "Deauth once" bounces a
+    // client (re-triggers the captive portal); the blocklist keeps a client off for the session
+    // by deauthing it every update() cycle it is still associated.
+
+    /**
+     * @brief Send a single targeted deauth burst at one connected client. No blocklist state;
+     * the client will reconnect to our open AP within seconds (a nudge, not a kick).
+     */
+    void deauthClientOnce(const uint8_t* clientMac);
+
+    /**
+     * @brief Add a client MAC to the session blocklist. update() then deauths it on every cycle
+     * it remains associated. Returns false if already blocked or the blocklist is full.
+     */
+    bool blockClient(const uint8_t* clientMac);
+
+    /**
+     * @brief Remove a client MAC from the blocklist. Returns false if it was not blocked.
+     */
+    bool unblockClient(const uint8_t* clientMac);
+
+    /**
+     * @brief Whether a client MAC is on the blocklist.
+     */
+    bool isClientBlocked(const uint8_t* clientMac) const;
+
+    /**
+     * @brief Number of MACs currently on the blocklist.
+     */
+    uint8_t getBlockedCount() const { return blockedCount_; }
+
     /**
      * @brief Get target SSID
      */
@@ -167,7 +200,17 @@ private:
     
     // Portal config (still used for some settings)
     ap::CaptivePortalConfig portalConfig_;
+
+    // Session blocklist of client MACs to keep off our rogue AP (ADR-0132). Fixed array over a
+    // std::set to avoid heap churn on this chip; sized to the AP client ceiling, so it can hold
+    // every admissible client. Cleared on stop() (so each attack starts fresh).
+    uint8_t blocklist_[EVIL_TWIN_MAX_CLIENTS][6] = {};
+    uint8_t blockedCount_ = 0;
+    int findBlocked(const uint8_t* mac) const;  ///< index in blocklist_, or -1
+
     void sendDeauthBurst();
+    void enforceBlocklist();  ///< deauth any blocklisted client still associated (per update cycle)
+    void sendApDeauth(const uint8_t targets[][6], uint8_t count);  ///< burst sourced from our AP BSSID
     void updateStats();
 };
 
