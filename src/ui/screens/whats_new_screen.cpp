@@ -16,8 +16,8 @@ WhatsNewScreen::WhatsNewScreen()
     : visible_(false)
     , shouldExit_(false)
     , needsRedraw_(true)
-    , scrollOffset_(0)
 {
+    scrollModel_.setScrollOnly(true);  // read-only release notes: scroll, no selection (ADR-0133)
 }
 
 WhatsNewScreen::~WhatsNewScreen() {
@@ -32,7 +32,8 @@ void WhatsNewScreen::show() {
     visible_ = true;
     shouldExit_ = false;
     needsRedraw_ = true;
-    scrollOffset_ = 0;
+    scrollModel_.setItemCount(0);  // reset scroll to the top
+    scrollModel_.setItemCount(WHATS_NEW_LINE_COUNT);
 
     footerHints_.setHints({
         {'`', "Back"}
@@ -50,28 +51,26 @@ void WhatsNewScreen::update() {
 bool WhatsNewScreen::handleInput(char key) {
     needsRedraw_ = true;
 
-    const int totalLines = WHATS_NEW_LINE_COUNT;
-    const int visibleLines = (config::SCREEN_HEIGHT - HEADER_HEIGHT - ui::FOOTER_HEIGHT) / LINE_HEIGHT;
-    const int maxScroll = (totalLines > visibleLines) ? (totalLines - visibleLines) : 0;
-
+    // The model owns the clamp/no-wrap scroll math; the renderer keeps its viewport in sync each
+    // frame, so here we just nudge the window up or down (ADR-0133).
     char action = 0;
     if (footerHints_.handleInputWithDispatch(key, action)) {
         if (action == '`' || action == '\n') {
             shouldExit_ = true;
         } else if (action == ';') {
-            if (scrollOffset_ > 0) scrollOffset_--;
+            scrollModel_.moveUp();
         } else if (action == '.') {
-            if (scrollOffset_ < maxScroll) scrollOffset_++;
+            scrollModel_.moveDown();
         }
         return true;
     }
 
     switch (key) {
         case ';':  // Up
-            if (scrollOffset_ > 0) scrollOffset_--;
+            scrollModel_.moveUp();
             return true;
         case '.':  // Down
-            if (scrollOffset_ < maxScroll) scrollOffset_++;
+            scrollModel_.moveDown();
             return true;
         case '`':
         case '\n':
@@ -107,54 +106,42 @@ void WhatsNewScreen::drawHeader(Canvas& canvas) {
 }
 
 void WhatsNewScreen::drawContent(Canvas& canvas) {
-    int16_t y = HEADER_HEIGHT + 4;
-    const int16_t screenHeight = canvas.height();
+    const int16_t listTop = HEADER_HEIGHT + 4;
+    const int16_t availableHeight = canvas.height() - listTop - ui::FOOTER_HEIGHT;
     const int16_t x = 4;
 
     canvas.setTextSize(1);
 
-    const int totalLines = WHATS_NEW_LINE_COUNT;
-    for (int i = scrollOffset_; i < totalLines; i++) {
-        // Stop before a line would overlap the footer.
-        if (y + LINE_HEIGHT > screenHeight - ui::FOOTER_HEIGHT) break;
-
-        const char* line = WHATS_NEW_LINES[i];
-
-        if (i == 0) {
-            // Release title line: the live version (config::VERSION, never hard-coded into the
-            // notes body per ADR-0121) + the codename from whats_new.h line 0, composed by
-            // chained prints on one line. The version shows only here now (the status bar no
-            // longer carries a version subtitle), so it reads as one title (slice-0124).
-            canvas.setTextColor(theme::ACCENT());
-            canvas.setCursor(x, y);
-            canvas.print("v");
-            canvas.print(config::VERSION);
-            canvas.print(" - ");
-            canvas.print(line);
-            y += LINE_HEIGHT;
-            continue;
-        } else if (strcmp(line, "---") == 0) {
-            canvas.drawLine(x, y + 3, canvas.width() - x, y + 3, theme::TEXT_DISABLED());
-            y += LINE_HEIGHT;
-            continue;
-        } else if (line[0] == '\0') {
-            y += LINE_HEIGHT;
-            continue;
-        } else {
-            canvas.setTextColor(theme::TEXT_SECONDARY());
-        }
-
-        canvas.setCursor(x, y);
-        canvas.print(line);
-        y += LINE_HEIGHT;
-    }
-
-    const int visibleLines = (screenHeight - HEADER_HEIGHT - ui::FOOTER_HEIGHT) / LINE_HEIGHT;
-    if (totalLines > visibleLines) {
-        canvas.setTextColor(theme::TEXT_DISABLED());
-        canvas.setCursor(canvas.width() - 30, HEADER_HEIGHT + 2);
-        canvas.printf("%d/%d", scrollOffset_ + 1, totalLines);
-    }
+    // One release-note line per row through the shared scroll-only list: the component owns the
+    // viewport and the proportional thumb (replacing the old "N/total" readout), the model owns
+    // the scroll position, and this callback styles and prints one line (ADR-0133).
+    scrollModel_.setItemCount(WHATS_NEW_LINE_COUNT);
+    ScrollableList::render(canvas, scrollModel_, 0, listTop, canvas.width(), availableHeight,
+        LINE_HEIGHT, [x](Canvas& c, int idx, int16_t rowY, bool /*selected*/) {
+            const char* line = WHATS_NEW_LINES[idx];
+            if (idx == 0) {
+                // Release title line: the live version (config::VERSION, never hard-coded into the
+                // notes body per ADR-0121) + the codename from whats_new.h line 0, composed by
+                // chained prints on one line. The version shows only here now (the status bar no
+                // longer carries a version subtitle), so it reads as one title (slice-0124).
+                c.setTextColor(theme::ACCENT());
+                c.setCursor(x, rowY);
+                c.print("v");
+                c.print(config::VERSION);
+                c.print(" - ");
+                c.print(line);
+                return;
+            } else if (strcmp(line, "---") == 0) {
+                c.drawLine(x, rowY + 3, c.width() - x, rowY + 3, theme::TEXT_DISABLED());
+                return;
+            } else if (line[0] == '\0') {
+                return;  // blank spacer row
+            } else {
+                c.setTextColor(theme::TEXT_SECONDARY());
+            }
+            c.setCursor(x, rowY);
+            c.print(line);
+        });
 }
 
 } // namespace adversary

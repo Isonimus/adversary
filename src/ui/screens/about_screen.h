@@ -13,6 +13,8 @@
 #include "../theme.h"
 #include "../components/status_bar.h"
 #include "../components/footer_hints.h"
+#include "../components/list_scroll_model.h"
+#include "../components/scrollable_list.h"
 #include "screen_interface.h"
 
 namespace adversary {
@@ -60,8 +62,11 @@ private:
     bool visible_;
     bool shouldExit_;
     bool needsRedraw_;
-    int scrollOffset_;
-    
+
+    // Scroll-only (read-only log) list model: the manifesto is a static text block with no
+    // selection, so it routes through the shared component in scroll-only mode (ADR-0133).
+    ListScrollModel scrollModel_;
+
     // UI Components
     ui::FooterHints footerHints_;
     

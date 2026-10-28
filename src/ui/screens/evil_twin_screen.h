@@ -114,7 +114,9 @@ private:
     uint32_t lastRedrawMs_ = 0;
     uint32_t credentialHandlerId_ = 0;  // EventBus subscription
     
-    size_t credentialScrollPos_ = 0;
+    // Read-only harvested-credentials log: scroll-only mode (no selection, clamp-no-wrap,
+    // proportional thumb instead of the old triangle carets), ADR-0133.
+    ListScrollModel credentialList_;
 
     // Selection + scroll window for the connected-clients list. Same shared read-only idiom as
     // the wardriving network log: the renderer feeds it the live client count each frame and it

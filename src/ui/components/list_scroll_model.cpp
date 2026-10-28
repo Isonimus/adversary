@@ -59,6 +59,10 @@ void ListScrollModel::snapSelectionToSelectable() {
 
 void ListScrollModel::moveUp() {
     if (itemCount_ == 0) return;
+    if (scrollOnly_) {  // read-only log: move the window up one row, clamp at the top, no wrap
+        if (scrollOffset_ > 0) scrollOffset_--;
+        return;
+    }
     const int next = seekSelectable(selectedIndex_ - 1, -1);
     if (next >= 0) selectedIndex_ = next;  // leave put when nothing is selectable
     clampOffsetToSelection();
@@ -66,6 +70,11 @@ void ListScrollModel::moveUp() {
 
 void ListScrollModel::moveDown() {
     if (itemCount_ == 0) return;
+    if (scrollOnly_) {  // read-only log: move the window down one row, clamp at the bottom, no wrap
+        const int maxOffset = itemCount_ > visibleRows_ ? itemCount_ - visibleRows_ : 0;
+        if (scrollOffset_ < maxOffset) scrollOffset_++;
+        return;
+    }
     const int next = seekSelectable(selectedIndex_ + 1, 1);
     if (next >= 0) selectedIndex_ = next;
     clampOffsetToSelection();
@@ -79,13 +88,17 @@ void ListScrollModel::setSelectedIndex(int index) {
 }
 
 void ListScrollModel::clampOffsetToSelection() {
-    // Selection above the window: pull the window up to it.
-    if (selectedIndex_ < scrollOffset_) {
-        scrollOffset_ = selectedIndex_;
-    }
-    // Selection below the window: pull the window down so it is the last visible row.
-    if (selectedIndex_ >= scrollOffset_ + visibleRows_) {
-        scrollOffset_ = selectedIndex_ - visibleRows_ + 1;
+    // Scroll-only mode has no selection to track: hold the window where it is and only clamp it
+    // into range, so a per-frame setViewport() never snaps a log back to the top (ADR-0133).
+    if (!scrollOnly_) {
+        // Selection above the window: pull the window up to it.
+        if (selectedIndex_ < scrollOffset_) {
+            scrollOffset_ = selectedIndex_;
+        }
+        // Selection below the window: pull the window down so it is the last visible row.
+        if (selectedIndex_ >= scrollOffset_ + visibleRows_) {
+            scrollOffset_ = selectedIndex_ - visibleRows_ + 1;
+        }
     }
     // Never scroll past the point where the last item sits on the bottom row (and never below 0,
     // so a list that fits entirely stays pinned at the top with no empty lead-in).

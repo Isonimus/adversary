@@ -37,6 +37,15 @@ public:
     /// scroll offset so the selection stays visible even when the viewport shrank this frame.
     void setViewport(int visibleRows);
 
+    /// Switch the model into scroll-only (read-only log) mode, or back to selection mode.
+    /// In scroll-only mode there is no selection cursor: moveUp/moveDown move the scroll window
+    /// directly by one row, clamped at both ends with no wrap, and the renderer paints no
+    /// selection band. clampOffsetToSelection() then only clamps the offset into range instead
+    /// of pulling the window to the (unused) selection, which is what keeps the per-frame
+    /// setViewport() from snapping a log back to the top (ADR-0133). Default is selection mode.
+    void setScrollOnly(bool on) { scrollOnly_ = on; }
+    bool isScrollOnly() const { return scrollOnly_; }
+
     /// Install a predicate deciding which indices the cursor may rest on; an index the predicate
     /// rejects is skipped by moveUp/moveDown and snapped off by setSelectedIndex/setItemCount
     /// (separators, live-disabled rows). An empty predicate (the default) means every index is
@@ -90,6 +99,7 @@ private:
     int selectedIndex_ = 0;
     int scrollOffset_ = 0;
     int visibleRows_ = 1;  // at least 1; the renderer overwrites this every frame
+    bool scrollOnly_ = false;  // true = read-only log: no selection cursor, nav moves the window
     std::function<bool(int)> selectable_;  // empty = every index selectable
 };
 

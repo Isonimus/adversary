@@ -207,6 +207,62 @@ void test_predicate_capture_fits_std_function_small_buffer() {
     TEST_PASS();
 }
 
+// --- scroll-only (read-only log) mode (ADR-0133) -----------------------------------------
+
+void test_scroll_only_down_moves_window_and_clamps_at_bottom() {
+    ListScrollModel m = makeList(10, 4);  // rows 0..3 visible
+    m.setScrollOnly(true);
+    m.moveDown();  // window moves by one row directly, no selection involved
+    TEST_ASSERT_EQUAL_INT(1, m.scrollOffset());
+    for (int i = 0; i < 20; ++i) m.moveDown();  // churn well past the end
+    // Clamps at the last full page (offset 6 shows 6..9) and never wraps back to the top.
+    TEST_ASSERT_EQUAL_INT(6, m.scrollOffset());
+}
+
+void test_scroll_only_up_clamps_at_top_without_wrapping() {
+    ListScrollModel m = makeList(10, 4);
+    m.setScrollOnly(true);
+    for (int i = 0; i < 5; ++i) m.moveDown();  // somewhere in the middle (offset 5)
+    TEST_ASSERT_EQUAL_INT(5, m.scrollOffset());
+    for (int i = 0; i < 20; ++i) m.moveUp();   // churn past the top
+    // Clamps at 0 and never wraps to the bottom (a log is not circular).
+    TEST_ASSERT_EQUAL_INT(0, m.scrollOffset());
+}
+
+void test_scroll_only_setViewport_holds_window_not_snaps_to_top() {
+    // The bug the mode exists to prevent: the renderer calls setViewport() every frame, and in
+    // selection mode that pulls the window to the (here unused) selection at index 0. A log must
+    // keep its scroll position across those per-frame calls.
+    ListScrollModel m = makeList(10, 4);
+    m.setScrollOnly(true);
+    for (int i = 0; i < 3; ++i) m.moveDown();  // offset 3
+    TEST_ASSERT_EQUAL_INT(3, m.scrollOffset());
+    m.setViewport(4);  // simulate the next frame's render feeding the same viewport
+    TEST_ASSERT_EQUAL_INT(3, m.scrollOffset());  // held, not snapped to 0
+}
+
+void test_scroll_only_growing_viewport_reclamps_offset_down() {
+    // Growing the viewport lowers the maximum offset (fewer rows left to scroll). An offset that
+    // now sits past the bottom must re-clamp down so the last item stays on the bottom row.
+    ListScrollModel m = makeList(10, 3);        // maxOffset 7
+    m.setScrollOnly(true);
+    for (int i = 0; i < 10; ++i) m.moveDown();  // offset clamps to 7 (7..9)
+    TEST_ASSERT_EQUAL_INT(7, m.scrollOffset());
+    m.setViewport(9);  // maxOffset now 1; offset must re-clamp down from 7 to 1 (1..9)
+    TEST_ASSERT_EQUAL_INT(1, m.scrollOffset());
+}
+
+void test_scroll_only_shrinking_viewport_holds_valid_offset() {
+    // Shrinking the viewport raises the maximum offset, so a valid offset is simply held: there
+    // is no selection pulling the window anywhere (unlike the selection-mode counterpart).
+    ListScrollModel m = makeList(10, 7);
+    m.setScrollOnly(true);
+    for (int i = 0; i < 10; ++i) m.moveDown();  // offset clamps to 3 (3..9)
+    TEST_ASSERT_EQUAL_INT(3, m.scrollOffset());
+    m.setViewport(4);  // maxOffset now 6; offset 3 is still valid, so it is held
+    TEST_ASSERT_EQUAL_INT(3, m.scrollOffset());
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_down_on_last_visible_row_advances_window);
@@ -224,5 +280,10 @@ int main() {
     RUN_TEST(test_set_item_count_snaps_selection_off_rejected_row);
     RUN_TEST(test_no_predicate_is_all_selectable);
     RUN_TEST(test_predicate_capture_fits_std_function_small_buffer);
+    RUN_TEST(test_scroll_only_down_moves_window_and_clamps_at_bottom);
+    RUN_TEST(test_scroll_only_up_clamps_at_top_without_wrapping);
+    RUN_TEST(test_scroll_only_setViewport_holds_window_not_snaps_to_top);
+    RUN_TEST(test_scroll_only_growing_viewport_reclamps_offset_down);
+    RUN_TEST(test_scroll_only_shrinking_viewport_holds_valid_offset);
     return UNITY_END();
 }

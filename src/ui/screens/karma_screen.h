@@ -111,14 +111,17 @@ private:
     uint32_t credentialHandlerId_ = 0;  // EventBus subscription
     uint32_t probeHandlerId_ = 0;       // PROBE_REQUEST_RECEIVED subscription
     
-    // Scroll positions
-    size_t probeScrollPos_ = 0;
-    size_t credentialScrollPos_ = 0;
+    // Read-only log views (probes, harvested credentials, per-client traffic) scroll through the
+    // shared component in scroll-only mode: no selection, clamp-no-wrap, proportional thumb
+    // instead of the old triangle carets + hardcoded row budget (ADR-0133). Each render feeds its
+    // model the live item count + viewport; the screen never tracks a raw scroll offset.
+    ListScrollModel probeList_;
+    ListScrollModel credentialList_;
+    ListScrollModel trafficList_;
     // Owns the clients-list selection + scroll window + wrap; renderClients feeds it the live
     // viewport each frame so cursor and scroll offset can't drift (slice-0062/0067).
     ListScrollModel clientList_;
     std::string selectedClientMac_; // snapshotted from the list at Enter; downstream key
-    size_t trafficScrollPos_ = 0;
     
     // Config options
     static constexpr int CONFIG_OPTION_COUNT = 4;

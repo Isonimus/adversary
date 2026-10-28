@@ -2,11 +2,12 @@
  * @file whats_new_screen.h
  * @brief "What's new" notes for the running release (ADR-0121, slice-0122).
  *
- * A scrollable block of static lines, the same shape as AboutScreen (ADR-0121 records the
- * deliberate choice to copy that idiom rather than extract a shared component yet: this is
- * the second such screen, not the third). Content comes from config/whats_new.h; the header
- * shows the running config::VERSION. Reached two ways: auto-shown once on the first boot
- * after a version change (main.cpp), and on demand from Settings > What's New.
+ * A scrollable block of static lines, the same shape as AboutScreen. ADR-0121 deferred
+ * extracting a shared component "until the third such screen"; ADR-0133 is that trigger, so
+ * this and AboutScreen now scroll through the shared ScrollableList in scroll-only (read-only
+ * log) mode. Content comes from config/whats_new.h; the title line composes the running
+ * config::VERSION. Reached two ways: auto-shown once on the first boot after a version change
+ * (main.cpp), and on demand from Settings > What's New.
  */
 
 #pragma once
@@ -16,6 +17,8 @@
 #include "../theme.h"
 #include "../components/status_bar.h"
 #include "../components/footer_hints.h"
+#include "../components/list_scroll_model.h"
+#include "../components/scrollable_list.h"
 #include "screen_interface.h"
 
 namespace adversary {
@@ -50,7 +53,9 @@ private:
     bool visible_;
     bool shouldExit_;
     bool needsRedraw_;
-    int scrollOffset_;
+
+    // Scroll-only (read-only log) list model: static release notes with no selection (ADR-0133).
+    ListScrollModel scrollModel_;
 
     ui::FooterHints footerHints_;
 

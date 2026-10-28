@@ -63,8 +63,8 @@ AboutScreen::AboutScreen()
     : visible_(false)
     , shouldExit_(false)
     , needsRedraw_(true)
-    , scrollOffset_(0)
 {
+    scrollModel_.setScrollOnly(true);  // read-only manifesto: scroll, no selection (ADR-0133)
 }
 
 AboutScreen::~AboutScreen() {
@@ -83,8 +83,9 @@ void AboutScreen::show() {
     visible_ = true;
     shouldExit_ = false;
     needsRedraw_ = true;
-    scrollOffset_ = 0;
-    
+    scrollModel_.setItemCount(0);  // reset scroll to the top
+    scrollModel_.setItemCount(getManifestoLineCount());
+
     // Initialize footer hints
     footerHints_.setHints({
         {'`', "Back"}
@@ -100,41 +101,37 @@ void AboutScreen::update() {
 }
 bool AboutScreen::handleInput(char key) {
     needsRedraw_ = true;
-    
-    // Handle footer hints first
-    char action = 0;
-    int totalLines = getManifestoLineCount();
-    // Calculate visible lines (integer floor)
-    int visibleLines = (config::SCREEN_HEIGHT - HEADER_HEIGHT - ui::FOOTER_HEIGHT) / LINE_HEIGHT;
-    int maxScroll = (totalLines > visibleLines) ? (totalLines - visibleLines) : 0;
 
+    // Handle footer hints first. The model owns the clamp/no-wrap scroll math; the renderer keeps
+    // its viewport in sync each frame, so here we just nudge the window up or down (ADR-0133).
+    char action = 0;
     if (footerHints_.handleInputWithDispatch(key, action)) {
         if (action == '`' || action == '\n') {
             shouldExit_ = true;
         } else if (action == ';') {
-            if (scrollOffset_ > 0) scrollOffset_--;
+            scrollModel_.moveUp();
         } else if (action == '.') {
-            if (scrollOffset_ < maxScroll) scrollOffset_++;
+            scrollModel_.moveDown();
         }
         return true;
     }
-    
+
     switch (key) {
         case ';':  // Up
-            if (scrollOffset_ > 0) scrollOffset_--;
+            scrollModel_.moveUp();
             return true;
-            
+
         case '.':  // Down
-            if (scrollOffset_ < maxScroll) scrollOffset_++;
+            scrollModel_.moveDown();
             return true;
-            
+
         case '`':
         case '\n':
         case '\r':
             shouldExit_ = true;
             return true;
     }
-    
+
     return false;
 }
 
@@ -162,49 +159,35 @@ void AboutScreen::drawHeader(Canvas& canvas) {
 }
 
 void AboutScreen::drawContent(Canvas& canvas) {
-    int16_t y = HEADER_HEIGHT + 4;
-    int16_t screenHeight = canvas.height();
-    int16_t x = 4;
-    
+    const int16_t listTop = HEADER_HEIGHT + 4;
+    const int16_t availableHeight = canvas.height() - listTop - ui::FOOTER_HEIGHT;
+    const int16_t x = 4;
+
     canvas.setTextSize(1);
-    canvas.setTextColor(theme::TEXT_PRIMARY());
-    
-    int totalLines = getManifestoLineCount();
-    
-    for (int i = scrollOffset_; i < totalLines; i++) {
-        // STRICT CHECK: Break if the NEXT line would even PARTIALLY overlap the footer
-        if (y + LINE_HEIGHT > screenHeight - ui::FOOTER_HEIGHT) break;
-        
-        const char* line = MANIFESTO_LINES[i];
-        
-        // Style different line types
-        if (strcmp(line, "THE ADVERSARY MANIFESTO") == 0) {
-            canvas.setTextColor(theme::ACCENT());
-        } else if (strstr(line, "TRANSPARENCY") || strstr(line, "ACCESSIBILITY") || 
-                   strstr(line, "RESPONSIBILITY")) {
-            canvas.setTextColor(theme::WARNING());
-        } else if (strcmp(line, "---") == 0) {
-            canvas.drawLine(x, y + 3, canvas.width() - x, y + 3, theme::TEXT_DISABLED());
-            y += LINE_HEIGHT;
-            continue;
-        } else if (strcmp(line, "") == 0) {
-            y += LINE_HEIGHT;
-            continue;
-        } else {
-            canvas.setTextColor(theme::TEXT_SECONDARY());
-        }
-        
-        canvas.setCursor(x, y);
-        canvas.print(line);
-        y += LINE_HEIGHT;
-    }
-    
-    int visibleLines = (screenHeight - HEADER_HEIGHT - ui::FOOTER_HEIGHT) / LINE_HEIGHT;
-    if (totalLines > visibleLines) {
-        canvas.setTextColor(theme::TEXT_DISABLED());
-        canvas.setCursor(canvas.width() - 30, HEADER_HEIGHT + 2);
-        canvas.printf("%d/%d", scrollOffset_ + 1, totalLines);
-    }
+
+    // One manifesto line per row, drawn through the shared scroll-only list: the component owns
+    // the viewport and the proportional thumb (replacing the old "N/total" readout), the model
+    // owns the scroll position, and this callback only styles and prints one line (ADR-0133).
+    scrollModel_.setItemCount(getManifestoLineCount());
+    ScrollableList::render(canvas, scrollModel_, 0, listTop, canvas.width(), availableHeight,
+        LINE_HEIGHT, [x](Canvas& c, int idx, int16_t rowY, bool /*selected*/) {
+            const char* line = MANIFESTO_LINES[idx];
+            if (strcmp(line, "THE ADVERSARY MANIFESTO") == 0) {
+                c.setTextColor(theme::ACCENT());
+            } else if (strstr(line, "TRANSPARENCY") || strstr(line, "ACCESSIBILITY") ||
+                       strstr(line, "RESPONSIBILITY")) {
+                c.setTextColor(theme::WARNING());
+            } else if (strcmp(line, "---") == 0) {
+                c.drawLine(x, rowY + 3, c.width() - x, rowY + 3, theme::TEXT_DISABLED());
+                return;
+            } else if (line[0] == '\0') {
+                return;  // blank spacer row
+            } else {
+                c.setTextColor(theme::TEXT_SECONDARY());
+            }
+            c.setCursor(x, rowY);
+            c.print(line);
+        });
 }
 
 } // namespace adversary

@@ -18,6 +18,7 @@
 namespace adversary {
 
 EvilTwinScreen::EvilTwinScreen() {
+    credentialList_.setScrollOnly(true);  // read-only harvested-credentials log (ADR-0133)
     footerHints_.setHints({
         {'`', "Back"},
         {';', "Nav"},
@@ -402,7 +403,7 @@ bool EvilTwinScreen::handleInput(char key) {
         case 'C':
             if (screenState_ == EvilTwinScreenState::RUNNING) {
                 screenState_ = EvilTwinScreenState::CREDENTIALS;
-                credentialScrollPos_ = 0;
+                credentialList_.setItemCount(0);  // reset scroll to the top
                 return true;
             }
             break;
@@ -426,8 +427,10 @@ bool EvilTwinScreen::handleInput(char key) {
             break;
 
         case ';':  // Up
-            if (screenState_ == EvilTwinScreenState::CREDENTIALS && credentialScrollPos_ > 0) {
-                credentialScrollPos_--;
+            if (screenState_ == EvilTwinScreenState::CREDENTIALS) {
+                // Scroll-only log: the model clamps at the top (no wrap), ADR-0133.
+                credentialList_.setItemCount((int)evilTwin_.getCredentials().size());
+                credentialList_.moveUp();
                 return true;
             }
             if (screenState_ == EvilTwinScreenState::CLIENTS) {
@@ -439,11 +442,10 @@ bool EvilTwinScreen::handleInput(char key) {
 
         case '.':  // Down
             if (screenState_ == EvilTwinScreenState::CREDENTIALS) {
-                size_t maxScroll = evilTwin_.getCredentials().size();
-                if (credentialScrollPos_ < maxScroll - 1) {
-                    credentialScrollPos_++;
-                    return true;
-                }
+                // Scroll-only log: the model clamps at the bottom (no wrap), ADR-0133.
+                credentialList_.setItemCount((int)evilTwin_.getCredentials().size());
+                credentialList_.moveDown();
+                return true;
             }
             if (screenState_ == EvilTwinScreenState::CLIENTS) {
                 clientList_.moveDown();
@@ -709,41 +711,30 @@ void EvilTwinScreen::renderCredentials(Canvas& canvas) {
     snprintf(centerStr, sizeof(centerStr), "%zu items", creds.size());
     ui::StatusBar::render(canvas, "Credentials", centerStr);
     
-    int16_t y = 28;
-    const int maxVisible = 5;
-    
     if (creds.empty()) {
         canvas.setTextColor(theme::TEXT_SECONDARY());
         canvas.setCursor(10, 50);
         canvas.print("No credentials captured");
     } else {
-        for (size_t i = credentialScrollPos_; 
-             i < creds.size() && i < credentialScrollPos_ + maxVisible; 
-             i++) {
-            const auto& cred = creds[i];
-            
-            canvas.setTextColor(theme::ACCENT());
-            canvas.setCursor(10, y);
-            canvas.print(cred.username);
-            y += 10;
-            
-            canvas.setTextColor(theme::TEXT_SECONDARY());
-            canvas.setCursor(20, y);
-            canvas.print(cred.password);
-            y += 14;
-        }
+        // Each credential is a two-line item (username, then password). Scroll-only list: the
+        // component owns the row budget and the proportional thumb, replacing the old triangle
+        // carets + hardcoded maxVisible (ADR-0133).
+        const int16_t listTop = 28;
+        const int16_t availableHeight = canvas.height() - listTop - ui::FOOTER_HEIGHT;
+        constexpr int16_t CRED_ROW_HEIGHT = 24;
+        credentialList_.setItemCount((int)creds.size());
+        ScrollableList::render(canvas, credentialList_, 0, listTop, canvas.width(), availableHeight,
+            CRED_ROW_HEIGHT, [&creds](Canvas& c, int idx, int16_t rowY, bool /*selected*/) {
+                const auto& cred = creds[idx];
+                c.setTextColor(theme::ACCENT());
+                c.setCursor(10, rowY);
+                c.print(cred.username);
+                c.setTextColor(theme::TEXT_SECONDARY());
+                c.setCursor(20, rowY + 10);
+                c.print(cred.password);
+            });
     }
-    
-    // Scroll indicators
-    if (credentialScrollPos_ > 0) {
-        ui::drawTriGlyph(canvas, config::SCREEN_WIDTH - 10, 25, ui::TriGlyph::Up,
-                         theme::ACCENT());  // triangle (ADR-0100): items scrolled off above
-    }
-    if (credentialScrollPos_ + maxVisible < creds.size()) {
-        ui::drawTriGlyph(canvas, config::SCREEN_WIDTH - 10, config::SCREEN_HEIGHT - 30,
-                         ui::TriGlyph::Down, theme::ACCENT());  // items scrolled off below
-    }
-    
+
     // Footer hints
     footerHints_.setHints({});
     footerHints_.render(canvas);

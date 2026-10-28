@@ -67,14 +67,16 @@ void ScrollableList::render(Canvas& canvas, ListScrollModel& model,
 
     // The selection band is drawn here, once, for every list: BG_SELECTED when the list has
     // focus, dimmed to BG_SECONDARY when the screen's footer does. The callback draws content
-    // on top and never paints its own band (slice-0063).
+    // on top and never paints its own band (slice-0063). Scroll-only (read-only log) lists have
+    // no selection, so no band is ever painted and every row reports isSelected=false (ADR-0133).
+    const bool scrollOnly = model.isScrollOnly();
     const uint16_t bandColor = focused ? theme::BG_SELECTED() : theme::BG_SECONDARY();
     const int offset = model.scrollOffset();
     const int selected = model.selectedIndex();
     for (int row = 0; row < visibleRows && (offset + row) < model.itemCount(); ++row) {
         const int itemIndex = offset + row;
         const int16_t rowTopY = y + static_cast<int16_t>(row * rowHeight);
-        const bool isSelected = (itemIndex == selected);
+        const bool isSelected = !scrollOnly && (itemIndex == selected);
         if (isSelected) {
             canvas.fillRect(x, rowTopY, w, rowHeight, bandColor);
         }

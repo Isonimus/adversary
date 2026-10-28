@@ -23,13 +23,14 @@ KarmaScreen::KarmaScreen()
     , previousState_(KarmaScreenState::CONFIG)
     , visible_(false)
     , shouldExit_(false)
-    , probeScrollPos_(0)
-    , credentialScrollPos_(0)
-    , trafficScrollPos_(0)
     , configMode_(1)
     , configPortal_(0)
     , configLogSD_(true)
 {
+    // The three read-only log views carry no selection: scroll-only mode (ADR-0133).
+    probeList_.setScrollOnly(true);
+    credentialList_.setScrollOnly(true);
+    trafficList_.setScrollOnly(true);
 }
 
 // =============================================================================
@@ -322,7 +323,7 @@ bool KarmaScreen::handleInput(char key) {
                 screenState_ == KarmaScreenState::SNIFFER) {
                 previousState_ = screenState_;
                 screenState_ = KarmaScreenState::PROBES;
-                probeScrollPos_ = 0;
+                probeList_.setItemCount(0);  // reset scroll to the top
                 return true;
             }
             break;
@@ -339,18 +340,20 @@ bool KarmaScreen::handleInput(char key) {
             if (screenState_ == KarmaScreenState::ACTIVE) {
                 previousState_ = screenState_;
                 screenState_ = KarmaScreenState::CREDENTIALS;
-                credentialScrollPos_ = 0;
+                credentialList_.setItemCount(0);  // reset scroll to the top
                 return true;
             }
             break;
             
-        case ';':
-            if (screenState_ == KarmaScreenState::PROBES && probeScrollPos_ > 0) {
-                probeScrollPos_--;
+        case ';':  // scroll up: the model clamps at the top (no wrap on a read-only log)
+            if (screenState_ == KarmaScreenState::PROBES) {
+                probeList_.setItemCount((int)karma_.getProbes().size());
+                probeList_.moveUp();
                 return true;
             }
-            if (screenState_ == KarmaScreenState::CREDENTIALS && credentialScrollPos_ > 0) {
-                credentialScrollPos_--;
+            if (screenState_ == KarmaScreenState::CREDENTIALS) {
+                credentialList_.setItemCount((int)karma_.getCredentials().size());
+                credentialList_.moveUp();
                 return true;
             }
             if (screenState_ == KarmaScreenState::CLIENTS) {
@@ -361,26 +364,24 @@ bool KarmaScreen::handleInput(char key) {
                     return true;
                 }
             }
-            if (screenState_ == KarmaScreenState::CLIENT_TRAFFIC && trafficScrollPos_ > 0) {
-                trafficScrollPos_--;
+            if (screenState_ == KarmaScreenState::CLIENT_TRAFFIC) {
+                auto* client = TrafficProxy::getInstance().getClientByMac(selectedClientMac_.c_str());
+                trafficList_.setItemCount(client ? (int)client->entries.size() : 0);
+                trafficList_.moveUp();
                 return true;
             }
             break;
-            
-        case '.':
+
+        case '.':  // scroll down: the model clamps at the bottom (no wrap on a read-only log)
             if (screenState_ == KarmaScreenState::PROBES) {
-                size_t maxScroll = karma_.getProbes().size();
-                if (maxScroll > 0 && probeScrollPos_ < maxScroll - 1) {
-                    probeScrollPos_++;
-                    return true;
-                }
+                probeList_.setItemCount((int)karma_.getProbes().size());
+                probeList_.moveDown();
+                return true;
             }
             if (screenState_ == KarmaScreenState::CREDENTIALS) {
-                size_t maxScroll = karma_.getCredentials().size();
-                if (maxScroll > 0 && credentialScrollPos_ < maxScroll - 1) {
-                    credentialScrollPos_++;
-                    return true;
-                }
+                credentialList_.setItemCount((int)karma_.getCredentials().size());
+                credentialList_.moveDown();
+                return true;
             }
             if (screenState_ == KarmaScreenState::CLIENTS) {
                 auto macs = TrafficProxy::getInstance().getClientMacList();
@@ -392,10 +393,9 @@ bool KarmaScreen::handleInput(char key) {
             }
             if (screenState_ == KarmaScreenState::CLIENT_TRAFFIC) {
                 auto* client = TrafficProxy::getInstance().getClientByMac(selectedClientMac_.c_str());
-                if (client && trafficScrollPos_ < client->entries.size()) {
-                    trafficScrollPos_++;
-                    return true;
-                }
+                trafficList_.setItemCount(client ? (int)client->entries.size() : 0);
+                trafficList_.moveDown();
+                return true;
             }
             break;
             
@@ -415,7 +415,7 @@ bool KarmaScreen::handleInput(char key) {
         case 'd':
         case 'D':
             if (screenState_ == KarmaScreenState::CLIENT_DETAILS) {
-                trafficScrollPos_ = 0;
+                trafficList_.setItemCount(0);  // reset scroll to the top
                 screenState_ = KarmaScreenState::CLIENT_TRAFFIC;
                 return true;
             }
@@ -710,60 +710,49 @@ void KarmaScreen::renderSniffer(Canvas& canvas) {
 void KarmaScreen::renderProbes(Canvas& canvas) {
     canvas.fillScreen(theme::BG_PRIMARY());
     const auto& probes = karma_.getProbes();
-    
+
     char centerStr[16];
     snprintf(centerStr, sizeof(centerStr), "%zu items", probes.size());
     ui::StatusBar::render(canvas, "Probes", centerStr);
-    
-    int16_t y = 28;
-    const int maxVisible = 5;
-    
+
     if (probes.empty()) {
         canvas.setTextColor(theme::TEXT_SECONDARY());
         canvas.setCursor(10, 50);
         canvas.print("No probes captured");
     } else {
-        for (size_t i = probeScrollPos_; 
-             i < probes.size() && i < probeScrollPos_ + maxVisible; 
-             i++) {
-            const auto& probe = probes[i];
-            
-            canvas.setTextColor(theme::ACCENT());
-            canvas.setCursor(10, y);
-            
-            if (strlen(probe.ssid) > 18) {
-                char truncated[19];
-                strncpy(truncated, probe.ssid, 15);
-                truncated[15] = '.';
-                truncated[16] = '.';
-                truncated[17] = '.';
-                truncated[18] = '\0';
-                canvas.print(truncated);
-            } else {
-                canvas.print(probe.ssid);
-            }
-            
-            canvas.setTextColor(theme::TEXT_SECONDARY());
-            canvas.printf(" x%d", probe.count);
-            y += 10;
-            
-            canvas.setCursor(20, y);
-            canvas.printf("%02X:%02X:..:%02X %ddBm",
-                probe.clientMAC[0], probe.clientMAC[1], 
-                probe.clientMAC[5], probe.rssi);
-            y += 14;
-        }
+        // Each probe is a two-line item (SSID + count, then client MAC + RSSI). Routed through the
+        // shared scroll-only list: the component derives the row budget from the live rect (no more
+        // hardcoded maxVisible) and draws the proportional thumb in place of the old triangle
+        // carets (ADR-0133).
+        const int16_t listTop = 28;
+        const int16_t availableHeight = canvas.height() - listTop - ui::FOOTER_HEIGHT;
+        constexpr int16_t PROBE_ROW_HEIGHT = 24;
+        probeList_.setItemCount((int)probes.size());
+        ScrollableList::render(canvas, probeList_, 0, listTop, canvas.width(), availableHeight,
+            PROBE_ROW_HEIGHT, [&probes](Canvas& c, int idx, int16_t rowY, bool /*selected*/) {
+                const auto& probe = probes[idx];
+                c.setTextColor(theme::ACCENT());
+                c.setCursor(10, rowY);
+                if (strlen(probe.ssid) > 18) {
+                    char truncated[19];
+                    strncpy(truncated, probe.ssid, 15);
+                    truncated[15] = '.';
+                    truncated[16] = '.';
+                    truncated[17] = '.';
+                    truncated[18] = '\0';
+                    c.print(truncated);
+                } else {
+                    c.print(probe.ssid);
+                }
+                c.setTextColor(theme::TEXT_SECONDARY());
+                c.printf(" x%d", probe.count);
+                c.setCursor(20, rowY + 10);
+                c.printf("%02X:%02X:..:%02X %ddBm",
+                    probe.clientMAC[0], probe.clientMAC[1],
+                    probe.clientMAC[5], probe.rssi);
+            });
     }
-    
-    if (probeScrollPos_ > 0) {
-        ui::drawTriGlyph(canvas, config::SCREEN_WIDTH - 10, 25, ui::TriGlyph::Up,
-                         theme::ACCENT());  // triangle (ADR-0100): items scrolled off above
-    }
-    if (probeScrollPos_ + maxVisible < probes.size()) {
-        ui::drawTriGlyph(canvas, config::SCREEN_WIDTH - 10, config::SCREEN_HEIGHT - 30,
-                         ui::TriGlyph::Down, theme::ACCENT());  // items scrolled off below
-    }
-    
+
     // Footer hints
     footerHints_.setHints({}); // Universal hints back/nav are enough
     footerHints_.render(canvas);
@@ -777,37 +766,33 @@ void KarmaScreen::renderCredentials(Canvas& canvas) {
     snprintf(centerStr, sizeof(centerStr), "%zu items", creds.size());
     ui::StatusBar::render(canvas, "Credentials", centerStr);
     
-    int16_t y = 28;
-    const int maxVisible = 4;
-    
     if (creds.empty()) {
         canvas.setTextColor(theme::TEXT_SECONDARY());
         canvas.setCursor(10, 50);
         canvas.print("No credentials captured");
     } else {
-        for (size_t i = credentialScrollPos_; 
-             i < creds.size() && i < credentialScrollPos_ + maxVisible; 
-             i++) {
-            const auto& cred = creds[i];
-            
-            canvas.setTextColor(theme::ACCENT());
-            canvas.setCursor(5, y);
-            canvas.print("Credential #");
-            canvas.print((int)(i + 1));
-            y += 10;
-            
-            canvas.setTextColor(theme::SUCCESS());
-            canvas.setCursor(10, y);
-            canvas.print(cred.username);
-            y += 10;
-            
-            canvas.setTextColor(theme::WARNING());
-            canvas.setCursor(10, y);
-            canvas.print(cred.password);
-            y += 12;
-        }
+        // Each credential is a three-line item (header, username, password). Scroll-only list: the
+        // component owns the row budget and the thumb (ADR-0133).
+        const int16_t listTop = 28;
+        const int16_t availableHeight = canvas.height() - listTop - ui::FOOTER_HEIGHT;
+        constexpr int16_t CRED_ROW_HEIGHT = 32;
+        credentialList_.setItemCount((int)creds.size());
+        ScrollableList::render(canvas, credentialList_, 0, listTop, canvas.width(), availableHeight,
+            CRED_ROW_HEIGHT, [&creds](Canvas& c, int idx, int16_t rowY, bool /*selected*/) {
+                const auto& cred = creds[idx];
+                c.setTextColor(theme::ACCENT());
+                c.setCursor(5, rowY);
+                c.print("Credential #");
+                c.print(idx + 1);
+                c.setTextColor(theme::SUCCESS());
+                c.setCursor(10, rowY + 10);
+                c.print(cred.username);
+                c.setTextColor(theme::WARNING());
+                c.setCursor(10, rowY + 20);
+                c.print(cred.password);
+            });
     }
-    
+
     // Footer hints
     footerHints_.setHints({});
     footerHints_.render(canvas);
@@ -909,38 +894,37 @@ void KarmaScreen::renderClientTraffic(Canvas& canvas) {
     auto* client = TrafficProxy::getInstance().getClientByMac(selectedClientMac_.c_str());
     
     ui::StatusBar::render(canvas, "Traffic Feed");
-    
-    int16_t y = 28;
-    const int maxVisible = 6;
-    
+
     if (!client || client->entries.empty()) {
         canvas.setTextColor(theme::TEXT_SECONDARY());
         canvas.setCursor(10, 50);
         canvas.print("No traffic captured");
     } else {
-        for (size_t i = trafficScrollPos_; 
-             i < client->entries.size() && i < trafficScrollPos_ + maxVisible; 
-             i++) {
-            const auto& entry = client->entries[i];
-            
-            canvas.setTextColor(entry.type == TrafficEntryType::DNS ? theme::INFO() : theme::SUCCESS());
-            canvas.setCursor(5, y);
-            
-            if (strlen(entry.data) > 30) {
-                char truncated[31];
-                strncpy(truncated, entry.data, 27);
-                truncated[27] = '.';
-                truncated[28] = '.';
-                truncated[29] = '.';
-                truncated[30] = '\0';
-                canvas.print(truncated);
-            } else {
-                canvas.print(entry.data);
-            }
-            y += 14;
-        }
+        // Each traffic entry is a single line. Scroll-only list: the component owns the row budget
+        // and draws the proportional thumb (ADR-0133).
+        const int16_t listTop = 28;
+        const int16_t availableHeight = canvas.height() - listTop - ui::FOOTER_HEIGHT;
+        constexpr int16_t TRAFFIC_ROW_HEIGHT = 14;
+        trafficList_.setItemCount((int)client->entries.size());
+        ScrollableList::render(canvas, trafficList_, 0, listTop, canvas.width(), availableHeight,
+            TRAFFIC_ROW_HEIGHT, [client](Canvas& c, int idx, int16_t rowY, bool /*selected*/) {
+                const auto& entry = client->entries[idx];
+                c.setTextColor(entry.type == TrafficEntryType::DNS ? theme::INFO() : theme::SUCCESS());
+                c.setCursor(5, rowY);
+                if (strlen(entry.data) > 30) {
+                    char truncated[31];
+                    strncpy(truncated, entry.data, 27);
+                    truncated[27] = '.';
+                    truncated[28] = '.';
+                    truncated[29] = '.';
+                    truncated[30] = '\0';
+                    c.print(truncated);
+                } else {
+                    c.print(entry.data);
+                }
+            });
     }
-    
+
     // Footer hints
     footerHints_.setHints({});
     footerHints_.render(canvas);
