@@ -5,6 +5,7 @@
 
 #include "captures_screen.h"
 #include "../../modules/network/pwncrack_service.h"
+#include "utils/count_format.h"
 
 #ifdef ESP32
 #include <SD.h>
@@ -880,9 +881,11 @@ void CapturesScreen::kickNextSync() {
     uploadAllPos_++;
     if (uploadAllPos_ < (int)syncQueue_.size()) {
         pendingUpload_ = 2;  // next single-upload cycle (toast renders first)
-        char msg[48];  // sized for the format's worst case
-        snprintf(msg, sizeof(msg), "Syncing %d/%d (ESC=stop)",
-                 uploadAllPos_ + 1, (int)syncQueue_.size());
+        char count[utils::COUNT_FORMAT_BUFFER_SIZE];
+        utils::formatCount(uploadAllPos_ + 1, static_cast<int>(syncQueue_.size()),
+                           count, sizeof(count));
+        char msg[48];
+        snprintf(msg, sizeof(msg), "Syncing %s (ESC=stop)", count);
         showToast(msg);
     } else {
         char msg[40];

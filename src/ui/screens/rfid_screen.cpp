@@ -8,6 +8,7 @@
 #include "ui/components/action_button.h"
 #include "ui/components/status_bar.h"
 #include "ui/components/toast_manager.h"
+#include "utils/count_format.h"
 #include "utils/log.h"
 #include <SD.h>
 
@@ -1090,9 +1091,9 @@ void RfidScreen::drawAuditSummary(Canvas& canvas) {
         });
 
     // Scroll indicator
-    char rightContent[24];  // sized for the format's worst case
-    snprintf(rightContent, sizeof(rightContent), "%d/%d",
-             summaryList_.selectedIndex() + 1, MIFARE_1K_SECTORS);
+    char rightContent[utils::COUNT_FORMAT_BUFFER_SIZE];
+    utils::formatCount(summaryList_.selectedIndex() + 1, MIFARE_1K_SECTORS,
+                       rightContent, sizeof(rightContent));
     footerHints_.setRightContent(rightContent);
 }
 
@@ -1321,12 +1322,9 @@ void RfidScreen::drawWritePick(Canvas& canvas) {
             c.print(m_writeFiles[idx].c_str());
         });
 
-    // char[8] truncated the "N/M" counter once the file count reached 4 digits
-    // (e.g. "1000/1000" -> "1000/10"). Sized for the worst case of two 32-bit %d plus
-    // '/' and NUL (24); interim until the shared count formatter lands (see issue #54).
-    char rightContent[24];
-    snprintf(rightContent, sizeof(rightContent), "%d/%d",
-             writeFileList_.selectedIndex() + 1, total);
+    char rightContent[utils::COUNT_FORMAT_BUFFER_SIZE];
+    utils::formatCount(writeFileList_.selectedIndex() + 1, total,
+                       rightContent, sizeof(rightContent));
     footerHints_.setRightContent(rightContent);
 }
 
