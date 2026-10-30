@@ -105,6 +105,10 @@ and **Radio** (Sub-GHz / 2.4 GHz, shown when the multi-radio cap is attached), p
 - **Mouse Jiggler** - Periodic small mouse movements to defeat idle-lock/screensaver timers.
 - Not available on M5StickC Plus2 (no native USB-OTG).
 
+> **Custom BadUSB scripts:** drop DuckyScript `.txt` files into `/adversary/badusb/` on the SD
+> card. The firmware creates that folder on first run and lists each file with an "SD" badge
+> alongside the built-in scripts. One script per `.txt` file, standard DuckyScript syntax.
+
 ### Radio — Sub-GHz & 2.4 GHz (multi-radio cap)
 Requires the CC1101/NRF24 expansion cap; the **Radio** entry is greyed out when no cap is detected.
 - **Sub-GHz Band Sweep** - CC1101 RSSI read across the 315 / 433.92 / 868.35 / 915 MHz presets while you hold a remote's button, with a peak-held bar per band and the strongest highlighted — tells you *which band* an unknown remote transmits on before you try to capture it. Reads energy, not modulation (independent of OOK vs FSK).
@@ -160,7 +164,8 @@ RFID Write / Clone · AP / BLE Proximity Trackers · Evil Twin client deauth / b
 
 **Experimental — works, but hardware verification is still in progress**
 Sub-GHz OOK replay (transmit) · Sub-GHz FSK capture/replay · Sub-GHz Jamming · 2.4 GHz Spectrum
-Analyzer · BadBLE (known re-pair-after-reflash quirk) · BLE Identity Spoof.
+Analyzer · BadBLE (reflash re-pair loop fixed via fresh per-session identity, pending on-device
+confirmation) · BLE Identity Spoof.
 
 ---
 

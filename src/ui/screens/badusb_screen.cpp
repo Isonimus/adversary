@@ -253,9 +253,14 @@ void BadUsbScreen::drawIdle(Canvas& canvas) {
 
     int total = (int)m_scripts.size();
     if (total == 0) {
-        canvas.setTextColor(theme::TEXT_SECONDARY());
         canvas.setTextDatum(top_center);
-        canvas.drawString("No scripts found", config::SCREEN_WIDTH/2, 50);
+        canvas.setTextColor(theme::TEXT_SECONDARY());
+        canvas.drawString("No scripts found", config::SCREEN_WIDTH/2, 40);
+        // Discoverability hint: user DuckyScript is loaded from SD, but operators were not finding
+        // where to put it, so name the path and format on the empty screen itself.
+        canvas.setTextColor(theme::TEXT_DISABLED());
+        canvas.drawString("Put .txt DuckyScript in", config::SCREEN_WIDTH/2, 62);
+        canvas.drawString("/adversary/badusb/ on SD", config::SCREEN_WIDTH/2, 76);
         canvas.setTextDatum(top_left);
         return;
     }
