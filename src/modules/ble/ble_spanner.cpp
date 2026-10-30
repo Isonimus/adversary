@@ -30,10 +30,14 @@ class HIDSecurityCallbacks : public NimBLESecurityCallbacks {
     void onAuthenticationComplete(ble_gap_conn_desc* desc) {
         if (!desc->sec_state.encrypted) {
             LOG_E("BLE", "Auth Failed: Not Encrypted");
+            // Feed the reconnect-storm guard: a failed auth is the signature of a host retrying a
+            // stale bond against our identity (ADR-0134).
+            adversary::BLESpanner::getInstance().notifyAuthResult(false);
             return;
         }
         LOG_I("BLE", "Auth Complete. Bonded: %d, Encrypted: %d",
             desc->sec_state.bonded, desc->sec_state.encrypted);
+        adversary::BLESpanner::getInstance().notifyAuthResult(true);
     }
 };
 
@@ -54,7 +58,9 @@ BLESpanner::BLESpanner() :
     m_pAdvertising(nullptr),
     m_pServer(nullptr),
     m_taskHandle(nullptr),
-    m_lastModelIdx(0)
+    m_lastModelIdx(0),
+    m_hidLinkEncrypted(false),
+    m_hidAdvertiseSuppressed(false)
 {
     esp_read_mac(m_originalMac, ESP_MAC_BT);
 }
@@ -67,6 +73,12 @@ void BLESpanner::start(const BleSpamConfig& config) {
     m_interactionCount = 0;
     m_lastUpdate = millis();
     m_active = true;
+
+    // Fresh start: clear the reconnect-storm state so a prior session's churn never carries over
+    // and advertising is allowed again (ADR-0134).
+    m_churnGuard.reset();
+    m_hidLinkEncrypted = false;
+    m_hidAdvertiseSuppressed = false;
     
     // For HID mode: If stack is already initialized (restart), query actual connection count
     // instead of resetting to 0, since the connection may persist across stop/start
@@ -99,7 +111,10 @@ void BLESpanner::start(const BleSpamConfig& config) {
         m_pServer = NimBLEDevice::createServer();
         m_pServer->setCallbacks(this, false);  // false = we own this (singleton, don't delete)
     }
-    
+    // Re-enable auto-re-advertise on every start: a previous session's reconnect-storm trip may
+    // have turned it off (ADR-0134).
+    m_pServer->advertiseOnDisconnect(true);
+
     // HID / BadBLE Security Configuration
     if (m_config.provider == BleSpamProvider::HID_KEYBOARD) {
         NimBLEDevice::setSecurityAuth(true, false, true); // Bond=YES, MITM=NO, SC=YES (Just Works)
@@ -123,29 +138,33 @@ void BLESpanner::start(const BleSpamConfig& config) {
     NimBLEDevice::setOwnAddrType(BLE_OWN_ADDR_RANDOM);
     randomSeed(esp_random());
 
-    // HID Specific Logic: Use Public Address (Fixed or Factory)
+    // HID identity (ADR-0134): fresh random identity by default, fixed public identity opt-in.
+    // The default sidesteps the endless-reconnect loop, where a host keeps a stale LTK keyed to a
+    // fixed identity after a reflash and spins trying to encrypt against our wiped key. A fresh
+    // random address each session never matches that stale bond, so the host always pairs clean.
     if (m_config.provider == BleSpamProvider::HID_KEYBOARD) {
-        NimBLEDevice::setOwnAddrType(BLE_OWN_ADDR_PUBLIC); // Use Public Address for caching/bonding
-        
-        // Check for User-Defined Fixed MAC
+        NimBLEDevice::setOwnAddrType(BLE_OWN_ADDR_PUBLIC);
+
         const char* fixedMac = SettingsManager::getInstance().get().wireless.fixedBleMac;
-        if (fixedMac[0] != '\0') {
-            uint8_t mac[6];
-            unsigned int m[6];
-            if (sscanf(fixedMac, "%02X:%02X:%02X:%02X:%02X:%02X", 
-                &m[0], &m[1], &m[2], &m[3], &m[4], &m[5]) == 6) {
-                
-                for(int i=0; i<6; i++) mac[i] = (uint8_t)m[i];
-                esp_base_mac_addr_set(mac);
-                LOG_I("BLE", "Using Fixed MAC: %s", fixedMac);
-            } else {
-                LOG_W("BLE", "Invalid Fixed MAC format, using Factory.");
-                esp_base_mac_addr_set(m_originalMac);
-            }
+        uint8_t mac[6];
+        unsigned int m[6];
+        if (fixedMac[0] != '\0' &&
+            sscanf(fixedMac, "%02X:%02X:%02X:%02X:%02X:%02X",
+                   &m[0], &m[1], &m[2], &m[3], &m[4], &m[5]) == 6) {
+            // Opt-in persistence: a stable identity the host silently reconnects to across
+            // sessions. Caveat: after a reflash the host's stale bond must be forgotten to
+            // re-pair; the reconnect-storm guard bounds that case instead of looping.
+            for (int i = 0; i < 6; i++) mac[i] = (uint8_t)m[i];
+            esp_base_mac_addr_set(mac);
+            LOG_I("BLE", "HID fixed MAC (persistent identity): %s", fixedMac);
         } else {
-            // Factory Default
-            esp_base_mac_addr_set(m_originalMac);
-            LOG_I("BLE", "Using Factory MAC for HID.");
+            if (fixedMac[0] != '\0') {
+                LOG_W("BLE", "Invalid Fixed MAC format, using a fresh random identity.");
+            }
+            // Default: a fresh random identity so no host's stale bond can match. Inject-and-go
+            // needs no cross-session persistence.
+            generateRandomMac();
+            LOG_I("BLE", "HID fresh random identity (no stale-bond collision).");
         }
     }
 
@@ -452,20 +471,14 @@ void BLESpanner::runSpamCycle() {
 }
 
 void BLESpanner::generateRandomMac() {
+    // Fully random so the identity carries no recognizable prefix and never repeats across
+    // sessions (ADR-0134). The two forced bits keep it a valid unicast, locally administered
+    // address.
     uint8_t mac[6];
-    // Use a fixed prefix that is definitely Unicast and Locally Administered
-    // 0xDE = 1101 1110 (LSB 0 = Unicast, Bit 1 = 1 = Locally Administered)
-    mac[0] = 0xDE; 
-    mac[1] = 0xAD;
-    mac[2] = 0xBE;
-    mac[3] = esp_random() % 256;
-    mac[4] = esp_random() % 256;
-    mac[5] = esp_random() % 256;
-    
-    // Final safety bit check
-    mac[0] &= 0xFE; // Force Unicast
+    for (int i = 0; i < 6; i++) mac[i] = (uint8_t)(esp_random() & 0xFF);
+    mac[0] &= 0xFE; // Force Unicast (clear the multicast bit)
     mac[0] |= 0x02; // Force Locally Administered
-    
+
     esp_err_t err = esp_base_mac_addr_set(mac);
     if (err != ESP_OK) {
         LOG_E("BLE", "MAC rotation error: %d", err);
@@ -500,7 +513,11 @@ void BLESpanner::onConnect(NimBLEServer* pServer) {
     m_interactionCount = m_interactionCount + 1;
     m_lastPayload = "> CONNECTED [!]";
     LOG_I("BLE", "Device connected!");
-    
+
+    // A new link starts unencrypted; notifyAuthResult(true) flips this once SMP succeeds. A drop
+    // while still false is a failed-auth reconnect that feeds the storm guard (ADR-0134).
+    m_hidLinkEncrypted = false;
+
     // Trigger semantic event for notification
     EventData event(EventType::BLE_CONNECTED);
     EventBus::getInstance().publish(event);
@@ -509,6 +526,26 @@ void BLESpanner::onConnect(NimBLEServer* pServer) {
 void BLESpanner::onDisconnect(NimBLEServer* pServer) {
     if (m_connectedCount > 0) m_connectedCount = m_connectedCount - 1;
     LOG_I("BLE", "Device disconnected");
+
+    // Loop-breaker (ADR-0134): a HID link that drops before it ever encrypted is a failed-auth
+    // reconnect, the signature of a host retrying a stale bond. Count the churn; once it storms,
+    // stop auto-re-advertising so the device stops spinning and the operator sees why.
+    if (m_config.provider == BleSpamProvider::HID_KEYBOARD && !m_hidLinkEncrypted) {
+        if (m_churnGuard.recordFailure(millis())) {
+            m_hidAdvertiseSuppressed = true;
+            if (m_pServer) m_pServer->advertiseOnDisconnect(false);
+            NimBLEDevice::stopAdvertising();
+            m_lastPayload = "RE-PAIR: forget on host";
+            LOG_W("BLE", "Reconnect storm: advertising stopped. Forget this device on the host, "
+                         "then restart BadBLE.");
+        }
+    }
+}
+
+void BLESpanner::notifyAuthResult(bool encrypted) {
+    m_hidLinkEncrypted = encrypted;
+    // A clean encrypted link means the churn (if any) is over; let advertising recover next drop.
+    if (encrypted) m_churnGuard.reset();
 }
 
 void BLESpanner::updatePayload() {

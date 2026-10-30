@@ -11,6 +11,7 @@
 #include <vector>
 #include <string>
 #include "modules/ble/ble_scanner.h" // For BLEDeviceInfo
+#include "utils/ble_reconnect_guard.h" // Reconnect-storm loop-breaker (ADR-0134)
 
 namespace adversary {
 
@@ -101,6 +102,14 @@ public:
     void onDisconnect(NimBLEServer* pServer) override;
 
     /**
+     * @brief Report an SMP auth result for the current HID link (ADR-0134).
+     *
+     * Called from the security callback. A successful (encrypted) auth clears the reconnect-storm
+     * guard; a failure leaves the link marked unencrypted so onDisconnect counts it as churn.
+     */
+    void notifyAuthResult(bool encrypted);
+
+    /**
      * @brief Check if a device is currently paired/bonded (for HID)
      */
     bool isConnected() const { return m_connectedCount > 0; }
@@ -152,6 +161,14 @@ private:
     static void spamTask(void* pvParameters);
     void runSpamCycle();
     int m_lastModelIdx;
+
+    // BadBLE reconnect-storm loop-breaker (ADR-0134). m_hidLinkEncrypted tracks whether the
+    // current link reached an encrypted state; a drop while still unencrypted is a failed-auth
+    // reconnect and feeds the guard. Once the guard trips, m_hidAdvertiseSuppressed stops the
+    // auto-re-advertise so the device no longer spins against a host's stale bond.
+    utils::ReconnectChurnGuard m_churnGuard;
+    volatile bool m_hidLinkEncrypted;
+    volatile bool m_hidAdvertiseSuppressed;
 };
 
 } // namespace adversary

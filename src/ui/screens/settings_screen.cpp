@@ -113,7 +113,8 @@ void SettingsScreen::buildSettingsList() {
     if (strlen(fixedMac) > 0) {
         snprintf(macLabelBuf_, sizeof(macLabelBuf_), "Fixed MAC: %s", fixedMac);
     } else {
-        snprintf(macLabelBuf_, sizeof(macLabelBuf_), "Fixed MAC: Factory Default");
+        // Empty = the ADR-0134 default: a fresh random BLE identity each BadBLE session.
+        snprintf(macLabelBuf_, sizeof(macLabelBuf_), "Fixed MAC: Auto (random)");
     }
     items_[itemCount_++] = SettingItem::action(macLabelBuf_);
     
@@ -511,8 +512,8 @@ bool SettingsScreen::handleInput(char key) {
                          actionMenu_.setTitle("Configure BLE MAC");
                          actionMenu_.clearItems();
                          actionMenu_.addItem('1', "Manual Input");
-                         actionMenu_.addItem('2', "Randomize");
-                         actionMenu_.addItem('3', "Factory Default");
+                         actionMenu_.addItem('2', "Pin Random MAC");
+                         actionMenu_.addItem('3', "Auto (random/session)");
                          
                          actionMenu_.setOnAction([this](char key) {
                              auto& settings = SettingsManager::getInstance().getMutable();
@@ -548,9 +549,9 @@ bool SettingsScreen::handleInput(char key) {
                                  buildSettingsList();
                                  needsRedraw_ = true;
                              }
-                             else if (key == '3') { // Factory
+                             else if (key == '3') { // Auto: fresh random identity each session (ADR-0134)
                                  settings.wireless.fixedBleMac[0] = '\0';
-                                 ToastManager::getInstance().show("Reverted to Factory", ToastType::SUCCESS);
+                                 ToastManager::getInstance().show("BLE: random each session", ToastType::SUCCESS);
                                  actionMenu_.hide();
                                  buildSettingsList();
                                  needsRedraw_ = true;
