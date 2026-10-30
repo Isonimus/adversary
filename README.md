@@ -82,10 +82,11 @@ and **Radio** (Sub-GHz / 2.4 GHz, shown when the multi-radio cap is attached), p
 
 ### Wireless (WiFi)
 - **Scanner** - Discover networks with security type, signal strength, and channel info; context action menu per network.
+- **AP Proximity Tracker** - Hunt an access point by beacon signal strength: a live meter with a closer/farther direction (labelled signal, not distance), launched from the scanner, working on hidden or idle APs.
 - **Packet Sniffer** - Raw 802.11 frame capture with channel hopping and filtering.
 - **Handshake Capture** - WPA/WPA2/WPA3 handshake acquisition (4-way, PMKID, partial EAPOL), with Auto Hunt (autonomous multi-target hunting + whitelist) and manual modes.
 - **Deauthentication** - Targeted or mass 802.11 deauth frames.
-- **Evil Twin** - Rogue AP with captive-portal credential harvesting.
+- **Evil Twin** - Rogue AP with captive-portal credential harvesting; deauth or block individual connected clients from the clients list.
 - **Karma AP** - Auto-responds to any client probe request.
 - **Beacon Spam / Probe Flood** - Fake-network flooding and probe-request saturation.
 - **Wardriving** - GPS-integrated mapping of **WiFi and BLE** observations, with CSV/KML export and **WiGLE** upload.
@@ -93,7 +94,7 @@ and **Radio** (Sub-GHz / 2.4 GHz, shown when the multi-radio cap is attached), p
 - **Captures Browser** - Manage Handshakes/Packets/Credentials, with cloud-cracking status and a bulk **"Sync all new"** action across every configured cracking service.
 
 ### BLE (Bluetooth Low Energy)
-- **BLE Scanner** - Real-time discovery and RSSI tracking of BLE peripherals.
+- **BLE Scanner** - Real-time discovery and RSSI tracking of BLE peripherals, with a proximity tracker to hunt a chosen device by signal (live meter + closer/farther direction).
 - **Apple Attack** - Proximity-pairing popup spam for Apple devices.
 - **BadBLE** - BLE HID keyboard emulation, including a **DuckyScript interpreter** for scripted keystroke injection over BLE.
 - **Identity Spoof** - BLE identity/address spoofing.
@@ -155,7 +156,7 @@ Scanner · Packet Sniffer · Handshake Capture (4-way / PMKID / EAPOL) + Auto Hu
 Evil Twin + captive portal + Traffic Proxy · Karma · Beacon Spam / Probe Flood · Wardriving +
 WiGLE · Captures Browser · Cloud sync (WPA-SEC / pwncrack) · Web Dashboard · BadUSB · Mouse
 Jiggler · IR TV-B-Gone · IR Record & Replay · BLE Scanner · Apple/BLE Spam · RFID Audit ·
-RFID Write / Clone.
+RFID Write / Clone · AP / BLE Proximity Trackers · Evil Twin client deauth / block.
 
 **Experimental — works, but hardware verification is still in progress**
 Sub-GHz OOK replay (transmit) · Sub-GHz FSK capture/replay · Sub-GHz Jamming · 2.4 GHz Spectrum

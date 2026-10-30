@@ -7,6 +7,16 @@ releases, this can be replaced by a git-tag-generated changelog.
 ---
 
 
+## 2026-10-30 (v0.7.0-alpha)
+- **Hunt a BLE device by signal strength.** A "Track device" action on the BLE scanner opens a proximity view that locks onto the chosen device and turns its advertisement RSSI into a smoothed signal meter with a getting-closer / getting-farther arrow and a red/amber/green band, so you can walk down a beacon or tag. It is labelled signal, not distance (RSSI is not a tape measure). (slice-0129; ADR-0128)
+- **Locate a WiFi AP by beacon signal.** A "Locate AP" action on the WiFi scanner does the same for an access point: it locks the AP's channel, reads its beacon RSSI frame by frame and drives the same meter, arrow and band, and works on a hidden or idle AP. (slice-0131; ADR-0130)
+- **Act on connected clients from Evil Twin.** The CLIENTS list is now interactive: ENTER on a client opens a menu to deauthenticate it once (bounce it back through the captive portal) or block it, which keeps it kicked off for the rest of the session. (ADR-0132)
+- **BLE Identity Spoof is no longer a dead action.** Selecting "Spoof Identity" on a scanned device previously did nothing; it now opens the spoofer locked to that device to clone its name and MAC, and a cold launch from the BLE menu shows a `(select from scanner)` prompt that routes to the scanner to pick a target instead of advertising an empty persona. (Remains in the experimental tier pending on-device confirmation of the clone.)
+- **Read-only logs scroll with a position thumb.** The probe, credential, client-traffic, saved-network, About and What's New views now use the shared list component: a proportional scrollbar thumb replaces the old carets and "N/M" readout, and scrolling clamps cleanly at both ends. (ADR-0133)
+- **Crashes now record the heap state that preceded them.** A small flight recorder in always-on RTC memory logs the free heap, largest free block (fragmentation) and minimum free heap with a real timestamp, so an out-of-memory reboot leaves evidence of how starved the heap was instead of a bare reset. (slice-0127; ADR-0126)
+- **Footer counters no longer truncate.** Large index/total counters (such as a four-digit file count) render in full instead of being cut to "1000/10"; the counter formatter is now shared and bounds-checked. First external community contribution. (#54, #58)
+- **Build integrity: third-party firmware-library ZIPs are pinned by SHA256.** The two external release ZIPs the build downloads are verified against recorded checksums in CI, so a re-uploaded asset at a fixed URL can't silently change the shipped bytes. (ADR-0125)
+
 ## 2026-10-25 (v0.6.0-alpha)
 - **The screen now sleeps on idle to save battery.** After a period of inactivity the display dims to a still-readable level, then turns off; any key wakes it. Both delays are configurable in Settings > Display (Dim After / Screen Off), and the dim stage is a readable intermediate so a glance does not require a keypress. (slices 0115, 0117; ADR-0114, ADR-0116)
 - **Clocks show your local time.** Set a UTC offset in Settings > Time Zone and the wardriving clock and on-screen times render local, while saved logs and exports stay in UTC so captures remain comparable across devices. (slice-0119; ADR-0118)
