@@ -7,6 +7,17 @@ releases, this can be replaced by a git-tag-generated changelog.
 ---
 
 
+## 2026-10-30 (v0.7.1-alpha)
+
+Stability point release.
+
+- **BadBLE no longer loops after a reflash.** HID mode now advertises a fresh random identity each session by default, so a host's stale bond from a previous install can no longer collide and spin the device in an endless reconnect loop. "Fixed MAC" becomes opt-in persistence for operators who deliberately want a reconnectable identity, and a reconnect-storm guard stops advertising (with a "forget on host" hint) if that opt-in path ever spins. Verified on-device. (ADR-0134)
+- **BadUSB SD scripts are discoverable.** The "No scripts found" screen now names the path and format (DuckyScript `.txt` in `/adversary/badusb/`), and the README documents the convention. The SD-loading feature already existed; operators just could not find it.
+- **BadBLE "Type" row relabelled "Appearance".** It only ever set the BLE GAP appearance icon hint (hosts classify an HID device by its report map, which is always a keyboard), so the honest label avoids implying it changes the device class. A dead `setAppearance` no-op was removed. Real mouse/joystick device types are tracked for a later release.
+
+Internal: new host-tested `ReconnectChurnGuard` (utils, +9 native tests, 964 total). The `[Captures] heap` debug instrument was confirmed already inert in shipping builds (it is `LOG_D`, compiled out at the `INFO` default), so it stays as a zero-cost field instrument rather than being removed yet.
+
+
 ## 2026-10-30 (v0.7.0-alpha)
 - **Hunt a BLE device by signal strength.** A "Track device" action on the BLE scanner opens a proximity view that locks onto the chosen device and turns its advertisement RSSI into a smoothed signal meter with a getting-closer / getting-farther arrow and a red/amber/green band, so you can walk down a beacon or tag. It is labelled signal, not distance (RSSI is not a tape measure). (slice-0129; ADR-0128)
 - **Locate a WiFi AP by beacon signal.** A "Locate AP" action on the WiFi scanner does the same for an access point: it locks the AP's channel, reads its beacon RSSI frame by frame and drives the same meter, arrow and band, and works on a hidden or idle AP. (slice-0131; ADR-0130)
