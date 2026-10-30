@@ -260,9 +260,10 @@ void BLESpanner::start(const BleSpamConfig& config) {
             LOG_I("BLE", "Server re-started for reused HID service");
         }
         
-        // Update advertising to include HID appearance and service
-        m_pAdvertising->setAppearance(0x03C1); // Keyboard
-        m_pAdvertising->addServiceUUID(NimBLEUUID((uint16_t)0x1812));
+        // Appearance and the HID service UUID are already carried by the custom advertisement data
+        // set in updatePayload() (setAdvertisementData flips NimBLE's m_customAdvData, after which
+        // these piecemeal setters are ignored). The old hardcoded setAppearance(0x03C1) here was a
+        // dead no-op that also wrongly implied the appearance is forced to keyboard.
     }
 
     // Start background task

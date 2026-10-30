@@ -157,7 +157,10 @@ void BleBadBleScreen::drawIdle(Canvas& canvas) {
 
     const char* labels[] = {
         "Name:",
-        "Type:",
+        // GAP appearance hint only (icon), not the HID class: the report map is always a keyboard
+        // (ADR-0134 ledger / v0.8.0 real-device-type item). Labeled honestly so it does not imply
+        // it changes behavior.
+        "Appearance:",
         "Target:"
     };
 
@@ -176,7 +179,7 @@ void BleBadBleScreen::drawIdle(Canvas& canvas) {
                 case 0: // Name
                     strncpy(valueStr, m_sessionName, sizeof(valueStr) - 1);
                     break;
-                case 1: // Type
+                case 1: // Appearance (GAP icon hint only; HID class is always keyboard)
                     switch (m_appearance) {
                         case 0x03C1: strncpy(valueStr, "Keyboard", sizeof(valueStr) - 1); break;
                         case 0x03C2: strncpy(valueStr, "Mouse", sizeof(valueStr) - 1); break;
