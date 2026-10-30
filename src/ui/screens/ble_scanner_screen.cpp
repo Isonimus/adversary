@@ -293,9 +293,11 @@ void BleScannerScreen::handleAction(char action) {
             EventData evt(EventType::BLE_TRACK_TARGET_SELECTED);
             evt.payload.attackTarget.targetScreen = static_cast<int16_t>(ScreenId::BLE_TRACKER);
             memcpy(evt.payload.attackTarget.bssid, m_contextDevice.address.getNative(), 6);
-            const std::string& name = hasAdvertisedName(m_contextDevice)
-                                          ? m_contextDevice.name
-                                          : ble::addressToString(m_contextDevice.address);
+            // By value: the ternary yields a temporary (one branch returns std::string by
+            // value), so a reference would bind to it. A value copy is unambiguously safe.
+            const std::string name = hasAdvertisedName(m_contextDevice)
+                                         ? m_contextDevice.name
+                                         : ble::addressToString(m_contextDevice.address);
             strncpy(evt.payload.attackTarget.ssid, name.c_str(), 32);
             evt.payload.attackTarget.ssid[32] = '\0';
             EventBus::getInstance().queue(evt);
@@ -311,9 +313,10 @@ void BleScannerScreen::handleAction(char action) {
             EventData evt(EventType::BLE_SPOOF_TARGET_SELECTED);
             evt.payload.attackTarget.targetScreen = static_cast<int16_t>(ScreenId::BLE_SPOOF);
             memcpy(evt.payload.attackTarget.bssid, m_contextDevice.address.getNative(), 6);
-            const std::string& name = hasAdvertisedName(m_contextDevice)
-                                          ? m_contextDevice.name
-                                          : ble::addressToString(m_contextDevice.address);
+            // By value: see the Track case above (ternary yields a temporary).
+            const std::string name = hasAdvertisedName(m_contextDevice)
+                                         ? m_contextDevice.name
+                                         : ble::addressToString(m_contextDevice.address);
             strncpy(evt.payload.attackTarget.ssid, name.c_str(), 32);
             evt.payload.attackTarget.ssid[32] = '\0';
             EventBus::getInstance().queue(evt);

@@ -79,7 +79,9 @@ void ApRssiMonitor::onFrame(const uint8_t* data, uint16_t len, int8_t rssi) {
     if (!managementFrameFromBssid(data, len, targetBssid_)) return;
     lastRssi_ = rssi;
     lastSeenMs_ = millis();
-    ++sampleSeq_;
+    // Explicit store, not ++: compound ops on a volatile are deprecated (-Wvolatile).
+    // Single writer (this callback), so a plain read-add-write preserves the ordering seq.
+    sampleSeq_ = sampleSeq_ + 1;
 }
 #endif
 
