@@ -234,6 +234,10 @@ bool PacketSniffer::start(PacketCallback callback) {
     WiFi.disconnect();
     delay(10);
 
+    // The mode cycle resets the country to 1-11; re-apply 1-14 so capturing or
+    // hopping onto ch12-14 works.
+    wifi_utils::applyFullChannelRegulatory();
+
     // Set initial channel
     uint8_t startChannel = m_filter.targetChannel > 0 ? m_filter.targetChannel : 1;
     wifi_utils::setChannel(startChannel);

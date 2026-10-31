@@ -114,7 +114,11 @@ bool KarmaAP::startActive(const ap::CaptivePortalConfig& portalConfig) {
         return false;
     }
     delay(200);  // Give mode switch time to complete
-    
+
+    // Re-apply 1-14 after the mode cycle so a karmaChannel of 12-14 (and any
+    // upstream reconnect to a ch12-14 network) is not rejected by the 1-11 default.
+    adversary::wifi_utils::applyFullChannelRegulatory();
+
     // Reconnect STA if we were connected
     if (wasConnected && savedSSID.length() > 0) {
         LOG_I("KARMA", "Reconnecting to %s...", savedSSID.c_str());

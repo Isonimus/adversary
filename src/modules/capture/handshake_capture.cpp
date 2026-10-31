@@ -238,6 +238,11 @@ bool HandshakeCapture::start(const HandshakeCaptureConfig& config) {
     WiFi.mode(WIFI_AP_STA);
     delay(100);
 
+    // The mode cycle above re-inits the WiFi stack, resetting the country to the
+    // 1-11 default; re-apply the full 1-14 domain so a ch12-14 target softAP and
+    // channel set below don't fail with ESP_ERR_INVALID_ARG.
+    wifi_utils::applyFullChannelRegulatory();
+
     // Start hidden soft AP on target channel (required for raw frame TX)
     WiFi.softAP("adversary_hs", nullptr, config_.channel, 1);  // Hidden AP
     delay(100);

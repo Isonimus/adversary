@@ -38,6 +38,9 @@
 
 Adversary is for **educational and research purposes only.** Unauthorized access to networks is illegal. By using this tool, you agree to the terms in the [DISCLAIMER](DISCLAIMER.md).
 
+> [!NOTE]
+> To reach every 2.4 GHz AP, the radio is pinned to the full 1-14 channel domain and will scan and **transmit on channels 12-14** regardless of your location. Those channels are not licensed for transmission everywhere (e.g. the US allows 1-11). Operate only within your engagement's legal authorization.
+
 ---
 
 ## Features

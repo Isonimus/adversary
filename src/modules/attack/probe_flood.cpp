@@ -105,7 +105,11 @@ bool ProbeFlood::start(const ProbeFloodConfig& config) {
 #ifdef ESP32
     // Enable promiscuous mode for raw TX
     esp_wifi_set_promiscuous(true);  // Direct call - TX only, no filter needed
-    
+
+    // Re-apply 1-14 per run so probe hops onto ch12-14 (in HOP_CHANNELS) work
+    // even after a prior WiFi teardown reset the country to 1-11.
+    wifi_utils::applyFullChannelRegulatory();
+
     // Set initial channel
     wifi_utils::setChannel(stats_.currentChannel);
 #endif

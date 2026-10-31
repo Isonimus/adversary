@@ -15,6 +15,40 @@
 namespace adversary {
 namespace wifi_utils {
 
+// Regulatory domain this tool operates under. The WiFi stack resets the country
+// to a conservative default (channels 1-11) on every esp_wifi_init, which the
+// Arduino layer triggers whenever a module cycles WiFi off and back on. Under
+// that default, tuning to or starting a softAP on channels 12-14 fails
+// (ESP_ERR_INVALID_ARG / "channel out of range"), silently breaking scan,
+// capture and deauth against the ch12-13 APs that are standard under ETSI
+// (Europe). This is a capability tool: it must reach every 2.4GHz channel, so we
+// pin the widest manual domain (JP = 1-14) and RE-APPLY it after every WiFi
+// bring-up, not just once. TX on 12-14 is then unconditional; that posture is
+// documented in the README (the engagement authorization is the legal basis, not
+// the country register, consistent with the deauth/evil-twin/karma frames this
+// device already transmits).
+constexpr char REGULATORY_COUNTRY_CODE[3] = {'J', 'P', '\0'};
+constexpr uint8_t REGULATORY_FIRST_CHANNEL = 1;
+constexpr uint8_t REGULATORY_CHANNEL_COUNT = 14;  // 1-14 inclusive
+
+/**
+ * @brief Pin the regulatory domain to all 14 2.4GHz channels (manual policy).
+ *
+ * Call once right after each `WiFi.mode(<non-OFF>)` on any scan/capture/attack
+ * path that tunes to or transmits on an arbitrary target channel. Idempotent and
+ * cheap enough for a per-bring-up call (NOT a per-channel-hop call).
+ */
+inline void applyFullChannelRegulatory() {
+    wifi_country_t country = {};
+    country.cc[0] = REGULATORY_COUNTRY_CODE[0];
+    country.cc[1] = REGULATORY_COUNTRY_CODE[1];
+    country.cc[2] = REGULATORY_COUNTRY_CODE[2];
+    country.schan = REGULATORY_FIRST_CHANNEL;
+    country.nchan = REGULATORY_CHANNEL_COUNT;
+    country.policy = WIFI_COUNTRY_POLICY_MANUAL;
+    esp_wifi_set_country(&country);
+}
+
 /**
  * @brief Enable promiscuous mode with callback
  * @param callback Packet receive callback
@@ -122,6 +156,10 @@ inline uint8_t getChannel() {
 
 inline void disablePromiscuous() {
     // No-op
+}
+
+inline void applyFullChannelRegulatory() {
+    // No-op: no radio on the host build.
 }
 
 // Note: enablePromiscuous and filter functions are not available in native builds

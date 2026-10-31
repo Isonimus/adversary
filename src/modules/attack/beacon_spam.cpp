@@ -190,7 +190,11 @@ bool BeaconSpam::start(const BeaconSpamConfig& config) {
     WiFi.mode(WIFI_STA);
     WiFi.disconnect();
     delay(100);
-    
+
+    // Re-apply 1-14 after the mode cycle so beacons on ch12-14 (in HOP_CHANNELS)
+    // actually transmit instead of failing the channel set.
+    wifi_utils::applyFullChannelRegulatory();
+
     // Set channel
     wifi_utils::setChannel(config_.channel);
     

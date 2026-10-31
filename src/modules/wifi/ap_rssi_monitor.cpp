@@ -40,6 +40,8 @@ bool ApRssiMonitor::start(const uint8_t bssid[6], uint8_t channel) {
     WiFi.mode(WIFI_STA);
     WiFi.disconnect();
     delay(50);
+    // Re-apply 1-14 after the mode cycle so "Locate AP" can lock a ch12-14 beacon.
+    wifi_utils::applyFullChannelRegulatory();
     wifi_utils::setChannel(channel);
 
     s_instance_ = this;

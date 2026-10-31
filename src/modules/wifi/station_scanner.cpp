@@ -39,7 +39,12 @@ bool StationScanner::start(uint8_t channel, uint32_t durationMs) {
     WiFi.mode(WIFI_STA);
     WiFi.disconnect();
     delay(50);
-    
+
+    // Re-apply the full 1-14 domain after the mode cycle so ch12-14 targets can
+    // actually be tuned (otherwise this silently scans the wrong/no channel and
+    // reports 0 stations).
+    wifi_utils::applyFullChannelRegulatory();
+
     // Set channel
     wifi_utils::setChannel(channel);
     

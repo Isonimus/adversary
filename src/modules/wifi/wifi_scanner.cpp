@@ -7,6 +7,7 @@
 #include "core/event_bus.h"
 #include "config/config.h"
 #include "utils/log.h"
+#include "utils/wifi_utils.h"
 
 #ifndef UNIT_TEST
 #include <WiFi.h>
@@ -98,16 +99,10 @@ bool WiFiScanner::init() {
         WiFi.disconnect();
     }
     
-    // Configure country for all 13/14 channels (some regions limit to 11)
-    // Using manual policy to ensure we scan all channels including 12-14
-    wifi_country_t country = {};
-    country.cc[0] = 'J';  // Japan allows channels 1-14
-    country.cc[1] = 'P';
-    country.cc[2] = '\0';
-    country.schan = 1;
-    country.nchan = 14;   // Scan all 14 channels
-    country.policy = WIFI_COUNTRY_POLICY_MANUAL;
-    esp_wifi_set_country(&country);
+    // Configure the regulatory domain for all 14 channels (the default limits to
+    // 1-11). Re-applied on every startScan() too, since a capture/attack between
+    // scans resets it (see wifi_utils::applyFullChannelRegulatory).
+    wifi_utils::applyFullChannelRegulatory();
     
     // Extend minimum active scan time per channel for better detection
     // Default is ~100ms, we use 300ms to catch slow-responding APs
@@ -159,7 +154,13 @@ bool WiFiScanner::startScan() {
         WiFi.mode(WIFI_STA);
     }
     WiFi.setTxPower(WIFI_POWER_19_5dBm);
-    
+
+    // Re-apply the full 1-14 domain before every scan: a prior capture/attack in
+    // the autohunt loop cycles WiFi and resets the country to 1-11, which would
+    // otherwise make the scan blind to ch12-13 APs (set once at init() is not
+    // enough).
+    wifi_utils::applyFullChannelRegulatory();
+
     int16_t result = WiFi.scanNetworks(
         true,   // async
         true,   // show_hidden

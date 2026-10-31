@@ -144,7 +144,11 @@ bool DeauthAttack::start(const DeauthConfig& config) {
     // Set WiFi to AP+STA mode
     WiFi.mode(WIFI_AP_STA);
     delay(100);
-    
+
+    // Re-apply the full 1-14 domain (the mode cycle reset it to 1-11) so a
+    // ch12-14 target softAP/channel below does not fail with ESP_ERR_INVALID_ARG.
+    wifi_utils::applyFullChannelRegulatory();
+
     // Start a soft AP with a valid SSID (required)
     // Use a generic name - will be hidden
     WiFi.softAP("adversary", nullptr, config_.channel, 1);  // Hidden AP on target channel
