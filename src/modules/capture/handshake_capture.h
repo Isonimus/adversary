@@ -99,7 +99,7 @@ struct HandshakeStats {
  */
 struct CapturedPMKID {
     uint8_t bssid[6];           ///< Access point BSSID
-    uint8_t staMac[6];          ///< Station MAC (our MAC when probing)
+    uint8_t staMac[6];          ///< Station MAC the AP addressed M1 to (keys the PMKID)
     uint8_t pmkid[16];          ///< The 16-byte PMKID
     char ssid[33];              ///< Network SSID
     uint32_t timestamp;         ///< Capture timestamp
@@ -341,7 +341,8 @@ private:
     
     void setState(HandshakeState newState);
     void processMessage1(const uint8_t* eapolData, uint16_t eapolLen,
-                         const uint8_t* frameData, uint16_t frameLen);
+                         const uint8_t* frameData, uint16_t frameLen,
+                         const uint8_t* clientMac);
     void processMessage2(const uint8_t* eapolData, uint16_t eapolLen,
                          const uint8_t* frameData, uint16_t frameLen);
     void processMessage3(const uint8_t* eapolData, uint16_t eapolLen,
@@ -352,7 +353,9 @@ private:
     void sendDeauth();  // Sends both deauth + disassoc frames
     void checkTimeout();
     bool extractClientMac(const uint8_t* frame, uint8_t* clientMac);
-    void extractPMKID(const uint8_t* keyData, uint16_t keyDataLen);
+    // Populate pmkid_ from an extracted PMKID. clientMac is the station the AP
+    // addressed M1 to: the PMKID is keyed on it, so it must be the hashcat STA MAC.
+    void recordPmkid(const uint8_t* pmkid, const uint8_t* clientMac);
     
     // Static promiscuous mode callback
 #ifdef ESP32

