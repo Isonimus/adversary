@@ -2,10 +2,10 @@
 id: '0135'
 title: "Panic-set RTC marker so USB-reset crashes are no longer invisible"
 type: architecture
-status: accepted
+status: superseded
 date: 2026-11-01
 supersedes: []
-superseded_by: []
+superseded_by: ['0136']
 ---
 
 ## Context
