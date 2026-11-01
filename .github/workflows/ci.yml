@@ -175,6 +175,19 @@ jobs:
       - name: Lint src for new raw Serial.print*
         run: node scripts/lint-raw-serial.mjs src
 
+  # Regression gate for the operator-dashboard stored-XSS fix: attacker-controlled fields
+  # (crafted SSIDs, filenames, wardriving CSV cells) must stay routed through escapeHtml
+  # before reaching innerHTML, or a beacon SSID runs script in the operator's browser. The
+  # test loads the shipped dashboard.js and asserts both the helper and every sink.
+  dashboard-xss:
+    name: dashboard-xss
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Test dashboard HTML-escaping
+        run: node --test scripts/dashboard-xss-escaping.test.mjs
+
   # Verifies the two third-party patched build ZIPs (pioarduino platform, bruce arduino-libs)
   # against the SHA256s in scripts/build-zip-checksums.json, so a swapped upstream release
   # asset cannot enter a build unnoticed — the URL pins a location, not the bytes. See

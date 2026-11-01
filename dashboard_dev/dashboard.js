@@ -25,6 +25,16 @@ const combinedStatusInfo = (wpa, pc) => {
     return wpaSecStatusInfo(wpa);
 };
 
+// Escape device/SD-derived strings before interpolating them into innerHTML.
+// SSIDs, filenames and CSV cells are attacker-controlled (a crafted SSID is
+// stored verbatim and becomes a filename), so rendering them raw is stored
+// XSS. We escape at render, not at capture: the stored data stays faithful
+// (e.g. an SSID with a literal '<' round-trips), and every sink is covered
+// here in one place. Static markup we add around a value (status spans,
+// colors) is trusted and stays outside the escape.
+const ESCAPE_MAP = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (ch) => ESCAPE_MAP[ch]);
+
 class Dashboard {
     constructor() {
         this.apiBase = '/api';
@@ -178,7 +188,7 @@ class Dashboard {
             const tr = document.createElement('tr');
             const st = combinedStatusInfo(file.wpaSecStatus, file.pwncrackStatus);
             const gps = file.hasGPS ? '📍' : '';
-            tr.innerHTML = `<td>${file.name}</td>`
+            tr.innerHTML = `<td>${escapeHtml(file.name)}</td>`
                 + `<td>${(file.size / 1024).toFixed(1)} KB</td>`
                 + `<td style="color:${st.color}">${st.short}</td>`
                 + `<td style="text-align:center" title="${file.hasGPS ? 'Has GPS location' : 'No GPS'}">${gps}</td>`;
@@ -198,7 +208,7 @@ class Dashboard {
         list.innerHTML = '';
         [...sessions, ...packets].forEach(file => {
             const tr = document.createElement('tr');
-            tr.innerHTML = `<td>${file.name}</td><td>${(file.size / 1024).toFixed(0)} KB</td><td>${file.category}</td>`;
+            tr.innerHTML = `<td>${escapeHtml(file.name)}</td><td>${(file.size / 1024).toFixed(0)} KB</td><td>${escapeHtml(file.category)}</td>`;
             list.appendChild(tr);
         });
     }
@@ -218,7 +228,7 @@ class Dashboard {
         list.innerHTML = '';
         data.forEach(file => {
             const tr = document.createElement('tr');
-            tr.innerHTML = `<td>${file.name}</td><td>${(file.size / 1024).toFixed(1)} KB</td>`;
+            tr.innerHTML = `<td>${escapeHtml(file.name)}</td><td>${(file.size / 1024).toFixed(1)} KB</td>`;
             tr.onclick = () => this.showWardrivingDetail(file.name);
             list.appendChild(tr);
         });
@@ -263,7 +273,7 @@ class Dashboard {
 
             let html = `<div class="stat-desc" style="margin-bottom: 1rem">${dataLines.length} networks captured</div>`;
             html += '<table class="csv-table"><thead><tr>';
-            prettyHeaders.forEach(h => { html += `<th>${h}</th>`; });
+            prettyHeaders.forEach(h => { html += `<th>${escapeHtml(h)}</th>`; });
             html += '</tr></thead><tbody>';
 
             dataLines.forEach(line => {
@@ -271,7 +281,10 @@ class Dashboard {
                 const cells = line.split(',');
                 html += '<tr>';
                 colIndices.forEach(i => {
-                    let val = cells[i] || '';
+                    // Escape first; the WPA/RSSI substring checks below are
+                    // unaffected (escaping leaves 'WPA2', 'Open', digits and
+                    // '-' intact), so the trusted color spans wrap safe text.
+                    let val = escapeHtml(cells[i] || '');
                     // Color-code security
                     if (headers[i] === 'AuthMode') {
                         if (val.includes('WPA3')) val = `<span style="color:var(--accent-green)">${val}</span>`;
@@ -320,10 +333,10 @@ class Dashboard {
             return;
         }
 
-        let html = `<strong>SSID:</strong> ${data.ssid || 'Unknown'}<br>`;
-        html += `<strong>BSSID:</strong> ${data.bssid || 'Unknown'}<br>`;
+        let html = `<strong>SSID:</strong> ${escapeHtml(data.ssid || 'Unknown')}<br>`;
+        html += `<strong>BSSID:</strong> ${escapeHtml(data.bssid || 'Unknown')}<br>`;
         if (data.channel) html += `<strong>Channel:</strong> ${data.channel}<br>`;
-        if (data.type) html += `<strong>Type:</strong> ${data.type}<br>`;
+        if (data.type) html += `<strong>Type:</strong> ${escapeHtml(data.type)}<br>`;
         if (data.capturedAt) html += `<strong>Captured:</strong> ${new Date(data.capturedAt * 1000).toLocaleString()}<br>`;
         if (data.quality) html += `<strong>Quality:</strong> ${data.quality}%<br>`;
 
@@ -339,7 +352,7 @@ class Dashboard {
             const via = data.wpaSecPassword ? 'WPA-SEC' : 'pwncrack';
             html += `<div style="background: rgba(46, 204, 113, 0.15); padding: 1.2rem; border-radius: 12px; border: 1px solid rgba(46, 204, 113, 0.3); margin-top: 1rem;">`;
             html += `<span style="color:var(--accent-green); font-weight: bold;">🔑 Password Found (${via}):</span><br>`;
-            html += `<code style="font-size: 1.2rem; color: #fff; background: #222; padding: 0.5rem 1rem; border-radius: 6px; display: inline-block; margin-top: 0.5rem;">${crackedPwd}</code>`;
+            html += `<code style="font-size: 1.2rem; color: #fff; background: #222; padding: 0.5rem 1rem; border-radius: 6px; display: inline-block; margin-top: 0.5rem;">${escapeHtml(crackedPwd)}</code>`;
             html += `</div>`;
         }
 
