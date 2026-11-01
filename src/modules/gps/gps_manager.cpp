@@ -21,6 +21,14 @@
 
 namespace adversary {
 
+// Background-detection task stack. The task runs the full init() path every 30s while no
+// GPS is attached (new HardwareSerial + nested pin-set/profile probe loops + LOG
+// formatting), and 2048 bytes overflowed its canary in the field after several hours
+// (gps_detect stack-canary panic, 2026-11-01). Sized up with headroom here to stop the
+// reboot; the task logs its measured high-water mark each cycle so this can be trimmed to
+// a real figure (CLAUDE.md measure-twice; see LEDGER trim-to-measured follow-up).
+constexpr uint32_t BG_DETECT_TASK_STACK_BYTES = 4096;
+
 static GPSManager* s_instance = nullptr;
 
 GPSManager& GPSManager::getInstance() {
@@ -346,7 +354,7 @@ void GPSManager::startBackgroundDetection(bool probeCapPort) {
     xTaskCreatePinnedToCore(
         backgroundDetectionTask,
         "gps_detect",
-        2048,           // Stack size
+        BG_DETECT_TASK_STACK_BYTES,  // Stack size (see constant: field canary overflow at 2048)
         this,           // Parameter
         1,              // Priority (low)
         (TaskHandle_t*)&taskHandle_,
@@ -383,7 +391,21 @@ void GPSManager::backgroundDetectionTask(void* param) {
             return;
         }
         
-        LOG_D("GPS", "Background detection: GPS not found, retrying in 30s...");
+        // Report the task's stack low-water mark (fewest free bytes ever seen) whenever it
+        // reaches a new low, so the stack can be trimmed to a measured figure and a creeping
+        // shortfall surfaces on its own. Logged at INFO so it is visible in release builds,
+        // but only on a new minimum, which keeps it off the per-cycle hot path (the mark
+        // drops to its real worst case in the first cycles, then goes quiet).
+        // uxTaskGetStackHighWaterMark returns the minimum free words; scale to bytes.
+        static uint32_t reportedStackLowBytes = UINT32_MAX;
+        const uint32_t stackFreeBytes =
+            static_cast<uint32_t>(uxTaskGetStackHighWaterMark(nullptr)) * sizeof(StackType_t);
+        if (stackFreeBytes < reportedStackLowBytes) {
+            reportedStackLowBytes = stackFreeBytes;
+            LOG_I("GPS", "bg detect task stack low-water: %u bytes free of %u",
+                  static_cast<unsigned>(stackFreeBytes),
+                  static_cast<unsigned>(BG_DETECT_TASK_STACK_BYTES));
+        }
     }
 #else
     (void)param;
