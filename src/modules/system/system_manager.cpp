@@ -58,6 +58,12 @@ adversary::ResetReason mapResetReason(esp_reset_reason_t reason) {
         case ESP_RST_POWERON:   return adversary::ResetReason::PowerOn;
         case ESP_RST_SW:        return adversary::ResetReason::Software;
         case ESP_RST_DEEPSLEEP: return adversary::ResetReason::DeepSleep;
+        case ESP_RST_CPU_LOCKUP: return adversary::ResetReason::CpuLockup;
+        case ESP_RST_PWR_GLITCH: return adversary::ResetReason::PowerGlitch;
+        case ESP_RST_EFUSE:     return adversary::ResetReason::Efuse;
+        case ESP_RST_USB:       return adversary::ResetReason::UsbReset;
+        case ESP_RST_JTAG:      return adversary::ResetReason::Jtag;
+        case ESP_RST_EXT:       return adversary::ResetReason::ExternalPin;
         default:                return adversary::ResetReason::Unknown;
     }
 }
@@ -88,7 +94,18 @@ void SystemManager::recordHeapSnapshot() {
 }
 
 void SystemManager::logResetReason() {
-    const ResetClassification cls = classifyReset(mapResetReason(esp_reset_reason()));
+    const esp_reset_reason_t rawReason = esp_reset_reason();
+    const ResetReason mapped = mapResetReason(rawReason);
+    const ResetClassification cls = classifyReset(mapped);
+
+    // Fail loud on an unmapped cause: a real panic that resets through an enum value we do
+    // not handle would otherwise bucket into UNKNOWN/non-crash and never reach crash.log
+    // (this is exactly how a gps_detect stack-canary panic was first missed, 2026-11-01).
+    // Record the raw value so the gap is diagnosable and a case can be added.
+    if (mapped == ResetReason::Unknown) {
+        LOG_W("BOOT", "Unmapped esp_reset_reason()=%d: treated as non-crash. Add a case if abnormal.",
+              static_cast<int>(rawReason));
+    }
 
     // Consume the flight recorder: capture whether this boot's RTC survived, then
     // invalidate it so a crash early in *this* session (before it has sampled) reports

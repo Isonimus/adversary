@@ -12,9 +12,15 @@ ResetClassification classifyReset(ResetReason reason) {
         case ResetReason::OtherWdt:     return {"WDT (other watchdog)", true};
         case ResetReason::Brownout:     return {"BROWNOUT (power issue)", true};
         case ResetReason::ExternalSdio: return {"SDIO (external reset)", true};
+        case ResetReason::CpuLockup:    return {"CPU_LOCKUP (double exception/crash)", true};
+        case ResetReason::PowerGlitch:  return {"PWR_GLITCH (power anomaly)", true};
+        case ResetReason::Efuse:        return {"EFUSE (efuse read error)", true};
         case ResetReason::PowerOn:      return {"POWERON (normal)", false};
         case ResetReason::Software:     return {"SW (software reset)", false};
         case ResetReason::DeepSleep:    return {"DEEPSLEEP (wakeup)", false};
+        case ResetReason::UsbReset:     return {"USB (USB-triggered reset)", false};
+        case ResetReason::Jtag:         return {"JTAG (debugger reset)", false};
+        case ResetReason::ExternalPin:  return {"EXT (external pin reset)", false};
         case ResetReason::Unknown:      break;
     }
     return {"UNKNOWN", false};

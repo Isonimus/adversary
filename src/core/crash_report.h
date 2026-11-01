@@ -32,7 +32,15 @@ enum class ResetReason : uint8_t {
     ExternalSdio,  ///< External (SDIO) reset
     Software,      ///< Deliberate software reset (not a crash)
     DeepSleep,     ///< Deep-sleep wake (not a crash)
-    Unknown,       ///< Anything else
+    CpuLockup,     ///< Double exception / CPU lock-up reset (a crash)
+    PowerGlitch,   ///< Supply glitch detected by hardware (a crash, power anomaly like brownout)
+    Efuse,         ///< eFuse read error (a crash: abnormal, worth recording)
+    UsbReset,      ///< USB-peripheral reset, e.g. host re-enumeration (not a crash). A stack-canary
+                   ///< panic on this USB-CDC board also lands here, so reset-reason alone cannot flag
+                   ///< it as a crash (measured 2026-11-01); see LEDGER crash-classification item
+    Jtag,          ///< Reset by an attached debugger (not a crash)
+    ExternalPin,   ///< Reset via the external reset pin / button (not a crash)
+    Unknown,       ///< Anything else (an unmapped esp_reset_reason_t: logged raw, see system_manager)
 };
 
 /// Result of classifying a reset cause.

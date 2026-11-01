@@ -29,6 +29,11 @@ void test_abnormal_resets_are_crashes(void) {
     const ResetReason crashes[] = {
         ResetReason::Panic, ResetReason::IntWdt, ResetReason::TaskWdt,
         ResetReason::OtherWdt, ResetReason::Brownout, ResetReason::ExternalSdio,
+        // Abnormal CPU/hardware reset causes that classifyReset must flag as crashes. The
+        // stack-canary panic that prompted this does NOT present as any of them on the
+        // USB-CDC board (it resets as UsbReset, measured 2026-11-01); mapping them is still
+        // correct so crash.log catches these causes when they genuinely occur.
+        ResetReason::CpuLockup, ResetReason::PowerGlitch, ResetReason::Efuse,
     };
     for (ResetReason r : crashes) {
         ResetClassification c = classifyReset(r);
@@ -43,6 +48,7 @@ void test_clean_resets_are_not_crashes(void) {
     const ResetReason clean[] = {
         ResetReason::PowerOn, ResetReason::Software,
         ResetReason::DeepSleep, ResetReason::Unknown,
+        ResetReason::UsbReset, ResetReason::Jtag, ResetReason::ExternalPin,
     };
     for (ResetReason r : clean) {
         ResetClassification c = classifyReset(r);
