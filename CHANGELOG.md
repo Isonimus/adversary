@@ -7,6 +7,19 @@ releases, this can be replaced by a git-tag-generated changelog.
 ---
 
 
+## 2026-11-03 (v0.7.2-alpha)
+
+Stability and security point release: field-reported fixes, no new features.
+
+- **GPS detection no longer reboots the device.** The `gps_detect` probe task ran on a stack too small for its real peak, so on some boots it overflowed into a stack-canary panic that reset the device. The task stack is now sized above its measured peak with headroom. (commit 12239d7)
+- **WiFi scans and attacks cover the full 2.4 GHz channel set again.** Every WiFi bring-up now re-applies the complete 1-14 channel domain, so a re-init can no longer leave the radio clamped to a narrower regulatory set and quietly skip APs on the upper channels. (commit 734ac13)
+- **The crash log now classifies every reset cause.** Reset-reason handling maps the full IDF reset enum and fails loud on an unmapped cause instead of silently bucketing a new value as "not a crash", so a genuine crash can no longer slip past the log unlabelled. (commit 28817e1)
+- **PMKID capture extracts the hash from the correct fields.** A client-less PMKID was read from the wrong offset and without the associated client MAC, yielding a value downstream crackers reject. Both are now taken from the right fields, confirmed on-device against a PMKID-emitting AP. (commit 0d1b9a9)
+- **Web dashboard escapes device data before display.** Captured SSIDs, client names and other device-sourced strings were written into the dashboard DOM unescaped, so a crafted SSID could inject script into the operator's browser (stored XSS). Every device-data sink now HTML-escapes, with a CI test guarding the escape helper. (commit 92d2bf1)
+
+Internal: the panic-marker investigation (ADR-0135) was taken to its on-device acceptance gate and superseded by ADR-0136. The gate disproved both the mechanism (the Arduino panic hook is inert on our precompiled IDF archive, so the RTC marker never gets stamped) and the premise (the "panic reboots as `ESP_RST_USB`" symptom is a tethered-host capture artifact, not a standalone field blind spot), so no code mitigation ships and the reset-reason classifier stands. Native suite 971/971 (up from 964).
+
+
 ## 2026-10-30 (v0.7.1-alpha)
 
 Stability point release.
