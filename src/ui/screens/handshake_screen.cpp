@@ -204,10 +204,16 @@ void HandshakeScreen::update() {
     }
 
     // Solicited PMKID (ADR-0138/0139): flagged by the PMKID_CAPTURED subscriber (driver-task
-    // context); do the SD write here on the main loop. Save once, count it. The handshakeSaved_
-    // guard is shared with the 4-way writer so a target is never saved twice. This is the only
-    // PMKID writer for the solicit modes (the 4-way saveHandshake() bails without an M2).
-    if (pmkidReady_ && capturing_ && !handshakeSaved_) {
+    // context); do the SD write here on the main loop. Save once, count it.
+    //   - capture_.hasPMKID(): the flag can outlive its target (start() for the next Auto Hunt
+    //     target clears hasPMKID_ but not this screen flag), so only act while the capture
+    //     singleton actually holds a PMKID, never a stale one against the next target.
+    //   - !isMinimumValid(): if a 4-way pair also landed this window (the "Both" strategy race),
+    //     let the richer 4-way writer own the save. It writes the WPA*02 line too, so the PMKID
+    //     is not lost; this stops the PMKID path from claiming handshakeSaved_ first and making
+    //     the deferred 4-way save a no-op, which dropped the handshake while still counting it.
+    if (pmkidReady_ && capturing_ && !handshakeSaved_ &&
+        capture_.hasPMKID() && !capture_.getHandshake().isMinimumValid()) {
         pmkidReady_ = false;
 #ifdef ESP32
         auto result = handshake_save::savePMKIDToFile(capture_.getPMKID());
@@ -790,6 +796,9 @@ void HandshakeScreen::updateAutoHunt() {
                 config.captureAllClients = true;
 
                 if (capture_.start(config)) {
+                    // Clear any PMKID-ready flag from the previous target: Auto Hunt starts
+                    // each target here, not via startCapture(), so this is the per-target reset.
+                    pmkidReady_ = false;
                     setAutoHuntState(AutoHuntState::ATTACKING);
                 } else {
                     // Failed to start, try next target
