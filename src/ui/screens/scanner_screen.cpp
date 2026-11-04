@@ -100,7 +100,7 @@ void ScannerScreen::show() {
     // Initialize footer hints (Enter/Back are universal, not shown)
     footerHints_.setHints({
         {'R', "Rescan", true},
-        {'S', "Sort:SIG", true}
+        {'S', "Sort:Signal", true}
     });
     footerHints_.setFocus(false);
     
@@ -517,8 +517,8 @@ void ScannerScreen::render(Canvas& canvas) {
     // Update sort hint label with current criteria
     const char* sortLabel;
     switch (m_sortMode) {
-        case SortMode::SIGNAL:  sortLabel = "Sort:SIG"; break;
-        case SortMode::CHANNEL: sortLabel = "Sort:CH"; break;
+        case SortMode::SIGNAL:  sortLabel = "Sort:Signal"; break;
+        case SortMode::CHANNEL: sortLabel = "Sort:Channel"; break;
         case SortMode::SSID:    sortLabel = "Sort:ABC"; break;
         default:                sortLabel = "Sort:???"; break;
     }
