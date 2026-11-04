@@ -308,13 +308,16 @@ bool HandshakeScreen::handleInput(char key) {
                     handshakeSaved_ = false;
                     screenState_ = HandshakeScreenState::CONFIG;
                     return true;
-                    
+
                 case '`':
+                    // Signal the manager to pop back, same as the CONFIG ESC handler. Without
+                    // shouldExit_ the first ESC only hid the screen, so it took two presses.
+                    shouldExit_ = true;
                     hide();
                     return true;
             }
             break;
-            
+
         case HandshakeScreenState::TIMEOUT:
         case HandshakeScreenState::ERROR:
             switch (key) {
@@ -323,8 +326,9 @@ bool HandshakeScreen::handleInput(char key) {
                     // Retry
                     screenState_ = HandshakeScreenState::CONFIG;
                     return true;
-                    
+
                 case '`':
+                    shouldExit_ = true;  // pop back on the first ESC (see SUCCESS above)
                     hide();
                     return true;
             }
