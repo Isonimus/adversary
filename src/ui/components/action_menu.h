@@ -10,6 +10,8 @@
 #define ADVERSARY_ACTION_MENU_H
 
 #include "ui/theme.h"
+#include "ui/components/list_scroll_model.h"
+#include "ui/components/scrollable_list.h"
 #include <cstdint>
 #include <cstring>
 #include <functional>
@@ -60,7 +62,7 @@ public:
     /**
      * @brief Clear all menu items
      */
-    void clearItems() { items_.clear(); selectedIndex_ = 0; }
+    void clearItems() { items_.clear(); model_.setItemCount(0); }
     
     /**
      * @brief Add a menu item
@@ -137,7 +139,11 @@ private:
     ActionCallback callback_;
     std::function<void()> dismissCallback_;
 
-    int selectedIndex_;
+    // Selection + scroll window are owned by the shared, unit-tested model (slice-0062), the
+    // same one the config forms use. Its selectable-predicate skips disabled rows, so the popup
+    // scrolls and navigates consistently with every other list instead of overflowing the
+    // screen when it has many actions.
+    ListScrollModel model_;
     bool visible_;
 
     // Layout constants
@@ -154,93 +160,84 @@ private:
 template<typename Canvas>
 void ActionMenu::render(Canvas& canvas) {
     if (!visible_) return;
-    
-    int16_t screenWidth = canvas.width();
-    int16_t screenHeight = canvas.height();
-    
-    // Calculate menu dimensions
-    int16_t menuWidth = screenWidth - 40;  // 20px margin each side
-    int16_t contentHeight = TITLE_HEIGHT +
-                            (subtitle_[0] ? SUBTITLE_HEIGHT : 0) +
-                            (items_.size() * ITEM_HEIGHT) + 
-                            FOOTER_HEIGHT + 
-                            (MENU_PADDING * 2);
-    int16_t menuHeight = contentHeight;
-    
-    // Center the menu
-    int16_t menuX = (screenWidth - menuWidth) / 2;
-    int16_t menuY = (screenHeight - menuHeight) / 2;
-    
-    // Draw semi-transparent backdrop (darken background)
-    // Since we can't do true transparency, just draw a dark rect
+
+    const int16_t screenWidth = canvas.width();
+    const int16_t screenHeight = canvas.height();
+    const int16_t menuWidth = screenWidth - 40;  // 20px margin each side
+
+    // Everything except the item rows. The item area is then capped to whatever height is left
+    // so the popup never grows past the screen: extra actions scroll instead of clipping.
+    const int16_t chrome = (MENU_PADDING * 2) + TITLE_HEIGHT +
+                           (subtitle_[0] ? SUBTITLE_HEIGHT : 0) +
+                           4 +   // separator under the title/subtitle
+                           6 +   // spacing + separator above the footer
+                           FOOTER_HEIGHT;
+    const int16_t maxMenuHeight = screenHeight - 8;  // 4px breathing room top and bottom
+    int maxItemRows = (maxMenuHeight - chrome) / ITEM_HEIGHT;
+    if (maxItemRows < 1) maxItemRows = 1;
+    const int itemCount = static_cast<int>(items_.size());
+    int visibleRows = (itemCount > 0 && itemCount < maxItemRows) ? itemCount : maxItemRows;
+    if (visibleRows < 1) visibleRows = 1;
+
+    const int16_t itemsAreaH = static_cast<int16_t>(visibleRows * ITEM_HEIGHT);
+    const int16_t menuHeight = chrome + itemsAreaH;
+
+    const int16_t menuX = (screenWidth - menuWidth) / 2;
+    const int16_t menuY = (screenHeight - menuHeight) / 2;
+
+    // Darken the background (no true alpha on this canvas) and draw the bordered popup.
     canvas.fillRect(0, 0, screenWidth, screenHeight, theme::BG_PRIMARY());
-    
-    // Draw menu background with border
-    canvas.fillRoundRect(menuX, menuY, menuWidth, menuHeight, 
-                         BORDER_RADIUS, theme::BG_SECONDARY());
-    canvas.drawRoundRect(menuX, menuY, menuWidth, menuHeight, 
-                         BORDER_RADIUS, theme::ACCENT());
-    
+    canvas.fillRoundRect(menuX, menuY, menuWidth, menuHeight, BORDER_RADIUS, theme::BG_SECONDARY());
+    canvas.drawRoundRect(menuX, menuY, menuWidth, menuHeight, BORDER_RADIUS, theme::ACCENT());
+
     int16_t y = menuY + MENU_PADDING;
-    
-    // Draw title
+
+    // Title (centered)
     canvas.setTextColor(theme::ACCENT());
     canvas.setTextSize(1);
-    
-    // Center title
-    int16_t titleWidth = strlen(title_) * theme::FONT_CELL_WIDTH;
-    int16_t titleX = menuX + (menuWidth - titleWidth) / 2;
-    canvas.setCursor(titleX, y);
+    const int16_t titleWidth = strlen(title_) * theme::FONT_CELL_WIDTH;
+    canvas.setCursor(menuX + (menuWidth - titleWidth) / 2, y);
     canvas.print(title_);
     y += TITLE_HEIGHT;
-    
-    // Draw subtitle if present
+
+    // Subtitle (centered), when present
     if (subtitle_[0]) {
         canvas.setTextColor(theme::TEXT_SECONDARY());
-        int16_t subWidth = strlen(subtitle_) * theme::FONT_CELL_WIDTH;
-        int16_t subX = menuX + (menuWidth - subWidth) / 2;
-        canvas.setCursor(subX, y);
+        const int16_t subWidth = strlen(subtitle_) * theme::FONT_CELL_WIDTH;
+        canvas.setCursor(menuX + (menuWidth - subWidth) / 2, y);
         canvas.print(subtitle_);
         y += SUBTITLE_HEIGHT;
     }
-    
-    // Draw separator line
-    canvas.drawFastHLine(menuX + MENU_PADDING, y, menuWidth - (MENU_PADDING * 2), 
+
+    canvas.drawFastHLine(menuX + MENU_PADDING, y, menuWidth - (MENU_PADDING * 2),
                          theme::TEXT_DISABLED());
     y += 4;
-    
-    // Draw menu items
-    for (size_t i = 0; i < items_.size(); i++) {
-        const auto& item = items_[i];
-        
-        // Highlight selected item with the house band (slice-0063): a BG_SELECTED() band and
-        // content-coloured text, not the old ACCENT() fill with inverted text. Shared by all
-        // ActionMenu popups, so this is the one place the modal selected-row style is set.
-        if (static_cast<int>(i) == selectedIndex_) {
-            canvas.fillRect(menuX + 4, y - 4, menuWidth - 8, ITEM_HEIGHT, theme::BG_SELECTED());
-            canvas.setTextColor(theme::TEXT_PRIMARY());
-        } else if (!item.enabled) {
-            canvas.setTextColor(theme::TEXT_DISABLED());
-        } else {
-            canvas.setTextColor(theme::TEXT_PRIMARY());
-        }
-        
-        // Draw shortcut key
-        canvas.setCursor(menuX + MENU_PADDING + 4, y);
-        canvas.print(item.shortcut);
-        canvas.print(": ");
-        canvas.print(item.label);
-        
-        y += ITEM_HEIGHT;
-    }
-    
-    // Draw separator
-    y += 2;
-    canvas.drawFastHLine(menuX + MENU_PADDING, y, menuWidth - (MENU_PADDING * 2), 
+
+    // Scrollable item body (slice-0062 primitive): the shared renderer paints the selection
+    // band, the visible window and a proportional thumb; the callback draws one row's text.
+    // This is the one place the modal selected-row style is set (slice-0063).
+    model_.setItemCount(itemCount);
+    const int16_t itemsX = menuX + 4;
+    const int16_t itemsW = menuWidth - 8;
+    ScrollableList::render(canvas, model_, itemsX, y, itemsW, itemsAreaH, ITEM_HEIGHT,
+        [this, itemsX](Canvas& c, int idx, int16_t rowY, bool selected) {
+            const ActionMenuItem& item = items_[static_cast<size_t>(idx)];
+            (void)selected;  // band is drawn by the renderer; text stays readable on it
+            const int16_t textDy = (ITEM_HEIGHT - theme::FONT_CELL_HEIGHT) / 2;
+            c.setTextColor(item.enabled ? theme::TEXT_PRIMARY() : theme::TEXT_DISABLED());
+            c.setCursor(itemsX + MENU_PADDING, rowY + textDy);
+            c.print(item.shortcut);
+            c.print(": ");
+            c.print(item.label);
+        },
+        true);
+    y += itemsAreaH + 2;
+
+    canvas.drawFastHLine(menuX + MENU_PADDING, y, menuWidth - (MENU_PADDING * 2),
                          theme::TEXT_DISABLED());
     y += 4;
-    
-    // Draw footer hint
+
+    // Footer hint
     canvas.setTextColor(theme::TEXT_SECONDARY());
     canvas.setCursor(menuX + MENU_PADDING, y);
     canvas.print("`;/.:Nav  ENTER:Sel  ESC:Back");

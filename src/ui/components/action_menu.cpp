@@ -11,28 +11,26 @@ namespace ui {
 ActionMenu::ActionMenu()
     : callback_(nullptr)
     , dismissCallback_(nullptr)
-    , selectedIndex_(0)
     , visible_(false)
 {
     copyText(title_, "Select Action");
     copyText(subtitle_, nullptr);
+    // The model skips disabled rows for navigation and selection snapping, replacing the
+    // hand-rolled enabled-item wrap below. Bound to items_, which outlives the predicate.
+    model_.setSelectablePredicate([this](int i) {
+        return i >= 0 && i < static_cast<int>(items_.size()) && items_[i].enabled;
+    });
 }
 
 void ActionMenu::addItem(char shortcut, const char* label, bool enabled) {
     items_.emplace_back(shortcut, label, enabled);
+    model_.setItemCount(static_cast<int>(items_.size()));
 }
 
 void ActionMenu::show() {
     visible_ = true;
-    selectedIndex_ = 0;
-    
-    // Find first enabled item
-    for (size_t i = 0; i < items_.size(); i++) {
-        if (items_[i].enabled) {
-            selectedIndex_ = static_cast<int>(i);
-            break;
-        }
-    }
+    // Snap to the first enabled item (the predicate moves off a disabled row 0).
+    model_.setSelectedIndex(0);
 }
 
 void ActionMenu::hide() {
@@ -85,42 +83,18 @@ bool ActionMenu::handleInput(char key) {
 }
 
 void ActionMenu::navigateUp() {
-    if (items_.empty()) return;
-    
-    int startIndex = selectedIndex_;
-    do {
-        selectedIndex_--;
-        if (selectedIndex_ < 0) {
-            selectedIndex_ = static_cast<int>(items_.size()) - 1;
-        }
-        // Found an enabled item or wrapped around
-        if (items_[selectedIndex_].enabled || selectedIndex_ == startIndex) {
-            break;
-        }
-    } while (selectedIndex_ != startIndex);
+    model_.moveUp();  // wraps and skips disabled rows via the selectable predicate
 }
 
 void ActionMenu::navigateDown() {
-    if (items_.empty()) return;
-    
-    int startIndex = selectedIndex_;
-    do {
-        selectedIndex_++;
-        if (selectedIndex_ >= static_cast<int>(items_.size())) {
-            selectedIndex_ = 0;
-        }
-        // Found an enabled item or wrapped around
-        if (items_[selectedIndex_].enabled || selectedIndex_ == startIndex) {
-            break;
-        }
-    } while (selectedIndex_ != startIndex);
+    model_.moveDown();  // wraps and skips disabled rows via the selectable predicate
 }
 
 void ActionMenu::selectCurrent() {
-    if (items_.empty()) return;
-    if (selectedIndex_ < 0 || selectedIndex_ >= static_cast<int>(items_.size())) return;
-    
-    const auto& item = items_[selectedIndex_];
+    const int sel = model_.selectedIndex();
+    if (sel < 0 || sel >= static_cast<int>(items_.size())) return;
+
+    const auto& item = items_[static_cast<size_t>(sel)];
     if (item.enabled) {
         visible_ = false;
         if (callback_) {
