@@ -270,6 +270,7 @@ void ScannerScreen::setupActionMenu() {
     // Add available attack options
     m_actionMenu.addItem('D', "Deauth", true);
     m_actionMenu.addItem('H', "Handshake Capture", true);
+    m_actionMenu.addItem('K', "Clientless PMKID", true);
     m_actionMenu.addItem('T', "Evil Twin AP", true);
     m_actionMenu.addItem('P', "Probe Flood", true);
     m_actionMenu.addItem('L', "Locate AP", true);
@@ -308,7 +309,13 @@ void ScannerScreen::handleAction(char action) {
             LOG_I("SCANNER", "Handshake capture selected for %s", m_selectedNetwork.ssid.c_str());
             publishAttackTarget(ScreenId::HANDSHAKE_MANUAL, m_selectedNetwork);
             break;
-            
+
+        case 'K':  // Clientless PMKID (ADR-0138): solicit M1, no client/deauth needed
+        case 'k':
+            LOG_I("SCANNER", "Clientless PMKID selected for %s", m_selectedNetwork.ssid.c_str());
+            publishAttackTarget(ScreenId::HANDSHAKE_CLIENTLESS, m_selectedNetwork);
+            break;
+
         case 'T':  // Evil Twin
         case 't':
             LOG_I("SCANNER", "Evil Twin selected for %s", m_selectedNetwork.ssid.c_str());

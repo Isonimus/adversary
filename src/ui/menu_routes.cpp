@@ -23,6 +23,7 @@ constexpr MenuRoute MENU_ROUTES[] = {
     {ACTION_PROBE_FLOOD,       ScreenId::PROBE_FLOOD,      true,  AppState::ATTACKING},
     {ACTION_HANDSHAKE_AUTO,    ScreenId::HANDSHAKE_AUTO,   true,  AppState::ATTACKING},
     {ACTION_HANDSHAKE_MANUAL,  ScreenId::HANDSHAKE_MANUAL, true,  AppState::ATTACKING},
+    {ACTION_HANDSHAKE_CLIENTLESS, ScreenId::HANDSHAKE_CLIENTLESS, true, AppState::ATTACKING},
     {ACTION_EVIL_TWIN,         ScreenId::EVIL_TWIN,        true,  AppState::ATTACKING},
     {ACTION_KARMA_AP,          ScreenId::KARMA,            true,  AppState::ATTACKING},
     {ACTION_CAPTURES,          ScreenId::CAPTURES,         false, AppState::IDLE},

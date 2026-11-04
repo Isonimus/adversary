@@ -102,6 +102,7 @@ struct CapturedPMKID {
     uint8_t staMac[6];          ///< Station MAC the AP addressed M1 to (keys the PMKID)
     uint8_t pmkid[16];          ///< The 16-byte PMKID
     char ssid[33];              ///< Network SSID
+    uint8_t channel;            ///< Channel the PMKID was captured on (for the manifest record)
     uint32_t timestamp;         ///< Capture timestamp
     bool saved;                 ///< Already saved to file
     
@@ -219,7 +220,8 @@ struct HandshakeCaptureConfig {
     uint32_t timeoutMs;         ///< Capture timeout (0 = no timeout)
     bool captureAllClients;     ///< Capture from any client (vs specific)
     uint8_t targetClient[6];    ///< Specific client to target (if not captureAllClients)
-    
+    bool solicitPmkid;          ///< Clientless PMKID: inject auth+assoc to solicit M1 (ADR-0138)
+
     HandshakeCaptureConfig() {
         memset(targetBssid, 0, 6);
         memset(targetSsid, 0, 33);
@@ -230,6 +232,7 @@ struct HandshakeCaptureConfig {
         timeoutMs = 60000;  // 60 second default timeout
         captureAllClients = true;
         memset(targetClient, 0, 6);
+        solicitPmkid = false;
     }
     
     bool hasValidTarget() const {
@@ -382,6 +385,21 @@ private:
     // Pre-deauth delay: let promiscuous mode stabilize and catch M1 from already-connecting clients
     static constexpr uint32_t PRE_DEAUTH_DELAY_MS = 500;  ///< Wait 500ms before first deauth
     
+    // Clientless PMKID solicitation (ADR-0137/0138/0139). When armed by config_.solicitPmkid,
+    // update() injects an open-auth + association-request blind pair at the target on an
+    // interval so a PMK-caching AP sends us M1 with a PMKID KDE; the promiscuous RX path
+    // records it keyed on our spoofed STA MAC. Bounded to SOLICIT_MAX_ATTEMPTS, stops injecting
+    // on the first PMKID or when exhausted. It is a parallel injector only: it does not own the
+    // capture's terminal state, so it can run alongside deauth (the "Both" strategy, ADR-0139).
+    // Reuses the softAP TX netif already raised for deauth, so it adds no radio interface.
+    uint8_t solicitAttempts_ = 0;
+    uint32_t solicitLastMs_ = 0;
+    bool solicitExhausted_ = false;
+    void updateSolicitation(uint32_t now);
+    static constexpr uint8_t SOLICIT_MAX_ATTEMPTS = 20;    ///< ~30 s at the interval below
+    static constexpr uint32_t SOLICIT_INTERVAL_MS = 1500;  ///< Between blind pairs
+    static constexpr uint32_t SOLICIT_INTER_FRAME_MS = 25; ///< Proven auth->assoc gap (ADR-0138)
+
     // Discovered clients for targeted deauth
     static constexpr uint8_t MAX_DISCOVERED_CLIENTS = 8;
     uint8_t discoveredClients_[MAX_DISCOVERED_CLIENTS][6];

@@ -12,12 +12,14 @@ std::vector<MenuItem> buildRootMenuItems() {
     using adversary::MenuItem;
     using adversary::MenuItemType;
 
-    // Handshake has two peer flows (ADR-0094): Auto Hunt (self-targeting) and Manual
-    // (scanner-targeted). A nested submenu surfaces Auto Hunt as a first-class entry
-    // instead of hiding it behind an in-screen mode toggle.
+    // Handshake has three peer flows (ADR-0094/0138): Auto Hunt (self-targeting), Manual
+    // (scanner-targeted), and Clientless PMKID (inject auth+assoc to solicit M1, no deauth).
+    // A nested submenu surfaces each as a first-class entry instead of hiding them behind an
+    // in-screen mode toggle.
     std::vector<MenuItem> handshakeMenu = {
         MenuItem::action("Auto Hunt", ACTION_HANDSHAKE_AUTO, 'a'),
         MenuItem::action("Manual Capture", ACTION_HANDSHAKE_MANUAL, 'm'),
+        MenuItem::action("Clientless PMKID", ACTION_HANDSHAKE_CLIENTLESS, 'c'),
         MenuItem::separator(),
         MenuItem::back()
     };

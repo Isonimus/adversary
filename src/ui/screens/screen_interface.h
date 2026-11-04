@@ -26,6 +26,7 @@ enum class ScreenId : uint8_t {
     DEAUTH,
     HANDSHAKE_AUTO,
     HANDSHAKE_MANUAL,
+    HANDSHAKE_CLIENTLESS,
     EVIL_TWIN,
     KARMA,
     BEACON_SPAM,
