@@ -416,10 +416,14 @@ inline SaveResult saveHandshakeToPcap(HandshakeCapture& capture,
 inline SaveResult savePMKIDToFile(const CapturedPMKID& pmkid, bool showToast = true) {
     SaveResult result;
     
-    // Generate filename
+    // Generate filename. Sanitize the SSID first: an SSID may legally contain '/', ':', etc.,
+    // which would make a broken path and silently fail the SD write. The BSSID suffix keeps
+    // same-SSID different-AP PMKIDs from colliding on one file.
+    char safeSsid[filename_utils::MAX_FILENAME_LEN + 1];
+    filename_utils::sanitizeSSID(pmkid.ssid, safeSsid, sizeof(safeSsid));
     char filename[128];
-    snprintf(filename, sizeof(filename), "%s/%s_%02X%02X%02X.22000", 
-             config::SD_HANDSHAKES_PATH, pmkid.ssid,
+    snprintf(filename, sizeof(filename), "%s/%s_%02X%02X%02X.22000",
+             config::SD_HANDSHAKES_PATH, safeSsid,
              pmkid.bssid[3], pmkid.bssid[4], pmkid.bssid[5]);
     
 #ifdef ESP32
