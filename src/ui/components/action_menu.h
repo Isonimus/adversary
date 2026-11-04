@@ -44,6 +44,13 @@ public:
     
     ActionMenu();
     ~ActionMenu() = default;
+
+    // Non-copyable/non-movable: the selectable predicate set in the constructor captures `this`
+    // and items_, so a copy or move would leave the predicate bound to the wrong instance.
+    ActionMenu(const ActionMenu&) = delete;
+    ActionMenu& operator=(const ActionMenu&) = delete;
+    ActionMenu(ActionMenu&&) = delete;
+    ActionMenu& operator=(ActionMenu&&) = delete;
     
     /**
      * @brief Set the menu title (main heading)
