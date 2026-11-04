@@ -30,6 +30,7 @@
 
 #ifdef ESP32
 #include "../ui/components/toast_manager.h"
+#include "../ui/components/status_bar.h"  // declares adversary::ui::g_gpsDetected (used below)
 #endif
 
 namespace adversary {
@@ -189,7 +190,47 @@ struct SaveResult {
  * @param showToast Whether to show toast notifications (default: true)
  * @return SaveResult with success status and filename
  */
-inline SaveResult saveHandshakeToPcap(HandshakeCapture& capture, 
+/**
+ * @brief A cracked password worth carrying across a re-save of the same network.
+ */
+struct PreservedCrack {
+    bool found = false;
+    char password[65] = {0};
+    uint32_t crackedAt = 0;
+};
+
+/**
+ * @brief Look up a prior CRACKED password for (bssid, ssid) to preserve across a re-save.
+ *
+ * BSSID-gated (ADR-0139 discussion): the cracked password is only carried over when the
+ * re-captured AP has the SAME BSSID, so two different APs sharing an SSID cannot inherit each
+ * other's PSK. Same-BSSID PSK rotation stays the one documented staleness vector, which is not
+ * detectable on-device (there is no local WPA PSK verification; cracking is off-device).
+ * Keyed by SSID through getMetadata (which extracts the SSID from the canonical filename), so
+ * it works whether the prior capture was a 4-way .pcap or a PMKID .22000.
+ */
+inline PreservedCrack lookupCrackedForResave(const uint8_t bssid[6], const char* ssid) {
+    PreservedCrack out;
+#ifdef ESP32
+    if (!ssid || ssid[0] == '\0') return out;
+    char path[80];
+    filename_utils::getHandshakePath(ssid, path, sizeof(path));
+    const char* base = strrchr(path, '/') ? strrchr(path, '/') + 1 : path;
+    const HandshakeMetadata* m = CaptureRegistry::getInstance().getMetadata(base);
+    if (!m) return out;
+    if (m->wpaSecStatus != WpaSecStatus::CRACKED) return out;
+    if (memcmp(m->bssid, bssid, 6) != 0) return out;  // BSSID gate: same AP only
+    out.found = true;
+    strncpy(out.password, m->wpaSecPassword, sizeof(out.password) - 1);
+    out.crackedAt = m->wpaSecCrackedAt;
+#else
+    (void)bssid;
+    (void)ssid;
+#endif
+    return out;
+}
+
+inline SaveResult saveHandshakeToPcap(HandshakeCapture& capture,
                                        PcapWriter& pcapWriter,
                                        bool showToast = true) {
     SaveResult result;
@@ -206,25 +247,13 @@ inline SaveResult saveHandshakeToPcap(HandshakeCapture& capture,
     char filename[80];
     filename_utils::getHandshakePath(hs.ssid, filename, sizeof(filename));
     
-    // Check for existing capture and preserve cracked password if present
-    WpaSecStatus preservedStatus = WpaSecStatus::NOT_UPLOADED;
-    char preservedPassword[65] = {0};
-    uint32_t preservedCrackedAt = 0;
-    
-    if (filename_utils::handshakeExists(hs.ssid)) {
-        // Load existing metadata to check for cracked password
-        const HandshakeMetadata* existingMeta = CaptureRegistry::getInstance().getMetadata(
-            strrchr(filename, '/') ? strrchr(filename, '/') + 1 : filename);
-        if (existingMeta && existingMeta->wpaSecStatus == WpaSecStatus::CRACKED) {
-            preservedStatus = WpaSecStatus::CRACKED;
-            strncpy(preservedPassword, existingMeta->wpaSecPassword, sizeof(preservedPassword) - 1);
-            preservedCrackedAt = existingMeta->wpaSecCrackedAt;
+    // Carry a prior CRACKED password across this re-save, but only for the same BSSID
+    // (ADR-0139 discussion): an SSID collision must not inherit another AP's PSK.
+    const PreservedCrack preserved = lookupCrackedForResave(hs.apBssid, hs.ssid);
 #ifdef ESP32
-            LOG_D("HSSAVE", "Preserving cracked password for %s", hs.ssid);
+    if (preserved.found) LOG_D("HSSAVE", "Preserving cracked password for %s", hs.ssid);
 #endif
-        }
-    }
-    
+
     // Open PCAP file
     if (!pcapWriter.open(filename, PcapLinkType::IEEE802_11_RADIOTAP)) {
         logger::logError("HandshakeSave", "Failed to open PCAP file");
@@ -339,11 +368,11 @@ inline SaveResult saveHandshakeToPcap(HandshakeCapture& capture,
     }
 #endif
     
-    // Apply preserved password if we had a cracked password before
-    if (preservedStatus == WpaSecStatus::CRACKED && preservedPassword[0] != '\0') {
+    // Apply preserved password if we had a cracked password before (same BSSID only).
+    if (preserved.found && preserved.password[0] != '\0') {
         metadata.wpaSecStatus = WpaSecStatus::CRACKED;
-        strncpy(metadata.wpaSecPassword, preservedPassword, sizeof(metadata.wpaSecPassword) - 1);
-        metadata.wpaSecCrackedAt = preservedCrackedAt;
+        strncpy(metadata.wpaSecPassword, preserved.password, sizeof(metadata.wpaSecPassword) - 1);
+        metadata.wpaSecCrackedAt = preserved.crackedAt;
     }
     
     // Emit the canonical "{ssid}.22000" (hashcat lines) next to the .pcap so the
@@ -439,10 +468,48 @@ inline SaveResult savePMKIDToFile(const CapturedPMKID& pmkid, bool showToast = t
     file.print("***\n");
     
     file.close();
-    
-    // Update registry (track PMKID as handshake for H indicator)
-    CaptureRegistry::getInstance().addHandshake(pmkid.ssid);
-    
+
+    // Register a full BSSID-bearing record, exactly like the 4-way path (ADR-0139): a bare
+    // addHandshake(ssid) only creates an in-memory summary, which skips the network this
+    // session but is NOT persisted to the manifest, so after a reboot the registry rebuilds
+    // without it and Auto Hunt/scanner retarget an AP we already have a PMKID for. Passing
+    // metadata persists it and marks has22000 so the pwncrack sync sees the .22000.
+    HandshakeMetadata metadata;
+    strncpy(metadata.ssid, pmkid.ssid, sizeof(metadata.ssid) - 1);
+    memcpy(metadata.bssid, pmkid.bssid, 6);
+    metadata.channel = pmkid.channel;
+    strncpy(metadata.type, "PMKID", sizeof(metadata.type) - 1);
+    metadata.hasPMKID = true;
+    metadata.has22000 = true;  // the WPA*02 line was just written above
+    metadata.quality = 100;    // a PMKID is fully crackable on its own
+    // PMKID-only has no beacon+M1+M2 pcap, so it is not WPA-SEC (pcap) uploadable; it is
+    // pwncrack-uploadable via the .22000. Mark WPA-SEC INCOMPLETE, matching the 4-way path's
+    // treatment of a capture that is not WPA-SEC valid.
+    metadata.wpaSecStatus = WpaSecStatus::INCOMPLETE;
+    // Carry a prior CRACKED password across this re-save, same-BSSID only (ADR-0139). Looked up
+    // before addHandshake below overwrites the record. Parity with the 4-way path.
+    const PreservedCrack preserved = lookupCrackedForResave(pmkid.bssid, pmkid.ssid);
+    if (preserved.found && preserved.password[0] != '\0') {
+        metadata.wpaSecStatus = WpaSecStatus::CRACKED;
+        strncpy(metadata.wpaSecPassword, preserved.password, sizeof(metadata.wpaSecPassword) - 1);
+        metadata.wpaSecCrackedAt = preserved.crackedAt;
+    }
+    metadata.capturedAt = TimeManager::getInstance().isSynced()
+                              ? (uint32_t)TimeManager::getInstance().now()
+                              : (uint32_t)(millis() / 1000);
+    // GPS geolocation (same source and guard as the 4-way path above).
+    if (adversary::ui::g_gpsDetected) {
+        const auto& gpsData = GPSManager::getInstance().getCurrentData();
+        if (gpsData.coordinate.valid) {
+            metadata.hasGPS = true;
+            metadata.latitude = gpsData.coordinate.latitude;
+            metadata.longitude = gpsData.coordinate.longitude;
+            metadata.altitude = gpsData.coordinate.altitude;
+            metadata.satellites = gpsData.coordinate.satellites;
+        }
+    }
+    CaptureRegistry::getInstance().addHandshake(pmkid.ssid, &metadata, 0, metadata.wpaSecStatus);
+
     // Success
     strncpy(result.filename, filename, sizeof(result.filename) - 1);
     snprintf(result.message, sizeof(result.message), "PMKID: %s", pmkid.ssid);
