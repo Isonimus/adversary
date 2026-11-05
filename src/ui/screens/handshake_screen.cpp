@@ -209,15 +209,20 @@ void HandshakeScreen::update() {
 
     // Solicited PMKID (ADR-0138/0139): flagged by the PMKID_CAPTURED subscriber (driver-task
     // context); do the SD write here on the main loop. Save once, count it.
-    //   - capture_.hasPMKID(): the flag can outlive its target (start() for the next Auto Hunt
-    //     target clears hasPMKID_ but not this screen flag), so only act while the capture
-    //     singleton actually holds a PMKID, never a stale one against the next target.
+    //   - Auto Hunt gate (autoState_ == ATTACKING): only consume a PMKID while actively
+    //     attacking the target it belongs to. capturing_ is true for the whole hunt, and
+    //     capture_.stop() at NEXT_TARGET does not clear hasPMKID_, so without this an AP's
+    //     re-sent M1 (EAPOL retry) re-set pmkidReady_ and the stale PMKID was saved+counted a
+    //     second time during NEXT_TARGET/SCANNING (HS:1 PMKID:2 for one capture). Clientless and
+    //     Manual set capturing_=false on success, so they need no such gate.
+    //   - capture_.hasPMKID(): only act while the capture singleton actually holds a PMKID.
     //   - !isMinimumValid(): if a 4-way pair also landed this window (the "Both" strategy race),
     //     let the richer 4-way writer own the save. It writes the WPA*02 line too, so the PMKID
     //     is not lost; this stops the PMKID path from claiming handshakeSaved_ first and making
     //     the deferred 4-way save a no-op, which dropped the handshake while still counting it.
     if (pmkidReady_ && capturing_ && !handshakeSaved_ &&
-        capture_.hasPMKID() && !capture_.getHandshake().isMinimumValid()) {
+        capture_.hasPMKID() && !capture_.getHandshake().isMinimumValid() &&
+        (!isAutoHunt() || autoState_ == AutoHuntState::ATTACKING)) {
         pmkidReady_ = false;
 #ifdef ESP32
         auto result = handshake_save::savePMKIDToFile(capture_.getPMKID());
