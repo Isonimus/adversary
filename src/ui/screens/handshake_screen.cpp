@@ -88,6 +88,10 @@ void HandshakeScreen::init() {
             hs.ssid[32] = '\0';
             hs.channel = evt.payload.handshake.channel;
             hs.hasMsg1 = hs.hasMsg2 = hs.hasMsg3 = hs.hasMsg4 = true;
+            // A 4-way whose M1 also carried a PMKID KDE: tag it in History so the row reflects
+            // both artifacts (the PMKID counter counts it too). capture_.hasPMKID() is accurate
+            // here: it is set at M1 and this event fires once the 4-way completes.
+            hs.hadPmkid = capture_.hasPMKID();
             onHandshakeCaptured(hs);
         }
     );
@@ -1556,17 +1560,29 @@ void HandshakeScreen::drawHandshakeList(Canvas& canvas) {
             const auto& hs = sessionHandshakes_[idx];
 
             // Type badge: brackets in primary text, the type itself in the accent colour.
-            // isPmkid makes the shared classifier report "PMKID" for a clientless capture.
+            // isPmkid makes the shared classifier report "PMKID" for a clientless capture;
+            // a 4-way whose M1 also carried a PMKID gets a trailing accent "+P" so the row
+            // shows both artifacts (the PMKID counter counts it too).
+            const char* typeStr = utils::getHandshakeTypeString(hs, hs.isPmkid);
+            const bool tagPmkid = hs.hadPmkid && !hs.isPmkid;
             c.setCursor(4, y + theme::LIST_ROW_TEXT_DY);
             c.setTextColor(theme::TEXT_PRIMARY());
             c.print("[");
             c.setTextColor(theme::ACCENT());
-            c.print(utils::getHandshakeTypeString(hs, hs.isPmkid));
+            c.print(typeStr);
             c.setTextColor(theme::TEXT_PRIMARY());
             c.print("]");
+            if (tagPmkid) {
+                c.setTextColor(theme::ACCENT());
+                c.print("+PMKID");
+            }
 
-            // SSID
-            c.setCursor(40, y + theme::LIST_ROW_TEXT_DY);
+            // SSID, placed one cell past the badge so the tag and SSID never touch (the fixed
+            // x=40 overlapped a 7-char badge like [PMKID]). Width is derived from the badge text.
+            const int badgeChars = 2 + (int)strlen(typeStr) + (tagPmkid ? 6 : 0);  // [ + type + ] (+PMKID)
+            const int16_t ssidX = 4 + (int16_t)((badgeChars + 1) * theme::FONT_CELL_WIDTH);
+            c.setCursor(ssidX, y + theme::LIST_ROW_TEXT_DY);
+            c.setTextColor(theme::TEXT_PRIMARY());
             char ssid[17];
             strncpy(ssid, (const char*)hs.ssid, 16);
             ssid[16] = '\0';

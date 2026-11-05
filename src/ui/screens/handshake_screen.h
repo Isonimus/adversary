@@ -42,6 +42,7 @@ struct SessionHandshakeEntry {
     bool    hasMsg3 = false;
     bool    hasMsg4 = false;
     bool    isPmkid = false;   ///< Clientless PMKID capture (no 4-way); drives the [PMKID] badge
+    bool    hadPmkid = false;  ///< A 4-way capture whose M1 also carried a PMKID KDE ([P] tag)
     int8_t  signalStrength = 0;
 };
 
