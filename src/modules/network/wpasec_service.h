@@ -58,6 +58,9 @@ public:
     /**
      * @brief Upload a handshake file to WPA-SEC
      * @param filepath Full path to the pcap file
+     * @param ssid the capture SSID, used to key the manifest status (ADR-0141);
+     *        passed in rather than derived from the filename, which is sanitized and
+     *        would not match the display-SSID registry key for special-char SSIDs.
      * @param deferCleanup when true (bulk upload), skip the per-file WiFi
      *        disconnect + rescanSummaries() so the caller can keep one WiFi
      *        session and do a single cleanup at the end. The per-file rescan also
@@ -66,7 +69,7 @@ public:
      *        makes bulk upload work.
      * @return true if upload succeeded
      */
-    bool uploadHandshake(const char* filepath, bool deferCleanup = false);
+    bool uploadHandshake(const char* filepath, const char* ssid, bool deferCleanup = false);
     
     /**
      * @brief Fetch cracked results from WPA-SEC

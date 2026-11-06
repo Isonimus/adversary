@@ -101,10 +101,45 @@ inline void getHandshakeFilename(const char* ssid, char* output, size_t outputLe
         if (output && outputLen > 0) output[0] = '\0';
         return;
     }
-    
+
     char sanitized[MAX_FILENAME_LEN + 1];
     sanitizeSSID(ssid, sanitized, sizeof(sanitized));
     snprintf(output, outputLen, "%s.pcap", sanitized);
+}
+
+/**
+ * @brief Get full path for the hashcat "{ssid}.22000" file (ADR-0141).
+ *
+ * The one canonical name for the .22000 artifact. Both producers (the 4-way
+ * writeHandshake22000 and the clientless PMKID savePMKIDToFile) and the Captures
+ * pwncrack sync build the path through here, so they cannot drift: the file is
+ * {SD_HANDSHAKES_PATH}/{sanitize(ssid)}.22000, same sanitized stem as the .pcap,
+ * with no per-record suffix. (A per-BSSID suffix here is what silently broke every
+ * PMKID upload: the sync looked for {ssid}.22000 and never found {ssid}_{bssid}.22000.)
+ */
+inline void getHc22000Path(const char* ssid, char* output, size_t outputLen) {
+    if (!ssid || !output || outputLen < 64) {
+        if (output && outputLen > 0) output[0] = '\0';
+        return;
+    }
+
+    char sanitized[MAX_FILENAME_LEN + 1];
+    sanitizeSSID(ssid, sanitized, sizeof(sanitized));
+    snprintf(output, outputLen, "%s/%s.22000", config::SD_HANDSHAKES_PATH, sanitized);
+}
+
+/**
+ * @brief Get sanitized filename (without path) for an SSID's .22000 artifact.
+ */
+inline void getHc22000Filename(const char* ssid, char* output, size_t outputLen) {
+    if (!ssid || !output || outputLen < MAX_FILENAME_LEN + 7) {
+        if (output && outputLen > 0) output[0] = '\0';
+        return;
+    }
+
+    char sanitized[MAX_FILENAME_LEN + 1];
+    sanitizeSSID(ssid, sanitized, sizeof(sanitized));
+    snprintf(output, outputLen, "%s.22000", sanitized);
 }
 
 /**

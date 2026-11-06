@@ -34,22 +34,28 @@ bool _wpaSecHasApiKey() {
     return SettingsManager::getInstance().hasWpaSecKey();
 }
 
-bool WpaSecService::uploadHandshake(const char* filepath, bool deferCleanup) {
+bool WpaSecService::uploadHandshake(const char* filepath, const char* ssidArg, bool deferCleanup) {
 #ifdef ESP32
     if (!hasApiKey()) {
         showErrorToast("No WPA-SEC key");
         return false;
     }
-    
-    // Get filename from path (needed for status check)
+
+    // Get filename from path (for logging + the multipart form field only)
     const char* filename = strrchr(filepath, '/');
     filename = filename ? filename + 1 : filepath;
-    
+
     LOG_I("WPASEC", "Upload starting: %s", filename);
-    
-    // Check local status FIRST (before opening file) to avoid SD reads for already-uploaded files
-    // This is a pure memory operation using registry - no SD access needed
-    WpaSecStatus currentStatus = getStatus(filename);
+
+    // Check local status FIRST (before opening file) to avoid SD reads for already-uploaded files.
+    // Keyed by the capture SSID (ADR-0141), not the sanitized filename stem. Pure RAM lookup.
+    WpaSecStatus currentStatus = WpaSecStatus::NOT_UPLOADED;
+    {
+        const auto& summaries = CaptureRegistry::getInstance().getHandshakeSummaries();
+        for (const auto& s : summaries) {
+            if (ssidArg && strcmp(s.ssid, ssidArg) == 0) { currentStatus = s.wpaSecStatus; break; }
+        }
+    }
     if (currentStatus == WpaSecStatus::UPLOADED ||
         currentStatus == WpaSecStatus::CRACKED ||
         currentStatus == WpaSecStatus::INVALID) {
@@ -185,17 +191,9 @@ bool WpaSecService::uploadHandshake(const char* filepath, bool deferCleanup) {
     // - "EAPOL pairs written" - hcxpcapngtool extracted handshake successfully
     // Status is persisted to the BSSID-keyed manifest via the registry
     
-    // Helper: derive SSID from filename (remove path and .pcap extension)
-    auto deriveSSID = [](const char* filepath) -> String {
-        const char* basename = strrchr(filepath, '/');
-        basename = basename ? basename + 1 : filepath;
-        String ssid(basename);
-        if (ssid.endsWith(".pcap")) {
-            ssid = ssid.substring(0, ssid.length() - 5);
-        }
-        return ssid;
-    };
-    String ssid = deriveSSID(filename);
+    // Status is keyed by the capture SSID passed in by the caller (ADR-0141), so a
+    // sanitized filename cannot desync it from the display-SSID registry record.
+    String ssid(ssidArg ? ssidArg : "");
     
     // 1. Duplicate
     if (response.indexOf("already in database") != -1) {

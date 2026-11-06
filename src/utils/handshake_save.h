@@ -126,7 +126,7 @@ inline bool writeHandshake22000(const char* ssid, const CapturedHandshake& hs,
         SD.mkdir(config::SD_HANDSHAKES_PATH);
     }
     char path[128];
-    snprintf(path, sizeof(path), "%s/%s.22000", config::SD_HANDSHAKES_PATH, ssid);
+    filename_utils::getHc22000Path(ssid, path, sizeof(path));  // one canonical name (ADR-0141)
     SD.remove(path);  // clean rewrite
 
     File file = SD.open(path, FILE_WRITE);
@@ -416,15 +416,13 @@ inline SaveResult saveHandshakeToPcap(HandshakeCapture& capture,
 inline SaveResult savePMKIDToFile(const CapturedPMKID& pmkid, bool showToast = true) {
     SaveResult result;
     
-    // Generate filename. Sanitize the SSID first: an SSID may legally contain '/', ':', etc.,
-    // which would make a broken path and silently fail the SD write. The BSSID suffix keeps
-    // same-SSID different-AP PMKIDs from colliding on one file.
-    char safeSsid[filename_utils::MAX_FILENAME_LEN + 1];
-    filename_utils::sanitizeSSID(pmkid.ssid, safeSsid, sizeof(safeSsid));
+    // Generate the canonical "{sanitize(ssid)}.22000" path (ADR-0141): the SAME name the 4-way
+    // producer and the Captures pwncrack sync build, so the sync actually finds this file.
+    // (The old "{ssid}_{bssid}.22000" suffix was unknown to the sync, so every PMKID upload
+    // failed SD.open and stayed NOT SENT. Same-SSID/different-AP file collision is the
+    // pre-existing SSID-file-keyed store limitation, shared with the .pcap path.)
     char filename[128];
-    snprintf(filename, sizeof(filename), "%s/%s_%02X%02X%02X.22000",
-             config::SD_HANDSHAKES_PATH, safeSsid,
-             pmkid.bssid[3], pmkid.bssid[4], pmkid.bssid[5]);
+    filename_utils::getHc22000Path(pmkid.ssid, filename, sizeof(filename));
     
 #ifdef ESP32
     // Create directory if needed

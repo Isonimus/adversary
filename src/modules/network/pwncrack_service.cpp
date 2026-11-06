@@ -32,16 +32,6 @@ bool _pwncrackHasApiKey() {
     return SettingsManager::getInstance().hasPwncrackKey();
 }
 
-// Derive the capture SSID from a .22000 path (strip directory + extension).
-static String pwncrackDeriveSSID(const char* filepath) {
-    const char* basename = strrchr(filepath, '/');
-    basename = basename ? basename + 1 : filepath;
-    String ssid(basename);
-    int dot = ssid.lastIndexOf('.');
-    if (dot > 0) ssid = ssid.substring(0, dot);
-    return ssid;
-}
-
 WpaSecStatus PwncrackService::getStatus(const char* ssid) const {
 #ifdef ESP32
     if (!ssid) return WpaSecStatus::NOT_UPLOADED;
@@ -56,14 +46,16 @@ WpaSecStatus PwncrackService::getStatus(const char* ssid) const {
 #endif
 }
 
-bool PwncrackService::uploadHandshake(const char* filepath, bool quiet) {
+bool PwncrackService::uploadHandshake(const char* filepath, const char* ssidArg, bool quiet) {
 #ifdef ESP32
     if (!hasApiKey()) {
         showErrorToast("No pwncrack key");
         return false;
     }
 
-    String ssid = pwncrackDeriveSSID(filepath);
+    // SSID keys the manifest status; passed in (not derived from the sanitized filename)
+    // so special-char SSIDs record status against the right record (ADR-0141).
+    String ssid(ssidArg ? ssidArg : "");
 
     // Skip if already uploaded/cracked (pure RAM lookup, no SD).
     WpaSecStatus current = getStatus(ssid.c_str());

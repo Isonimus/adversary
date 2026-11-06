@@ -6,6 +6,7 @@
 #include "captures_screen.h"
 #include "../../modules/network/pwncrack_service.h"
 #include "utils/count_format.h"
+#include "utils/filename_utils.h"  // canonical handshake artifact paths (ADR-0141)
 
 #ifdef ESP32
 #include <SD.h>
@@ -215,15 +216,16 @@ void CapturesScreen::update() {
             const char* svcName = (job.svc == SyncService::WPASEC) ? "WPA-SEC" : "pwncrack";
             // Live progress straight to the panel (canvas is purged this whole run).
             drawSyncProgressDirect(uploadAllPos_ + 1, (int)syncQueue_.size(), job.ssid, svcName);
+            // Build both artifact paths through filename_utils so they match the sanitized
+            // names the save paths wrote (ADR-0141); pass the SSID explicitly so the service
+            // keys the manifest status off the capture SSID, not the filename stem.
             char filepath[160];
             if (job.svc == SyncService::WPASEC) {
-                snprintf(filepath, sizeof(filepath),
-                         "/adversary/captures/handshakes/%s.pcap", job.ssid);
-                WpaSecService::getInstance().uploadHandshake(filepath, /*deferCleanup=*/true);
+                filename_utils::getHandshakePath(job.ssid, filepath, sizeof(filepath));
+                WpaSecService::getInstance().uploadHandshake(filepath, job.ssid, /*deferCleanup=*/true);
             } else {
-                snprintf(filepath, sizeof(filepath),
-                         "/adversary/captures/handshakes/%s.22000", job.ssid);
-                PwncrackService::getInstance().uploadHandshake(filepath, /*quiet=*/true);
+                filename_utils::getHc22000Path(job.ssid, filepath, sizeof(filepath));
+                PwncrackService::getInstance().uploadHandshake(filepath, job.ssid, /*quiet=*/true);
             }
 
             // Tear WiFi down once, on the final job (reclaims ~34KB, clean idle),
@@ -673,25 +675,33 @@ void CapturesScreen::deleteSelectedFile() {
         
         // Also delete associated .json metadata file for handshakes
         if (selectedCategory_ == CaptureCategory::HANDSHAKES) {
-            // Derive SSID from filename (remove .pcap extension)
+            // Recover the SSID stem from the row's filename. The row may show a
+            // .pcap (4-way/EAPOL) or a .22000 (PMKID-only) name, so strip at the
+            // last dot instead of a fixed ".pcap" (ADR-0141): a .22000 name left
+            // the old strstr(".pcap") no-op, so the registry entry survived the
+            // delete and the real file was orphaned.
             char ssid[48];
             strncpy(ssid, filename, sizeof(ssid) - 1);
             ssid[sizeof(ssid) - 1] = '\0';
-            char* ext = strstr(ssid, ".pcap");
+            char* ext = strrchr(ssid, '.');
             if (ext) *ext = '\0';
-            
+
             // Remove from caches by SSID
             CaptureRegistry::getInstance().removeHandshake(ssid);
             WpaSecCache::getInstance().removeEntry(ssid);
-            
-            char jsonPath[128];
-            strncpy(jsonPath, filepath, sizeof(jsonPath) - 1);
-            char* jsonExt = strstr(jsonPath, ".pcap");
-            if (jsonExt) {
-                strcpy(jsonExt, ".json");
-                if (SD.remove(jsonPath)) {
-                    LOG_D("CAPTURES", "Deleted metadata: %s", jsonPath);
-                }
+
+            // A handshake can own up to three artifacts sharing the stem: the
+            // .pcap (WPA-SEC), the .22000 (pwncrack), and the .json sidecar.
+            // SD.remove above deleted whichever one the row named; remove the
+            // companions too so a 4-way delete never leaves its .22000 behind.
+            char companion[160];
+            filename_utils::getHandshakePath(ssid, companion, sizeof(companion));
+            SD.remove(companion);
+            filename_utils::getHc22000Path(ssid, companion, sizeof(companion));
+            SD.remove(companion);
+            filename_utils::getMetadataPath(ssid, companion, sizeof(companion));
+            if (SD.remove(companion)) {
+                LOG_D("CAPTURES", "Deleted metadata: %s", companion);
             }
         }
     } else {
@@ -1333,12 +1343,18 @@ void CapturesScreen::drawFileList(Canvas& canvas) {
                 // pwncrack's negative states in: its status defaults to NOT_UPLOADED
                 // for every capture even when unkeyed, which would wrongly turn
                 // incomplete/invalid rows red. FILE INFO shows the per-service detail.
-                WpaSecStatus pcStatus = summaries[handshakeIndices_[i]].pwncrackStatus;
-                WpaSecStatus combined = wpaStatus;
-                if (wpaStatus == WpaSecStatus::CRACKED || pcStatus == WpaSecStatus::CRACKED) {
-                    combined = WpaSecStatus::CRACKED;
-                } else if (wpaStatus == WpaSecStatus::UPLOADED || pcStatus == WpaSecStatus::UPLOADED) {
-                    combined = WpaSecStatus::UPLOADED;
+                const auto& sRow = summaries[handshakeIndices_[i]];
+                WpaSecStatus pcStatus = sRow.pwncrackStatus;
+                // A PMKID-only capture has no .pcap, so WPA-SEC is N/A: the dot tracks pwncrack,
+                // its only applicable service (ADR-0141), instead of showing a permanent white
+                // INCOMPLETE. Otherwise the best outcome across both services wins.
+                WpaSecStatus combined = sRow.isPmkid ? pcStatus : wpaStatus;
+                if (!sRow.isPmkid) {
+                    if (wpaStatus == WpaSecStatus::CRACKED || pcStatus == WpaSecStatus::CRACKED) {
+                        combined = WpaSecStatus::CRACKED;
+                    } else if (wpaStatus == WpaSecStatus::UPLOADED || pcStatus == WpaSecStatus::UPLOADED) {
+                        combined = WpaSecStatus::UPLOADED;
+                    }
                 }
 
                 uint16_t circleColor;
@@ -1538,16 +1554,23 @@ void CapturesScreen::drawFileInfo(Canvas& canvas) {
         const char* statusStr = "Unknown";
         uint16_t statusColor = theme::TEXT_DISABLED();
 
-        // Row 3: WPA-SEC status (+ key if cracked)
+        // Row 3: WPA-SEC status (+ key if cracked). A PMKID-only capture has no .pcap for
+        // WPA-SEC, so it shows a neutral "N/A" rather than the misleading "INCOMPLETE" (ADR-0141).
+        const bool isPmkidOnly = (strcmp(handshakeType, "PMKID") == 0);
         canvas.setTextColor(theme::TEXT_SECONDARY());
         canvas.setCursor(4, y);
         canvas.print("WPA-SEC:");
-        statusText(wpaStatus, statusStr, statusColor);
+        if (isPmkidOnly) {
+            statusStr = "N/A";
+            statusColor = theme::TEXT_DISABLED();
+        } else {
+            statusText(wpaStatus, statusStr, statusColor);
+        }
         canvas.setTextColor(statusColor);
         canvas.setCursor(64, y);
         canvas.print(statusStr);
         y += lineHeight;
-        if (wpaStatus == WpaSecStatus::CRACKED) {
+        if (!isPmkidOnly && wpaStatus == WpaSecStatus::CRACKED) {
             const char* pwd = WpaSecService::getInstance().getCrackedPassword(fileName);
             if (pwd) drawKeyRow(pwd);
         }
