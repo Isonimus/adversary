@@ -34,11 +34,11 @@ bool _wpaSecHasApiKey() {
     return SettingsManager::getInstance().hasWpaSecKey();
 }
 
-bool WpaSecService::uploadHandshake(const char* filepath, const char* ssidArg, bool deferCleanup) {
+UploadResult WpaSecService::uploadHandshake(const char* filepath, const char* ssidArg, bool deferCleanup) {
 #ifdef ESP32
     if (!hasApiKey()) {
         showErrorToast("No WPA-SEC key");
-        return false;
+        return UploadResult::failed("no WPA-SEC key");
     }
 
     // Get filename from path (for logging + the multipart form field only)
@@ -60,23 +60,27 @@ bool WpaSecService::uploadHandshake(const char* filepath, const char* ssidArg, b
         currentStatus == WpaSecStatus::CRACKED ||
         currentStatus == WpaSecStatus::INVALID) {
         if (!deferCleanup) showToast("Already processed (skipped)");  // quiet during bulk
-        return true;
+        return UploadResult::already();
     }
-    
+
     // Open file briefly ONLY to get size, then close before SSL allocation
     // This prevents file buffer + SSL buffers from fragmenting heap
     File file = SD.open(filepath, FILE_READ);
     if (!file) {
+        // Fail loud: the canvas is purged during a bulk sync so this toast is
+        // invisible; name the missing path on the serial log (ADR-0142).
+        LOG_W("WPASEC", "upload: cannot open %s", filepath);
         showErrorToast("Cannot open file");
-        return false;
+        return UploadResult::failed("cannot open file");
     }
-    
+
     size_t fileSize = file.size();
-    
+
     if (fileSize == 0 || fileSize > 1024*1024) {  // Max 1MB
         file.close();
+        LOG_W("WPASEC", "upload: invalid file size %u: %s", (unsigned)fileSize, filepath);
         showErrorToast("Invalid file size");
-        return false;
+        return UploadResult::failed("invalid file size");
     }
     
     file.close();  // *** CRITICAL: Close before SSL allocation ***
@@ -89,23 +93,23 @@ bool WpaSecService::uploadHandshake(const char* filepath, const char* ssidArg, b
     
     if (!WiFi.isConnected()) {
         showErrorToast("WiFi connection required");
-        return false;
+        return UploadResult::failed("no wifi");
     }
 
     // Cert validation checks notBefore/notAfter and the Cardputer has no RTC, so
     // refuse to start TLS on a stale clock (would fail a legit server cert).
     if (!tls_upload::timeSyncedForTls()) {
         showErrorToast("Time not synced");
-        LOG_W("WPASEC", "Clock not NTP/GPS-synced — skipping (retry next sync)");
-        return false;
+        LOG_W("WPASEC", "Clock not NTP/GPS-synced, skipping (retry next sync)");
+        return UploadResult::failed("time not synced");
     }
 
     // Gate on contiguous heap before allocating TLS buffers, so we fail fast
     // (and leave the file for retry) instead of dying part-way through connect().
     if (tls_upload::heapTooLowForTls()) {
         showErrorToast("Low heap, try again");
-        LOG_W("WPASEC", "Heap too low for TLS — skipping (retry next sync)");
-        return false;
+        LOG_W("WPASEC", "Heap too low for TLS, skipping (retry next sync)");
+        return UploadResult::failed("low heap");
     }
 
     // Create HTTPS client — validate the server against the embedded root-CA
@@ -117,7 +121,7 @@ bool WpaSecService::uploadHandshake(const char* filepath, const char* ssidArg, b
     if (!tls_upload::connectWithRetry(client, WPASEC_HOST, WPASEC_PORT, "WPA-SEC")) {
         showErrorToast("Connection failed");
         LOG_E("WPASEC", "Upload connect failed (heap: %lu)", ESP.getFreeHeap());
-        return false;
+        return UploadResult::failed("connection failed");
     }
     
     // Build multipart form data
@@ -144,8 +148,9 @@ bool WpaSecService::uploadHandshake(const char* filepath, const char* ssidArg, b
     file = SD.open(filepath, FILE_READ);
     if (!file) {
         client.stop();
+        LOG_W("WPASEC", "upload: cannot reopen %s", filepath);
         showErrorToast("Cannot reopen file");
-        return false;
+        return UploadResult::failed("cannot reopen file");
     }
 
     // Heap-paced upload. On failure the helper closes the file + client and we
@@ -153,8 +158,9 @@ bool WpaSecService::uploadHandshake(const char* filepath, const char* ssidArg, b
     // the next sync (rather than being marked INVALID/UPLOADED).
     char streamErr[48] = {0};
     if (!tls_upload::streamFile(client, file, fileSize, "WPA-SEC", streamErr, sizeof(streamErr))) {
+        LOG_W("WPASEC", "upload: stream failed: %s", streamErr[0] ? streamErr : "unknown");
         showErrorToast(streamErr[0] ? streamErr : "Upload failed");
-        return false;
+        return UploadResult::failed("upload failed");
     }
 
     // Send footer
@@ -165,8 +171,9 @@ bool WpaSecService::uploadHandshake(const char* filepath, const char* ssidArg, b
     while (client.connected() && !client.available()) {
         if (millis() - timeout > 10000) {
             client.stop();
+            LOG_W("WPASEC", "upload: response timeout for %s", filepath);
             showErrorToast("Upload timeout");
-            return false;
+            return UploadResult::failed("upload timeout");
         }
         delay(10);
     }
@@ -203,7 +210,7 @@ bool WpaSecService::uploadHandshake(const char* filepath, const char* ssidArg, b
             WiFiConnection::getInstance().disconnect();  // Keep STA mode for scanner
             showToast("Already uploaded");
         }
-        return true;
+        return UploadResult::already();
     }
 
     // 2. No valid handshakes found by server
@@ -214,8 +221,9 @@ bool WpaSecService::uploadHandshake(const char* filepath, const char* ssidArg, b
             CaptureRegistry::getInstance().rescanSummaries();
             WiFiConnection::getInstance().disconnect();  // Keep STA mode for scanner
         }
+        LOG_W("WPASEC", "upload: server found no valid handshakes in %s", filepath);
         showErrorToast("No valid handshakes");
-        return false;
+        return UploadResult::failed("no valid handshakes");
     }
 
     // 3. Success (New upload). The server pipes back hcxpcapngtool's summary; a
@@ -231,9 +239,9 @@ bool WpaSecService::uploadHandshake(const char* filepath, const char* ssidArg, b
             WiFiConnection::getInstance().disconnect();  // Keep STA mode for scanner
             showSuccessToast("Uploaded to WPA-SEC!");
         }
-        return true;
+        return UploadResult::sent();
     }
-    
+
     // Extract error message from response body
     int bodyStart = response.indexOf("\r\n\r\n");
     if (bodyStart != -1) {
@@ -259,10 +267,12 @@ bool WpaSecService::uploadHandshake(const char* filepath, const char* ssidArg, b
         }
     }
     
-    return false;
+    return UploadResult::failed("server error");
 #else
     (void)filepath;
-    return false;
+    (void)ssidArg;
+    (void)deferCleanup;
+    return UploadResult::failed("not supported");
 #endif
 }
 

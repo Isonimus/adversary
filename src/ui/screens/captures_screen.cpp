@@ -220,17 +220,27 @@ void CapturesScreen::update() {
             // names the save paths wrote (ADR-0141); pass the SSID explicitly so the service
             // keys the manifest status off the capture SSID, not the filename stem.
             char filepath[160];
+            UploadResult result;
+            ui::SyncRecapDialog::Service recapSvc;
             if (job.svc == SyncService::WPASEC) {
                 filename_utils::getHandshakePath(job.ssid, filepath, sizeof(filepath));
-                WpaSecService::getInstance().uploadHandshake(filepath, job.ssid, /*deferCleanup=*/true);
+                result = WpaSecService::getInstance().uploadHandshake(filepath, job.ssid, /*deferCleanup=*/true);
+                recapSvc = ui::SyncRecapDialog::Service::WpaSec;
             } else {
                 filename_utils::getHc22000Path(job.ssid, filepath, sizeof(filepath));
-                PwncrackService::getInstance().uploadHandshake(filepath, job.ssid, /*quiet=*/true);
+                result = PwncrackService::getInstance().uploadHandshake(filepath, job.ssid, /*quiet=*/true);
+                recapSvc = ui::SyncRecapDialog::Service::Pwncrack;
             }
+            // Tally the outcome for the end-of-run recap (ADR-0142). The canvas is
+            // purged this whole run, so this is the only surface that survives.
+            syncRecap_.record(recapSvc, result.outcome, job.ssid, result.reason);
 
             // Tear WiFi down once, on the final job (reclaims ~34KB, clean idle),
-            // then restore the canvas from the cleanest possible heap state.
-            if (lastJob) {
+            // then restore the canvas from the cleanest possible heap state. An
+            // ESC-stop ends the run here too: without this the cancel path below
+            // left the canvas purged and WiFi up (dead UI), and the recap could
+            // not render (ADR-0142).
+            if (lastJob || syncCancelRequested_) {
                 wifiConn.disconnect();
                 WiFi.mode(WIFI_OFF);
                 logHeap("pre-restore (wifi off)");
@@ -368,6 +378,12 @@ void CapturesScreen::update() {
 
 bool CapturesScreen::handleInput(char key) {
     needsRedraw_ = true;
+
+    // The post-sync recap owns all input while up (ADR-0142): Enter/ESC close it,
+    // ;/. scroll the failure list. It only appears after a run has ended.
+    if (syncRecap_.isVisible()) {
+        return syncRecap_.handleInput(key);
+    }
 
     // While a sync run is active, ESC/back requests a graceful stop (after the
     // file currently uploading finishes — input is only seen between files).
@@ -866,6 +882,7 @@ void CapturesScreen::startSync(bool selectedOnly) {
     uploadAllActive_ = true;
     syncCancelRequested_ = false;
     uploadAllPos_ = 0;
+    syncRecap_.reset();  // fresh tally for this run (ADR-0142)
     pendingUpload_ = 2;  // deferred so the toast renders first
     char msg[40];
     snprintf(msg, sizeof(msg), "Syncing 1/%d (ESC=stop)", (int)syncQueue_.size());
@@ -874,16 +891,16 @@ void CapturesScreen::startSync(bool selectedOnly) {
 }
 
 void CapturesScreen::kickNextSync() {
-    // ESC requested mid-run: stop cleanly (the just-finished file is kept).
+    // ESC requested mid-run: stop cleanly (the just-finished file is kept). The
+    // canvas was restored in the tick above (lastJob || syncCancelRequested_), so
+    // the recap can render what we managed before the stop (ADR-0142).
     if (syncCancelRequested_) {
-        char msg[40];
-        snprintf(msg, sizeof(msg), "Sync stopped (%d/%d)",
-                 uploadAllPos_ + 1, (int)syncQueue_.size());
-        showToast(msg);
         uploadAllActive_ = false;
         syncCancelRequested_ = false;
         syncQueue_.clear();
         uploadAllPos_ = 0;
+        syncRecap_.setStopped(true);
+        syncRecap_.show();
         needsRedraw_ = true;
         return;
     }
@@ -898,12 +915,12 @@ void CapturesScreen::kickNextSync() {
         snprintf(msg, sizeof(msg), "Syncing %s (ESC=stop)", count);
         showToast(msg);
     } else {
-        char msg[40];
-        snprintf(msg, sizeof(msg), "Sync complete (%d)", (int)syncQueue_.size());
-        showSuccessToast(msg);
+        // Run finished: the canvas is restored, so end on the recap modal instead
+        // of a terse toast the purged-canvas run could never show (ADR-0142).
         uploadAllActive_ = false;
         syncQueue_.clear();
         uploadAllPos_ = 0;
+        syncRecap_.show();
     }
     needsRedraw_ = true;
 }
@@ -1218,6 +1235,8 @@ void CapturesScreen::render(Canvas& canvas) {
     }
     // Confirm overlay floats above everything (ADR-0085).
     confirmDialog_.render(canvas);
+    // Post-sync recap floats above all (ADR-0142); shown after the run finishes.
+    syncRecap_.render(canvas);
 #else
     (void)canvas;
 #endif

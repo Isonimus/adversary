@@ -12,6 +12,7 @@
 #include <cstring>
 #include <map>
 #include <string>
+#include "upload_result.h"
 
 #ifdef ESP32
 #include <WiFiClientSecure.h>
@@ -67,9 +68,11 @@ public:
      *        re-allocates the summaries vector, which fragments the freed-canvas
      *        region and breaks the 64KB canvas restore — so deferring it is what
      *        makes bulk upload work.
-     * @return true if upload succeeded
+     * @return an UploadResult (ADR-0142): Sent when the server newly accepted it,
+     *         AlreadyUploaded on a local skip or a server duplicate, Failed with a
+     *         static reason otherwise.
      */
-    bool uploadHandshake(const char* filepath, const char* ssid, bool deferCleanup = false);
+    UploadResult uploadHandshake(const char* filepath, const char* ssid, bool deferCleanup = false);
     
     /**
      * @brief Fetch cracked results from WPA-SEC
