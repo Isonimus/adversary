@@ -91,6 +91,26 @@ void test_finds_pmkid_after_another_element(void) {
     TEST_ASSERT_EQUAL_UINT8_ARRAY(kPmkid, out, 16);
 }
 
+void test_finds_pmkid_after_zero_length_element(void) {
+    // A zero-length element (Tag, Len=0: a 2-byte header, no value) precedes the
+    // PMKID KDE. The walk must advance by the full 2-byte header and still find
+    // the PMKID. Regression guard: the old `if (len == 0) { ++i; }` advanced by
+    // one byte, so the next read took the KDE's 0xDD tag as a length of 221, the
+    // bound check broke the loop, and a real crackable PMKID was dropped (false).
+    uint8_t keyData[40];
+    keyData[0] = 0x00;  // some element, zero-length
+    keyData[1] = 0x00;  // Len = 0
+    uint16_t kdeLen = makePmkidKde(keyData + 2, kPmkid);
+    uint16_t keyDataLen = 2 + kdeLen;
+
+    uint8_t frame[256];
+    uint16_t frameLen = buildM1(frame, keyData, keyDataLen);
+
+    uint8_t out[16];
+    TEST_ASSERT_TRUE(extractPmkidFromEapol(frame, frameLen, out));
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(kPmkid, out, 16);
+}
+
 void test_no_pmkid_when_kde_absent(void) {
     // Key Data holds only a non-PMKID vendor KDE (type 0x01, e.g. GTK): no PMKID.
     uint8_t keyData[24];
@@ -153,6 +173,7 @@ int main() {
     UNITY_BEGIN();
     RUN_TEST(test_extracts_pmkid_from_m1);
     RUN_TEST(test_finds_pmkid_after_another_element);
+    RUN_TEST(test_finds_pmkid_after_zero_length_element);
     RUN_TEST(test_no_pmkid_when_kde_absent);
     RUN_TEST(test_no_pmkid_when_key_data_empty);
     RUN_TEST(test_rejects_truncated_frame);
