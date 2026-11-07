@@ -573,7 +573,7 @@ void HandshakeCapture::processMessage1(const uint8_t* eapolData, uint16_t eapolL
     handshake_.keyDescVer = keyInfo & KEY_INFO_DESC_VER_MASK;
     
     // Extract a clientless-crackable PMKID when the AP put a PMKID KDE in M1's
-    // Key Data. The hashcat WPA*02 line is keyed on the supplicant MAC the AP
+    // Key Data. The hashcat WPA*01 PMKID line is keyed on the supplicant MAC the AP
     // used (PMKID = HMAC-SHA1(PMK, "PMK Name" | AP | STA)), so the station is the
     // client M1 was addressed to, not our own MAC.
     uint8_t pmkid[utils::PMKID_LENGTH];

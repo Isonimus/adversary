@@ -26,6 +26,7 @@
 #include "handshake_utils.h"
 #include "error_logger.h"
 #include "filename_utils.h"
+#include "hc22000_format.h"
 #include "utils/log.h"
 
 #ifdef ESP32
@@ -39,87 +40,21 @@ namespace handshake_save {
 // ============================================================================
 // hashcat 22000 (.hc22000) line generation
 //
-// pwncrack accepts .22000 lines (PMKID WPA*02 and 4-way WPA*01) — not raw
+// pwncrack accepts .22000 lines (PMKID WPA*01 and 4-way WPA*02) — not raw
 // .pcap — so we synthesise them on-device at capture time from the data we
 // already keep in CapturedHandshake. WPA-SEC takes the .pcap; pwncrack takes
-// the .22000; the two services are complementary.
+// the .22000; the two services are complementary. The line builders live in
+// hc22000_format.h (pure + unit-tested).
 // ============================================================================
 
-/// Find the 802.1X/EAPOL payload inside a raw 802.11 frame by scanning for the
-/// LLC/SNAP + EAPOL ethertype marker (AA AA 03 00 00 00 88 8E). Robust to QoS
-/// headers / varying 802.11 header lengths. Returns the offset just past the
-/// marker (start of the EAPOL frame) or -1 if not found.
-inline int findEapolOffset(const uint8_t* frame, size_t len) {
-    static const uint8_t marker[8] = {0xAA, 0xAA, 0x03, 0x00, 0x00, 0x00, 0x88, 0x8E};
-    if (!frame || len < 8) return -1;
-    for (size_t i = 0; i + 8 <= len; ++i) {
-        if (memcmp(frame + i, marker, 8) == 0) return static_cast<int>(i + 8);
-    }
-    return -1;
-}
-
-/// Build a hashcat WPA*01 (EAPOL) line from a captured 4-way handshake.
-/// Format: WPA*01*MIC*MAC_AP*MAC_STA*ESSID*ANONCE*EAPOL*MESSAGEPAIR
-/// Uses M2's EAPOL frame (carries SNonce + MIC) with the MIC field zeroed, and
-/// the ANonce from M1/M3. @return true if a complete line was written to @p out.
-inline bool buildEapolHc22000Line(const CapturedHandshake& hs, char* out, size_t outLen) {
-    if (!out || outLen == 0) return false;
-    // Need M2 (MIC + SNonce) plus an ANonce source (M1 or M3).
-    if (!(hs.hasMsg2 && (hs.hasMsg1 || hs.hasMsg3))) return false;
-
-    int off = findEapolOffset(hs.msg2Data, hs.msg2Len);
-    if (off < 0) return false;
-    const uint8_t* eapol = hs.msg2Data + off;
-    int avail = static_cast<int>(hs.msg2Len) - off;
-    // EAPOL-Key MIC sits at offset 81 (4B EAPOL hdr + 77B up to the MIC); need
-    // at least the MIC + the 2B key-data-length that follows it.
-    if (avail < 99) return false;
-
-    // Trust the EAPOL length field (bytes 2..3, big-endian) to trim any trailing
-    // 802.11 FCS/padding; fall back to what's available if it looks wrong.
-    int declared = 4 + ((eapol[2] << 8) | eapol[3]);
-    int eapolLen = (declared >= 99 && declared <= avail) ? declared : avail;
-
-    static uint8_t buf[256];
-    if (eapolLen > static_cast<int>(sizeof(buf))) eapolLen = sizeof(buf);
-    memcpy(buf, eapol, eapolLen);
-    for (int i = 81; i < 81 + 16 && i < eapolLen; ++i) buf[i] = 0;  // zero the MIC
-
-    size_t pos = 0;
-    auto appendStr = [&](const char* s) {
-        while (*s && pos + 1 < outLen) out[pos++] = *s++;
-    };
-    auto appendHex = [&](const uint8_t* d, size_t n) {
-        static const char H[] = "0123456789abcdef";
-        for (size_t i = 0; i < n && pos + 2 < outLen; ++i) {
-            out[pos++] = H[d[i] >> 4];
-            out[pos++] = H[d[i] & 0x0F];
-        }
-    };
-
-    appendStr("WPA*01*");
-    appendHex(hs.mic, 16);                                              appendStr("*");
-    appendHex(hs.apBssid, 6);                                          appendStr("*");
-    appendHex(hs.clientMac, 6);                                        appendStr("*");
-    appendHex(reinterpret_cast<const uint8_t*>(hs.ssid), strlen(hs.ssid)); appendStr("*");
-    appendHex(hs.anonce, 32);                                          appendStr("*");
-    appendHex(buf, eapolLen);
-    // messagepair 00: ANonce from M1, MIC/SNonce from M2 (the authenticated pair).
-    appendStr("*00");
-
-    if (pos + 1 >= outLen) return false;  // truncated — don't emit a partial line
-    out[pos] = '\0';
-    return true;
-}
-
 /// Write the canonical "{ssid}.22000" file (same stem as the .pcap) containing
-/// every hashcat line we can build for this capture: the WPA*01 4-way line and,
-/// when present, the WPA*02 PMKID line. Overwrites so a re-capture regenerates.
+/// every hashcat line we can build for this capture: the WPA*02 4-way line and,
+/// when present, the WPA*01 PMKID line. Overwrites so a re-capture regenerates.
 inline bool writeHandshake22000(const char* ssid, const CapturedHandshake& hs,
                                 bool hasPMKID, const CapturedPMKID& pmkid) {
 #ifdef ESP32
     char eapolLine[1024];
-    bool haveEapol = buildEapolHc22000Line(hs, eapolLine, sizeof(eapolLine));
+    bool haveEapol = hc22000::buildEapolLine(hs, eapolLine, sizeof(eapolLine));
     if (!haveEapol && !hasPMKID) return false;  // nothing pwncrack can use
 
     if (!SD.exists(config::SD_HANDSHAKES_PATH)) {
@@ -139,16 +74,11 @@ inline bool writeHandshake22000(const char* ssid, const CapturedHandshake& hs,
         file.print("\n");
     }
     if (hasPMKID) {
-        // WPA*02*PMKID*MAC_AP*MAC_STA*ESSID***
-        file.print("WPA*02*");
-        for (int i = 0; i < 16; i++) file.printf("%02x", pmkid.pmkid[i]);
-        file.print("*");
-        for (int i = 0; i < 6; i++) file.printf("%02x", pmkid.bssid[i]);
-        file.print("*");
-        for (int i = 0; i < 6; i++) file.printf("%02x", pmkid.staMac[i]);
-        file.print("*");
-        for (size_t i = 0; i < strlen(pmkid.ssid); i++) file.printf("%02x", (uint8_t)pmkid.ssid[i]);
-        file.print("***\n");
+        char pmkidLine[256];
+        if (hc22000::buildPmkidLine(pmkid, pmkidLine, sizeof(pmkidLine))) {
+            file.print(pmkidLine);
+            file.print("\n");
+        }
     }
     file.close();
     LOG_I("HC22000", "Wrote %s (eapol=%d pmkid=%d)", path, haveEapol, hasPMKID);
@@ -377,7 +307,7 @@ inline SaveResult saveHandshakeToPcap(HandshakeCapture& capture,
     
     // Emit the canonical "{ssid}.22000" (hashcat lines) next to the .pcap so the
     // capture can be uploaded to pwncrack (which takes .22000, not .pcap). Includes
-    // the WPA*01 4-way line and, if present, the WPA*02 PMKID line. Done BEFORE the
+    // the WPA*02 4-way line and, if present, the WPA*01 PMKID line. Done BEFORE the
     // manifest write so the record records whether a .22000 exists (drives the
     // pwncrack sync count without per-file SD checks).
     metadata.has22000 = writeHandshake22000(hs.ssid, hs, capture.hasPMKID(), capture.getPMKID());
@@ -441,34 +371,18 @@ inline SaveResult savePMKIDToFile(const CapturedPMKID& pmkid, bool showToast = t
         return result;
     }
     
-    // Write hashcat 22000 format (mode 02 = PMKID only)
-    // Format: WPA*02*PMKID*MAC_AP*MAC_STA*ESSID_HEX***
-    file.print("WPA*02*");
-    
-    // PMKID (16 bytes hex)
-    for (int i = 0; i < 16; i++) {
-        file.printf("%02x", pmkid.pmkid[i]);
+    // Write the hashcat 22000 PMKID line (mode 01 = PMKID only).
+    char pmkidLine[256];
+    if (!hc22000::buildPmkidLine(pmkid, pmkidLine, sizeof(pmkidLine))) {
+        logger::logError("PMKIDSave", "Failed to build PMKID hc22000 line");
+        file.close();
+        SD.remove(filename);  // don't leave an empty .22000 behind
+        strncpy(result.message, "PMKID encode failed", sizeof(result.message) - 1);
+        return result;
     }
-    file.print("*");
-    
-    // MAC AP (BSSID)
-    for (int i = 0; i < 6; i++) {
-        file.printf("%02x", pmkid.bssid[i]);
-    }
-    file.print("*");
-    
-    // MAC STA
-    for (int i = 0; i < 6; i++) {
-        file.printf("%02x", pmkid.staMac[i]);
-    }
-    file.print("*");
-    
-    // ESSID hex
-    for (size_t i = 0; i < strlen(pmkid.ssid); i++) {
-        file.printf("%02x", (uint8_t)pmkid.ssid[i]);
-    }
-    file.print("***\n");
-    
+    file.print(pmkidLine);
+    file.print("\n");
+
     file.close();
 
     // Register a full BSSID-bearing record, exactly like the 4-way path (ADR-0139): a bare
@@ -482,7 +396,7 @@ inline SaveResult savePMKIDToFile(const CapturedPMKID& pmkid, bool showToast = t
     metadata.channel = pmkid.channel;
     strncpy(metadata.type, "PMKID", sizeof(metadata.type) - 1);
     metadata.hasPMKID = true;
-    metadata.has22000 = true;  // the WPA*02 line was just written above
+    metadata.has22000 = true;  // the WPA*01 PMKID line was just written above
     metadata.quality = 100;    // a PMKID is fully crackable on its own
     // PMKID-only has no beacon+M1+M2 pcap, so it is not WPA-SEC (pcap) uploadable; it is
     // pwncrack-uploadable via the .22000. Mark WPA-SEC INCOMPLETE, matching the 4-way path's

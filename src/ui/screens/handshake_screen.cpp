@@ -217,7 +217,7 @@ void HandshakeScreen::update() {
     //     Manual set capturing_=false on success, so they need no such gate.
     //   - capture_.hasPMKID(): only act while the capture singleton actually holds a PMKID.
     //   - !isMinimumValid(): if a 4-way pair also landed this window (the "Both" strategy race),
-    //     let the richer 4-way writer own the save. It writes the WPA*02 line too, so the PMKID
+    //     let the richer 4-way writer own the save. It writes the WPA*01 PMKID line too, so the PMKID
     //     is not lost; this stops the PMKID path from claiming handshakeSaved_ first and making
     //     the deferred 4-way save a no-op, which dropped the handshake while still counting it.
     if (pmkidReady_ && capturing_ && !handshakeSaved_ &&
@@ -587,7 +587,7 @@ void HandshakeScreen::saveHandshake() {
         handshakeSaved_ = true;
         
         // PMKID is written into the canonical "{ssid}.22000" by saveHandshakeToPcap()
-        // (alongside the WPA*01 line), so no separate legacy "_XXYYZZ.22000" write.
+        // (alongside the WPA*02 4-way line), so no separate legacy "_XXYYZZ.22000" write.
         if (capture_.hasPMKID()) {
             pmkidsCaptured_++;
         }
