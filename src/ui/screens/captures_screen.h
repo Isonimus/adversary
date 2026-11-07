@@ -18,6 +18,7 @@
 #include "../components/footer_hints.h"
 #include "../components/action_menu.h"
 #include "../components/confirm_dialog.h"
+#include "../components/sync_recap_dialog.h"
 #include "../components/list_scroll_model.h"
 #include "../components/scrollable_list.h"
 #include "modules/network/wpasec_service.h"
@@ -208,6 +209,7 @@ private:
     ui::FooterHints footerHints_;
     ui::ActionMenu uploadMenu_;  // "Sync this / Sync all new" popup (handshakes)
     ui::ConfirmDialog confirmDialog_;  // shared delete-file confirm overlay (ADR-0085)
+    ui::SyncRecapDialog syncRecap_;    // end-of-run bulk-sync recap (ADR-0142)
 
     // Unified sync to every keyed cracking service. The atom of work is ONE TLS
     // upload of ONE file to ONE service (WPA-SEC <- {ssid}.pcap, pwncrack <-

@@ -162,6 +162,7 @@ struct HandshakeSummary {
     WpaSecStatus pwncrackStatus;  ///< pwncrack status (1 byte, enum reused)
     bool hasGPS = false;          ///< RF_HAS_GPS flag (for the list GPS column)
     bool has22000 = false;        ///< RF2_HAS_HC22000 (capture is pwncrack-uploadable)
+    bool isPmkid = false;         ///< record type == PMKID: WPA-SEC is N/A, pwncrack is the one service (ADR-0141)
     uint8_t bssid[6];             ///< Primary key (0 until known — bootstrap A)
     uint16_t recIndex;            ///< Manifest record index, or NO_RECORD
 
@@ -179,9 +180,23 @@ struct HandshakeSummary {
         if (s) strncpy(ssid, s, sizeof(ssid) - 1);
     }
 
-    /// Derive filename from SSID (e.g., "MyNetwork" -> "MyNetwork.pcap")
+    /// True when the capture's only uploadable artifact is a .22000 and WPA-SEC
+    /// does not apply: a real PMKID-only capture. Requires an actual .22000 on
+    /// disk (has22000), not merely a PMKID type label, so an older record
+    /// mislabeled type=PMKID with no .22000 (a misclassified 4-way) renders
+    /// honestly as its .pcap instead of an unsyncable .22000 row (ADR-0144,
+    /// refining ADR-0141).
+    bool isPmkidOnly() const { return isPmkid && has22000; }
+
+    /// Derive the display filename from the SSID. A PMKID-only capture has no
+    /// .pcap on disk, only the hashcat "{ssid}.22000" (ADR-0141), so it must
+    /// render as .22000 in the captures list; everything else is a .pcap.
     void getFilename(char* output, size_t outputLen) const {
-        filename_utils::getHandshakeFilename(ssid, output, outputLen);
+        if (isPmkidOnly()) {
+            filename_utils::getHc22000Filename(ssid, output, outputLen);
+        } else {
+            filename_utils::getHandshakeFilename(ssid, output, outputLen);
+        }
     }
 };
 
@@ -626,11 +641,13 @@ inline void CaptureRegistry::addHandshake(const char* ssid,
     if (summary) {
         if (size) summary->size = size;
         summary->wpaSecStatus = status;
-        if (metadata) { summary->hasGPS = metadata->hasGPS; summary->has22000 = metadata->has22000; }
+        if (metadata) { summary->hasGPS = metadata->hasGPS; summary->has22000 = metadata->has22000;
+                        summary->isPmkid = (strcmp(metadata->type, "PMKID") == 0); }
     } else {
         summaries_.emplace_back(ssid, size, status);
         summary = &summaries_.back();
-        if (metadata) { summary->hasGPS = metadata->hasGPS; summary->has22000 = metadata->has22000; }
+        if (metadata) { summary->hasGPS = metadata->hasGPS; summary->has22000 = metadata->has22000;
+                        summary->isPmkid = (strcmp(metadata->type, "PMKID") == 0); }
     }
 
 #ifdef ESP32
@@ -730,6 +747,7 @@ inline int CaptureRegistry::loadFromManifest() {
         memcpy(s.bssid, rec.bssid, 6);
         s.hasGPS = (rec.flags & RF_HAS_GPS) != 0;
         s.has22000 = (rec.flags2 & RF2_HAS_HC22000) != 0;
+        s.isPmkid = (rec.type == static_cast<uint8_t>(RecordType::PMKID));  // ADR-0141
         s.recIndex = static_cast<uint16_t>(i);
         summaries_.push_back(s);
         loaded++;

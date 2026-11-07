@@ -61,7 +61,10 @@ HandshakeScreen::~HandshakeScreen() {
     if (stateHandlerId_ != 0) {
         EventBus::getInstance().unsubscribe(stateHandlerId_);
     }
-    
+    if (pmkidHandlerId_ != 0) {
+        EventBus::getInstance().unsubscribe(pmkidHandlerId_);
+    }
+
     if (capturing_) {
         stopCapture();
     }
@@ -85,6 +88,10 @@ void HandshakeScreen::init() {
             hs.ssid[32] = '\0';
             hs.channel = evt.payload.handshake.channel;
             hs.hasMsg1 = hs.hasMsg2 = hs.hasMsg3 = hs.hasMsg4 = true;
+            // A 4-way whose M1 also carried a PMKID KDE: tag it in History so the row reflects
+            // both artifacts (the PMKID counter counts it too). capture_.hasPMKID() is accurate
+            // here: it is set at M1 and this event fires once the 4-way completes.
+            hs.hadPmkid = capture_.hasPMKID();
             onHandshakeCaptured(hs);
         }
     );
@@ -103,6 +110,25 @@ void HandshakeScreen::init() {
         );
     }
     
+    // Solicited PMKID (ADR-0138/0139): a PMKID never reaches the 4-way save path, so the modes
+    // that solicit it (focused Clientless, and Auto Hunt when its strategy uses solicitation)
+    // persist and count it off PMKID_CAPTURED. recordPmkid publishes that from the Wi-Fi driver
+    // callback, where SD I/O is unsafe, so the handler only flags; the main-loop update() does
+    // the save. Manual and Deauth-strategy Auto Hunt keep saving any PMKID through the 4-way
+    // writer, so they are gated out here (and the gate guards against a stale instance).
+    if (pmkidHandlerId_ == 0) {
+        pmkidHandlerId_ = EventBus::getInstance().subscribe(
+            EventType::PMKID_CAPTURED,
+            [this](const EventData& evt) {
+                (void)evt;
+                if (!capturing_) return;
+                if (!(isClientless() || (isAutoHunt() && autoUsesSolicit()))) return;
+                pmkidReady_ = true;
+                needsRedraw_ = true;
+            }
+        );
+    }
+
     initialized_ = true;
     needsRedraw_ = true;
 }
@@ -180,6 +206,59 @@ void HandshakeScreen::update() {
         }
         needsRedraw_ = true;  // Always redraw during capture for live stats
     }
+
+    // Solicited PMKID (ADR-0138/0139): flagged by the PMKID_CAPTURED subscriber (driver-task
+    // context); do the SD write here on the main loop. Save once, count it.
+    //   - Auto Hunt gate (autoState_ == ATTACKING): only consume a PMKID while actively
+    //     attacking the target it belongs to. capturing_ is true for the whole hunt, and
+    //     capture_.stop() at NEXT_TARGET does not clear hasPMKID_, so without this an AP's
+    //     re-sent M1 (EAPOL retry) re-set pmkidReady_ and the stale PMKID was saved+counted a
+    //     second time during NEXT_TARGET/SCANNING (HS:1 PMKID:2 for one capture). Clientless and
+    //     Manual set capturing_=false on success, so they need no such gate.
+    //   - capture_.hasPMKID(): only act while the capture singleton actually holds a PMKID.
+    //   - !isMinimumValid(): if a 4-way pair also landed this window (the "Both" strategy race),
+    //     let the richer 4-way writer own the save. It writes the WPA*01 PMKID line too, so the PMKID
+    //     is not lost; this stops the PMKID path from claiming handshakeSaved_ first and making
+    //     the deferred 4-way save a no-op, which dropped the handshake while still counting it.
+    if (pmkidReady_ && capturing_ && !handshakeSaved_ &&
+        capture_.hasPMKID() && !capture_.getHandshake().isMinimumValid() &&
+        (!isAutoHunt() || autoState_ == AutoHuntState::ATTACKING)) {
+        pmkidReady_ = false;
+#ifdef ESP32
+        auto result = handshake_save::savePMKIDToFile(capture_.getPMKID());
+        if (result.success) {
+            strncpy(savedFilename_, result.filename, sizeof(savedFilename_) - 1);
+            savedFilename_[sizeof(savedFilename_) - 1] = '\0';
+            pmkidsCaptured_++;
+            handshakeSaved_ = true;
+            if (isAutoHunt()) {
+                // Record it in the session History list with a [PMKID] badge so the capture is
+                // visible there, not just in the counter (parity with the 4-way path).
+                const auto& pm = capture_.getPMKID();
+                SessionHandshakeEntry entry{};
+                strncpy(entry.ssid, pm.ssid, sizeof(entry.ssid) - 1);
+                memcpy(entry.apBssid, pm.bssid, 6);
+                entry.channel = pm.channel;
+                entry.hasMsg1 = true;   // a PMKID is carried in M1
+                entry.isPmkid = true;
+                addSessionEntry(entry);
+                // A PMKID is a crackable win for this AP; advance instead of burning the window.
+                setAutoHuntState(AutoHuntState::NEXT_TARGET);
+            } else {
+                capturing_ = false;
+                screenState_ = HandshakeScreenState::SUCCESS;
+            }
+        } else {
+            LOG_E("HS", "PMKID save failed");
+            // Auto Hunt keeps hunting (the window timeout advances); focused modes show the error.
+            if (!isAutoHunt()) {
+                capturing_ = false;
+                screenState_ = HandshakeScreenState::ERROR;
+            }
+        }
+#endif
+        needsRedraw_ = true;
+    }
 }
 
 bool HandshakeScreen::handleInput(char key) {
@@ -202,12 +281,13 @@ bool HandshakeScreen::handleInput(char key) {
     switch (screenState_) {
         case HandshakeScreenState::CONFIG: {
             // Canonical config-form input via the shared classifier (ADR-0092 / 0107), the same
-            // path evil_twin and deauth use. Auto Hunt's single row is the START button, a Terminal
-            // row; Manual is Target (0, Navigation) + value rows (1-3) + START (last, Terminal).
+            // path evil_twin and deauth use. Auto Hunt is Strategy (0, Value) + START (last,
+            // Terminal) (ADR-0139); Manual is Target (0, Navigation) + value rows (1-3) + START.
             const int count = configItemCount();
             const int sel = configList_.selectedIndex();
             const ui::ConfigRowKind kind =
-                isAutoHunt()          ? ui::ConfigRowKind::Terminal   :
+                isAutoHunt()          ? (sel == count - 1 ? ui::ConfigRowKind::Terminal      // START
+                                                          : ui::ConfigRowKind::Value) :      // Strategy
                 (sel == 0)            ? ui::ConfigRowKind::Navigation  :  // Target -> scanner
                 (sel == count - 1)    ? ui::ConfigRowKind::Terminal   :   // START CAPTURE
                                         ui::ConfigRowKind::Value;         // Auto Deauth / Count / Timeout
@@ -308,13 +388,16 @@ bool HandshakeScreen::handleInput(char key) {
                     handshakeSaved_ = false;
                     screenState_ = HandshakeScreenState::CONFIG;
                     return true;
-                    
+
                 case '`':
+                    // Signal the manager to pop back, same as the CONFIG ESC handler. Without
+                    // shouldExit_ the first ESC only hid the screen, so it took two presses.
+                    shouldExit_ = true;
                     hide();
                     return true;
             }
             break;
-            
+
         case HandshakeScreenState::TIMEOUT:
         case HandshakeScreenState::ERROR:
             switch (key) {
@@ -323,8 +406,9 @@ bool HandshakeScreen::handleInput(char key) {
                     // Retry
                     screenState_ = HandshakeScreenState::CONFIG;
                     return true;
-                    
+
                 case '`':
+                    shouldExit_ = true;  // pop back on the first ESC (see SUCCESS above)
                     hide();
                     return true;
             }
@@ -361,8 +445,19 @@ bool HandshakeScreen::handleInput(char key) {
 }
 
 void HandshakeScreen::handleConfigEdit(int delta) {
-    // Only Manual value rows (1-3) are editable; Target (0), START (4), and Auto Hunt's single
-    // row have nothing to step. delta>0 advances (ENTER / '/' / '>'), delta<0 steps back (',' / '<').
+    // Auto Hunt: row 0 is the Strategy selector (ADR-0139); cycle Deauth -> PMKID -> Both.
+    if (isAutoHunt()) {
+        if (configList_.selectedIndex() == 0) {
+            constexpr int kStrategyCount = 3;  // Deauth, PMKID, Both
+            int next = static_cast<int>(autoStrategy_) + (delta > 0 ? 1 : -1);
+            next = (next % kStrategyCount + kStrategyCount) % kStrategyCount;  // ring both ways
+            autoStrategy_ = static_cast<AutoHuntStrategy>(next);
+        }
+        return;
+    }
+
+    // Only Manual value rows (1-3) are editable; Target (0) and START (4) have nothing to step.
+    // delta>0 advances (ENTER / '/' / '>'), delta<0 steps back (',' / '<').
     switch (configList_.selectedIndex()) {
         case 1:  // Auto Deauth: a toggle flips either direction
             autoDeauth_ = !autoDeauth_;
@@ -422,23 +517,34 @@ void HandshakeScreen::startCapture() {
         return;
     }
     
-    // Manual mode - need target
+    // Manual and Clientless both need a scanner-chosen target.
     if (!hasTarget_) {
 #ifdef ESP32
         LOG_W("HS", "No target set");
 #endif
         return;
     }
-    
+
     HandshakeCaptureConfig config;
     memcpy(config.targetBssid, targetBssid_, 6);
     strncpy(config.targetSsid, targetSsid_, 32);
     config.channel = targetChannel_;
-    config.autoDeauth = autoDeauth_;
-    config.deauthCount = deauthCount_;
-    config.timeoutMs = timeoutSecs_ * 1000;
     config.captureAllClients = true;
-    
+
+    if (isClientless()) {
+        // Clientless PMKID (ADR-0138): solicit M1 with an injected auth+assoc blind pair, no
+        // deauth. The solicitation state machine is bounded internally (SOLICIT_MAX_ATTEMPTS),
+        // so no capture-level timeout: timeoutMs 0 avoids a second, competing timeout.
+        config.solicitPmkid = true;
+        config.autoDeauth = false;
+        config.timeoutMs = 0;
+        pmkidReady_ = false;
+    } else {
+        config.autoDeauth = autoDeauth_;
+        config.deauthCount = deauthCount_;
+        config.timeoutMs = timeoutSecs_ * 1000;
+    }
+
     if (capture_.start(config)) {
         capturing_ = true;
         handshakeSaved_ = false;
@@ -481,7 +587,7 @@ void HandshakeScreen::saveHandshake() {
         handshakeSaved_ = true;
         
         // PMKID is written into the canonical "{ssid}.22000" by saveHandshakeToPcap()
-        // (alongside the WPA*01 line), so no separate legacy "_XXYYZZ.22000" write.
+        // (alongside the WPA*02 4-way line), so no separate legacy "_XXYYZZ.22000" write.
         if (capture_.hasPMKID()) {
             pmkidsCaptured_++;
         }
@@ -498,63 +604,14 @@ void HandshakeScreen::saveHandshake() {
     }
 }
 
-void HandshakeScreen::savePMKID22000(const CapturedPMKID& pmkid) {
+void HandshakeScreen::addSessionEntry(const SessionHandshakeEntry& entry) {
+    // Deduped by BSSID so each target shows once in the Auto Hunt History list.
+    for (const auto& existing : sessionHandshakeBuffer_) {
+        if (memcmp(existing.apBssid, entry.apBssid, 6) == 0) return;
+    }
+    sessionHandshakeBuffer_.push_back(entry);
 #ifdef ESP32
-    // Format: WPA*02*PMKID*MAC_AP*MAC_CLIENT*ESSID_HEX***
-    // Mode 02 = PMKID
-    
-    // Create directory if needed
-    if (!SD.exists(config::SD_HANDSHAKES_PATH)) {
-        SD.mkdir(config::SD_HANDSHAKES_PATH);
-    }
-    
-    // Generate filename
-    char filename[128];
-    snprintf(filename, sizeof(filename), "%s/%s_%02X%02X%02X.22000",
-             config::SD_HANDSHAKES_PATH,
-             pmkid.ssid,
-             pmkid.bssid[3], pmkid.bssid[4], pmkid.bssid[5]);
-    
-    File file = SD.open(filename, FILE_WRITE);
-    if (!file) {
-        LOG_E("PMKID", "Failed to open .22000 file");
-        return;
-    }
-    
-    // WPA*02*PMKID*
-    file.print("WPA*02*");
-    
-    // PMKID (16 bytes hex)
-    for (int i = 0; i < 16; i++) {
-        file.printf("%02x", pmkid.pmkid[i]);
-    }
-    file.print("*");
-    
-    // MAC_AP (6 bytes hex)
-    for (int i = 0; i < 6; i++) {
-        file.printf("%02x", pmkid.bssid[i]);
-    }
-    file.print("*");
-    
-    // MAC_CLIENT (6 bytes hex)
-    for (int i = 0; i < 6; i++) {
-        file.printf("%02x", pmkid.staMac[i]);
-    }
-    file.print("*");
-    
-    // ESSID (hex encoded)
-    for (size_t i = 0; i < strlen(pmkid.ssid); i++) {
-        file.printf("%02x", (uint8_t)pmkid.ssid[i]);
-    }
-    
-    // Empty fields for message pair and additional nonces
-    file.print("***\n");
-    
-    file.close();
-    
-    LOG_I("PMKID", "Saved .22000 to: %s", filename);
-#else
-    (void)pmkid;
+    LOG_D("HS", "Added to session buffer (%zu total)", sessionHandshakeBuffer_.size());
 #endif
 }
 
@@ -565,26 +622,11 @@ void HandshakeScreen::onHandshakeCaptured(const SessionHandshakeEntry& hs) {
     LOG_I("HS", "Handshake captured for %s", hs.ssid);
 #endif
     
-    // Add to session buffer for handshake list view (autohunt mode)
+    // Add to session buffer for the History list view (autohunt mode)
     if (isAutoHunt()) {
-        // Check for duplicates (same BSSID)
-        bool isDuplicate = false;
-        for (const auto& existing : sessionHandshakeBuffer_) {
-            if (memcmp(existing.apBssid, hs.apBssid, 6) == 0) {
-                isDuplicate = true;
-                break;
-            }
-        }
-        
-        if (!isDuplicate) {
-            sessionHandshakeBuffer_.push_back(hs);
-#ifdef ESP32
-            LOG_D("HS", "Added to session buffer (%zu total)",
-                  sessionHandshakeBuffer_.size());
-#endif
-        }
+        addSessionEntry(hs);
     }
-    
+
     // Transition to success screen (manual mode) or continue hunting (auto mode)
     if (isAutoHunt()) {
         handshakesCaptured_++;
@@ -754,12 +796,18 @@ void HandshakeScreen::updateAutoHunt() {
                 memcpy(config.targetBssid, targetBssid_, 6);
                 strncpy(config.targetSsid, targetSsid_, 32);
                 config.channel = targetChannel_;
-                config.autoDeauth = true;
+                // Strategy (ADR-0139): Deauth and Both force clients; PMKID and Both solicit M1.
+                config.autoDeauth = (autoStrategy_ == AutoHuntStrategy::Deauth ||
+                                     autoStrategy_ == AutoHuntStrategy::Both);
                 config.deauthCount = 5;
+                config.solicitPmkid = autoUsesSolicit();
                 config.timeoutMs = AUTO_ATTACK_TIME;
                 config.captureAllClients = true;
-                
+
                 if (capture_.start(config)) {
+                    // Clear any PMKID-ready flag from the previous target: Auto Hunt starts
+                    // each target here, not via startCapture(), so this is the per-target reset.
+                    pmkidReady_ = false;
                     setAutoHuntState(AutoHuntState::ATTACKING);
                 } else {
                     // Failed to start, try next target
@@ -950,7 +998,8 @@ void HandshakeScreen::render(Canvas& canvas) {
     
     switch (screenState_) {
         case HandshakeScreenState::CONFIG:
-            drawHeader(canvas, isAutoHunt() ? "Auto Hunt" : "Manual Capture");
+            drawHeader(canvas, isAutoHunt()   ? "Auto Hunt" :
+                               isClientless() ? "Clientless PMKID" : "Manual Capture");
             drawConfig(canvas);
             break;
             
@@ -1048,32 +1097,71 @@ void HandshakeScreen::drawHeader(Canvas& canvas, const char* title) {
 
 
 
+void HandshakeScreen::formatTargetValue(char* out, size_t outLen) const {
+    // Capped at 26 (an SSID can be 32; the "Target:" label leaves room for ~29 on a 240px row
+    // at FONT_CELL_WIDTH=6), matching deauth and evil_twin (slice-0109/0110).
+    constexpr size_t TARGET_VALUE_MAX = 26;
+    const char* t = (hasTarget_ && targetSsid_[0] != '\0') ? targetSsid_
+                                                           : "(select from scanner)";
+    if (strlen(t) > TARGET_VALUE_MAX) {
+        strncpy(out, t, TARGET_VALUE_MAX - 3);
+        strcpy(out + (TARGET_VALUE_MAX - 3), "...");
+    } else {
+        strncpy(out, t, outLen - 1);
+        out[outLen - 1] = '\0';
+    }
+}
+
 void HandshakeScreen::drawConfig(Canvas& canvas) {
     if (isAutoHunt()) {
-        // Auto Hunt finds its own targets, so there is no Target row: describe what it
-        // does, then render START as the single selectable row (always focused).
+        // Auto Hunt finds its own targets, so there is no Target row. A short honest note (it
+        // runs on built-in timing and only honours the whitelist, not Settings; ADR-0111), then
+        // a Strategy selector (ADR-0139) + START on the shared ScrollableList.
         int16_t y = HEADER_HEIGHT + 4;
         canvas.setTextColor(theme::TEXT_SECONDARY());
         canvas.setTextSize(1);
         canvas.setCursor(4, y);
-        canvas.print("-- Auto Hunt --");
-        y += 14;
-        // Auto Hunt runs on built-in timing (the AUTO_*_TIME constants, not Settings) and the
-        // only Settings input it honors is the whitelist (selectNextTarget skips matches). The
-        // copy says that, replacing the old, false "Uses values from Settings menu" which
-        // implied its scan/attack tuning came from Settings (ADR-0111 / slice-0123).
+        canvas.print("Auto scan + capture.");
+        y += 12;
         canvas.setCursor(4, y);
-        canvas.print("Scans, targets, and captures");
-        y += 14;
-        canvas.setCursor(4, y);
-        canvas.print("handshakes automatically.");
-        y += 14;
-        canvas.setCursor(4, y);
-        canvas.print("Skips whitelisted networks.");
-        y += 20;
+        canvas.print("Skips whitelisted.");
+        y += 16;
 
-        // Start button - shared ActionButton (ADR-0087). Its one row always has focus.
-        ui::ActionButton::render(canvas, y, "START AUTO HUNT", true);
+        const int16_t listTop = y;
+        const int16_t availHeight = canvas.height() - listTop - FOOTER_HEIGHT - 4;
+        configList_.setItemCount(AUTOHUNT_CONFIG_ITEMS);
+        ScrollableList::render(canvas, configList_, 0, listTop, canvas.width(), availHeight,
+            theme::LIST_ROW_HEIGHT, [this](Canvas& c, int idx, int16_t rowY, bool selected) {
+                if (idx == AUTOHUNT_CONFIG_ITEMS - 1) {  // START row: shared green ActionButton
+                    ui::ActionButton::render(c, rowY, "START AUTO HUNT", selected);
+                    return;
+                }
+                const char* strat = autoStrategy_ == AutoHuntStrategy::Deauth ? "Deauth" :
+                                    autoStrategy_ == AutoHuntStrategy::Pmkid  ? "PMKID"  : "Both";
+                ui::ConfigRow::render(c, rowY, "Strategy:", strat);
+            },
+            !footerHints_.hasFocus());
+        return;
+    }
+
+    if (isClientless()) {
+        // Clientless PMKID (ADR-0138): Target (row 0, navigation) + START, no deauth/timeout
+        // rows (this mode never deauths). Same shared ScrollableList as Manual so the form
+        // reads identically; just two rows.
+        const int16_t cListTop = HEADER_HEIGHT + 6;
+        const int16_t cAvailHeight = canvas.height() - cListTop - FOOTER_HEIGHT - 4;
+        configList_.setItemCount(CLIENTLESS_CONFIG_ITEMS);
+        ScrollableList::render(canvas, configList_, 0, cListTop, canvas.width(), cAvailHeight,
+            theme::LIST_ROW_HEIGHT, [this](Canvas& c, int idx, int16_t rowY, bool selected) {
+                if (idx == CLIENTLESS_CONFIG_ITEMS - 1) {  // START row: shared green ActionButton
+                    ui::ActionButton::render(c, rowY, "START PMKID", selected);
+                    return;
+                }
+                char valueStr[28] = "";
+                formatTargetValue(valueStr, sizeof(valueStr));
+                ui::ConfigRow::render(c, rowY, "Target:", valueStr);
+            },
+            !footerHints_.hasFocus());
         return;
     }
 
@@ -1100,22 +1188,7 @@ void HandshakeScreen::drawConfig(Canvas& canvas) {
             }
             char valueStr[28] = "";
             switch (idx) {
-                case 0: {
-                    // Target row value: the current SSID, or the shared scanner placeholder. Capped
-                    // at 26 (an SSID can be 32; the "Target:" label leaves room for ~29 on a 240px
-                    // row at FONT_CELL_WIDTH=6), matching deauth and evil_twin (slice-0109/0110).
-                    constexpr size_t TARGET_VALUE_MAX = 26;
-                    const char* t = (hasTarget_ && targetSsid_[0] != '\0') ? targetSsid_
-                                                                           : "(select from scanner)";
-                    if (strlen(t) > TARGET_VALUE_MAX) {
-                        strncpy(valueStr, t, TARGET_VALUE_MAX - 3);
-                        strcpy(valueStr + (TARGET_VALUE_MAX - 3), "...");
-                    } else {
-                        strncpy(valueStr, t, sizeof(valueStr) - 1);
-                        valueStr[sizeof(valueStr) - 1] = '\0';
-                    }
-                    break;
-                }
+                case 0: formatTargetValue(valueStr, sizeof(valueStr)); break;
                 case 1: snprintf(valueStr, sizeof(valueStr), "%s", autoDeauth_ ? "ON" : "OFF"); break;
                 case 2: snprintf(valueStr, sizeof(valueStr), "%d", deauthCount_); break;
                 case 3: snprintf(valueStr, sizeof(valueStr), "%lus", (unsigned long)timeoutSecs_); break;
@@ -1305,7 +1378,44 @@ void HandshakeScreen::drawAutoHuntCapturing(Canvas& canvas) {
 void HandshakeScreen::drawSuccess(Canvas& canvas) {
     (void)canvas.width();  // Suppress unused warning
     int16_t y = HEADER_HEIGHT + 8;
-    
+
+    // Clientless PMKID (ADR-0138): a PMKID is complete and crackable on its own, so the 4-way
+    // "Incomplete / client MAC / M1-M4 grid" view below would mislabel it. Show the PMKID
+    // identity instead: it is keyed on our injected STA MAC, which is the hashcat STA here.
+    if (isClientless()) {
+        const auto& pm = capture_.getPMKID();
+        canvas.setTextSize(1);
+        canvas.setTextColor(theme::SUCCESS());
+        canvas.setCursor(4, y);
+        canvas.print("PMKID Captured!");
+        y += 14;
+        canvas.setTextColor(theme::TEXT_PRIMARY());
+        canvas.setCursor(4, y);
+        canvas.print(pm.ssid[0] ? pm.ssid : targetSsid_);
+        y += 12;
+        char apStr[18];
+        utils::formatMacBytes(pm.bssid, apStr, sizeof(apStr));
+        canvas.setTextColor(theme::TEXT_SECONDARY());
+        canvas.setCursor(4, y);
+        canvas.printf("AP: %s", apStr);
+        y += 12;
+        char staStr[18];
+        utils::formatMacBytes(pm.staMac, staStr, sizeof(staStr));
+        canvas.setCursor(4, y);
+        canvas.printf("STA: %s", staStr);
+        y += 12;
+        canvas.setTextColor(theme::TEXT_DISABLED());
+        canvas.setCursor(4, y);
+        canvas.print("Ready for hashcat (22000)");
+        if (handshakeSaved_) {
+            y += 14;
+            canvas.setTextColor(theme::SUCCESS());
+            canvas.setCursor(4, y);
+            canvas.print("Saved!");
+        }
+        return;
+    }
+
     const auto& hs = capture_.getHandshake();
     const auto& stats = capture_.getStats();
     auto state = capture_.getState();
@@ -1455,24 +1565,40 @@ void HandshakeScreen::drawHandshakeList(Canvas& canvas) {
             const auto& hs = sessionHandshakes_[idx];
 
             // Type badge: brackets in primary text, the type itself in the accent colour.
+            // isPmkid makes the shared classifier report "PMKID" for a clientless capture;
+            // a 4-way whose M1 also carried a PMKID gets a trailing accent "+P" so the row
+            // shows both artifacts (the PMKID counter counts it too).
+            const char* typeStr = utils::getHandshakeTypeString(hs, hs.isPmkid);
+            const bool tagPmkid = hs.hadPmkid && !hs.isPmkid;
             c.setCursor(4, y + theme::LIST_ROW_TEXT_DY);
             c.setTextColor(theme::TEXT_PRIMARY());
             c.print("[");
             c.setTextColor(theme::ACCENT());
-            c.print(utils::getHandshakeTypeString(hs));
+            c.print(typeStr);
             c.setTextColor(theme::TEXT_PRIMARY());
             c.print("]");
+            if (tagPmkid) {
+                c.setTextColor(theme::ACCENT());
+                c.print("+PMKID");
+            }
 
-            // SSID
-            c.setCursor(40, y + theme::LIST_ROW_TEXT_DY);
+            // SSID, placed one cell past the badge so the tag and SSID never touch (the fixed
+            // x=40 overlapped a 7-char badge like [PMKID]). Width is derived from the badge text.
+            const int badgeChars = 2 + (int)strlen(typeStr) + (tagPmkid ? 6 : 0);  // [ + type + ] (+PMKID)
+            const int16_t ssidX = 4 + (int16_t)((badgeChars + 1) * theme::FONT_CELL_WIDTH);
+            c.setCursor(ssidX, y + theme::LIST_ROW_TEXT_DY);
+            c.setTextColor(theme::TEXT_PRIMARY());
             char ssid[17];
             strncpy(ssid, (const char*)hs.ssid, 16);
             ssid[16] = '\0';
             c.print(ssid);
 
-            // Quality indicator (if available - estimating from message count)
+            // Quality indicator (estimated). A PMKID is fully crackable on its own, so it is
+            // 100%, not the 50% the message-count heuristic would give a lone-M1 entry.
             c.setCursor(c.width() - 30, y + theme::LIST_ROW_TEXT_DY);
-            int quality = (hs.hasMsg1 && hs.hasMsg2 && hs.hasMsg3) ? 90 : (hs.hasMsg2 ? 70 : 50);
+            int quality = hs.isPmkid ? 100
+                        : (hs.hasMsg1 && hs.hasMsg2 && hs.hasMsg3) ? 90
+                        : (hs.hasMsg2 ? 70 : 50);
             c.print(quality);
             c.print("%");
         });

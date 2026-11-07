@@ -80,7 +80,10 @@ inline bool extractPmkidFromEapol(const uint8_t* eapolData, uint16_t eapolLen,
             memcpy(out, keyData + i + PMKID_KDE_VALUE_OFFSET, PMKID_LENGTH);
             return true;
         }
-        if (len == 0) { ++i; continue; }  // zero-length element: avoid stalling
+        // An element header is 2 bytes (Tag, Len), so a well-formed element always
+        // occupies 2 + len bytes; len is a uint8_t, so this advances by >= 2 every
+        // iteration and can never stall. (The old `if (len == 0) ++i` desynced the
+        // walk by one byte and dropped a valid PMKID KDE sitting after any element.)
         i += 2 + len;
     }
     return false;

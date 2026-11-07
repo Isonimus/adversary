@@ -102,6 +102,7 @@ struct CapturedPMKID {
     uint8_t staMac[6];          ///< Station MAC the AP addressed M1 to (keys the PMKID)
     uint8_t pmkid[16];          ///< The 16-byte PMKID
     char ssid[33];              ///< Network SSID
+    uint8_t channel;            ///< Channel the PMKID was captured on (for the manifest record)
     uint32_t timestamp;         ///< Capture timestamp
     bool saved;                 ///< Already saved to file
     
@@ -144,7 +145,19 @@ struct CapturedHandshake {
     uint16_t msg3Len;
     uint8_t msg4Data[256];
     uint16_t msg4Len;
-    
+
+    // Pairing validation (ADR-0145): the client MAC and EAPOL replay counter of
+    // each stored ANonce/MIC message, so M1/M2 (or M2/M3) can be confirmed to
+    // belong to one exchange before the capture is treated as complete. Without
+    // this, M1 from one station (e.g. our clientless-PMKID solicitation) gets
+    // paired with an unrelated client's M2, yielding an invalid handshake.
+    uint8_t msg1Client[6] = {0};
+    uint8_t msg2Client[6] = {0};
+    uint8_t msg3Client[6] = {0};
+    uint64_t msg1Replay = 0;
+    uint64_t msg2Replay = 0;
+    uint64_t msg3Replay = 0;
+
     // Beacon frame (required for hashcat PCAP). std::vector so the struct has
     // correct value semantics: it is stored BY VALUE in std::vector<CapturedHandshake>
     // (session buffers), and a raw owning pointer here was shallow-copied across
@@ -164,18 +177,45 @@ struct CapturedHandshake {
     }
     
     /**
-     * @brief Minimum for saving (M2 has SNonce + MIC, need ANonce from M1 or M3)
+     * @brief A crackable M1+M2 pair: same station and identical replay counter.
+     *
+     * M2 echoes M1's replay counter, and both are between the same AP and STA
+     * (ADR-0145). Replay/client equality is a necessary condition for the ANonce
+     * (M1) and MIC (M2) to belong to one exchange.
      */
-    bool isMinimumValid() const {
-        return hasMsg2 && (hasMsg1 || hasMsg3);
+    bool hasM1M2Pair() const {
+        return hasMsg1 && hasMsg2 &&
+               memcmp(msg1Client, msg2Client, 6) == 0 && msg1Replay == msg2Replay;
     }
-    
+
+    /**
+     * @brief A crackable M2+M3 pair: same station, M3's replay one past M2's.
+     *
+     * When M1 was missed, M3 also carries the ANonce; M3's replay counter is
+     * M2's + 1 in the same exchange (ADR-0145).
+     */
+    bool hasM2M3Pair() const {
+        return hasMsg2 && hasMsg3 &&
+               memcmp(msg3Client, msg2Client, 6) == 0 && msg3Replay == msg2Replay + 1;
+    }
+
+    /**
+     * @brief True when a crackable ANonce+MIC pair from one exchange exists.
+     */
+    bool hasValidPair() const { return hasM1M2Pair() || hasM2M3Pair(); }
+
+    /**
+     * @brief Minimum for saving: a crackable pair (M1+M2 or M2+M3) from one
+     * exchange, not merely the messages present (ADR-0145).
+     */
+    bool isMinimumValid() const { return hasValidPair(); }
+
     /**
      * @brief Check if handshake is valid for WPA-SEC upload
-     * WPA-SEC needs: Beacon + M1 + M2 (minimum valid pair with all nonces)
+     * WPA-SEC needs: Beacon + a crackable M1+M2 pair from one exchange.
      */
     bool isWpaSecValid() const {
-        return hasBeacon() && hasMsg1 && hasMsg2;
+        return hasBeacon() && hasM1M2Pair();
     }
     
     /**
@@ -219,7 +259,8 @@ struct HandshakeCaptureConfig {
     uint32_t timeoutMs;         ///< Capture timeout (0 = no timeout)
     bool captureAllClients;     ///< Capture from any client (vs specific)
     uint8_t targetClient[6];    ///< Specific client to target (if not captureAllClients)
-    
+    bool solicitPmkid;          ///< Clientless PMKID: inject auth+assoc to solicit M1 (ADR-0138)
+
     HandshakeCaptureConfig() {
         memset(targetBssid, 0, 6);
         memset(targetSsid, 0, 33);
@@ -230,6 +271,7 @@ struct HandshakeCaptureConfig {
         timeoutMs = 60000;  // 60 second default timeout
         captureAllClients = true;
         memset(targetClient, 0, 6);
+        solicitPmkid = false;
     }
     
     bool hasValidTarget() const {
@@ -344,9 +386,11 @@ private:
                          const uint8_t* frameData, uint16_t frameLen,
                          const uint8_t* clientMac);
     void processMessage2(const uint8_t* eapolData, uint16_t eapolLen,
-                         const uint8_t* frameData, uint16_t frameLen);
+                         const uint8_t* frameData, uint16_t frameLen,
+                         const uint8_t* clientMac);
     void processMessage3(const uint8_t* eapolData, uint16_t eapolLen,
-                         const uint8_t* frameData, uint16_t frameLen);
+                         const uint8_t* frameData, uint16_t frameLen,
+                         const uint8_t* clientMac);
     void processMessage4(const uint8_t* eapolData, uint16_t eapolLen,
                          const uint8_t* frameData, uint16_t frameLen);
     void updateCaptureState();  ///< Check what we have and update state
@@ -382,6 +426,21 @@ private:
     // Pre-deauth delay: let promiscuous mode stabilize and catch M1 from already-connecting clients
     static constexpr uint32_t PRE_DEAUTH_DELAY_MS = 500;  ///< Wait 500ms before first deauth
     
+    // Clientless PMKID solicitation (ADR-0137/0138/0139). When armed by config_.solicitPmkid,
+    // update() injects an open-auth + association-request blind pair at the target on an
+    // interval so a PMK-caching AP sends us M1 with a PMKID KDE; the promiscuous RX path
+    // records it keyed on our spoofed STA MAC. Bounded to SOLICIT_MAX_ATTEMPTS, stops injecting
+    // on the first PMKID or when exhausted. It is a parallel injector only: it does not own the
+    // capture's terminal state, so it can run alongside deauth (the "Both" strategy, ADR-0139).
+    // Reuses the softAP TX netif already raised for deauth, so it adds no radio interface.
+    uint8_t solicitAttempts_ = 0;
+    uint32_t solicitLastMs_ = 0;
+    bool solicitExhausted_ = false;
+    void updateSolicitation(uint32_t now);
+    static constexpr uint8_t SOLICIT_MAX_ATTEMPTS = 20;    ///< ~30 s at the interval below
+    static constexpr uint32_t SOLICIT_INTERVAL_MS = 1500;  ///< Between blind pairs
+    static constexpr uint32_t SOLICIT_INTER_FRAME_MS = 25; ///< Proven auth->assoc gap (ADR-0138)
+
     // Discovered clients for targeted deauth
     static constexpr uint8_t MAX_DISCOVERED_CLIENTS = 8;
     uint8_t discoveredClients_[MAX_DISCOVERED_CLIENTS][6];

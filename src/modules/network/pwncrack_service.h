@@ -19,6 +19,7 @@
 
 #include <cstdint>
 #include "wpasec_service.h"  // for WpaSecStatus enum
+#include "upload_result.h"
 
 namespace adversary {
 
@@ -35,11 +36,15 @@ public:
     /**
      * @brief Upload a .22000 (hashcat hc22000) file to pwncrack.
      * @param filepath full path to the .22000 file
+     * @param ssid the capture SSID, used to key the manifest status (ADR-0141);
+     *        passed in rather than derived from the filename, which is sanitized and
+     *        would not match the display-SSID registry key for special-char SSIDs.
      * @param quiet when true (bulk sync), suppress the per-file success/skip
      *        toasts so the screen's own progress + live list show through.
-     * @return true if the server accepted it (status marked UPLOADED)
+     * @return an UploadResult (ADR-0142): Sent on 2xx, AlreadyUploaded when the
+     *         skip-check short-circuited, Failed with a static reason otherwise.
      */
-    bool uploadHandshake(const char* filepath, bool quiet = false);
+    UploadResult uploadHandshake(const char* filepath, const char* ssid, bool quiet = false);
 
     /**
      * @brief Download the pwncrack potfile and apply cracked passwords.

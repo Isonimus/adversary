@@ -32,16 +32,6 @@ bool _pwncrackHasApiKey() {
     return SettingsManager::getInstance().hasPwncrackKey();
 }
 
-// Derive the capture SSID from a .22000 path (strip directory + extension).
-static String pwncrackDeriveSSID(const char* filepath) {
-    const char* basename = strrchr(filepath, '/');
-    basename = basename ? basename + 1 : filepath;
-    String ssid(basename);
-    int dot = ssid.lastIndexOf('.');
-    if (dot > 0) ssid = ssid.substring(0, dot);
-    return ssid;
-}
-
 WpaSecStatus PwncrackService::getStatus(const char* ssid) const {
 #ifdef ESP32
     if (!ssid) return WpaSecStatus::NOT_UPLOADED;
@@ -56,52 +46,59 @@ WpaSecStatus PwncrackService::getStatus(const char* ssid) const {
 #endif
 }
 
-bool PwncrackService::uploadHandshake(const char* filepath, bool quiet) {
+UploadResult PwncrackService::uploadHandshake(const char* filepath, const char* ssidArg, bool quiet) {
 #ifdef ESP32
     if (!hasApiKey()) {
         showErrorToast("No pwncrack key");
-        return false;
+        return UploadResult::failed("no pwncrack key");
     }
 
-    String ssid = pwncrackDeriveSSID(filepath);
+    // SSID keys the manifest status; passed in (not derived from the sanitized filename)
+    // so special-char SSIDs record status against the right record (ADR-0141).
+    String ssid(ssidArg ? ssidArg : "");
 
     // Skip if already uploaded/cracked (pure RAM lookup, no SD).
     WpaSecStatus current = getStatus(ssid.c_str());
     if (current == WpaSecStatus::UPLOADED || current == WpaSecStatus::CRACKED) {
         if (!quiet) showToast("pwncrack: already sent");
-        return true;
+        return UploadResult::already();
     }
 
     // Open briefly only for size, then close before TLS allocation.
     File file = SD.open(filepath, FILE_READ);
     if (!file) {
+        // Fail loud: under a bulk sync the canvas is purged and this toast is
+        // invisible, so name the missing path on the serial log (ADR-0142). This
+        // is the bail that hid every mis-named PMKID .22000 before ADR-0141.
+        LOG_W("PWNCRACK", "upload: cannot open .22000: %s", filepath);
         showErrorToast("No .22000 file");
-        return false;
+        return UploadResult::failed("no .22000 file");
     }
     size_t fileSize = file.size();
     file.close();
 
     // pwncrack rejects >100KB; an empty file is nothing to send.
     if (fileSize == 0 || fileSize > 100 * 1024) {
+        LOG_W("PWNCRACK", "upload: bad .22000 size %u: %s", (unsigned)fileSize, filepath);
         showErrorToast("Bad .22000 size");
-        return false;
+        return UploadResult::failed("bad .22000 size");
     }
 
     const char* apiKey = SettingsManager::getInstance().getPwncrackKey();
 
     if (!WiFi.isConnected()) {
         showErrorToast("WiFi connection required");
-        return false;
+        return UploadResult::failed("no wifi");
     }
     if (!tls_upload::timeSyncedForTls()) {
         showErrorToast("Time not synced");
-        LOG_W("PWNCRACK", "Clock not NTP/GPS-synced — skipping");
-        return false;
+        LOG_W("PWNCRACK", "Clock not NTP/GPS-synced, skipping");
+        return UploadResult::failed("time not synced");
     }
     if (tls_upload::heapTooLowForTls()) {
         showErrorToast("Low heap, try again");
-        LOG_W("PWNCRACK", "Heap too low for TLS — skipping");
-        return false;
+        LOG_W("PWNCRACK", "Heap too low for TLS, skipping");
+        return UploadResult::failed("low heap");
     }
 
     WiFiClientSecure client;
@@ -111,7 +108,7 @@ bool PwncrackService::uploadHandshake(const char* filepath, bool quiet) {
     if (!tls_upload::connectWithRetry(client, PWNCRACK_HOST, PWNCRACK_PORT, "pwncrack")) {
         showErrorToast("Connection failed");
         LOG_E("PWNCRACK", "connect failed (heap: %lu)", ESP.getFreeHeap());
-        return false;
+        return UploadResult::failed("connection failed");
     }
 
     // Multipart body: text field "key" then file field "handshake" (.hc22000).
@@ -137,14 +134,16 @@ bool PwncrackService::uploadHandshake(const char* filepath, bool quiet) {
     file = SD.open(filepath, FILE_READ);
     if (!file) {
         client.stop();
+        LOG_W("PWNCRACK", "upload: cannot reopen %s", filepath);
         showErrorToast("Cannot reopen file");
-        return false;
+        return UploadResult::failed("cannot reopen file");
     }
 
     char streamErr[48] = {0};
     if (!tls_upload::streamFile(client, file, fileSize, "pwncrack", streamErr, sizeof(streamErr))) {
+        LOG_W("PWNCRACK", "upload: stream failed: %s", streamErr[0] ? streamErr : "unknown");
         showErrorToast(streamErr[0] ? streamErr : "Upload failed");
-        return false;
+        return UploadResult::failed("upload failed");
     }
 
     client.print(footer);
@@ -154,8 +153,9 @@ bool PwncrackService::uploadHandshake(const char* filepath, bool quiet) {
     while (client.connected() && !client.available()) {
         if (millis() - timeout > 10000) {
             client.stop();
+            LOG_W("PWNCRACK", "upload: response timeout for %s", filepath);
             showErrorToast("Upload timeout");
-            return false;
+            return UploadResult::failed("upload timeout");
         }
         delay(10);
     }
@@ -192,16 +192,19 @@ bool PwncrackService::uploadHandshake(const char* filepath, bool quiet) {
     if (httpCode >= 200 && httpCode < 300 && !looksError) {
         CaptureRegistry::getInstance().setPwncrackStatus(ssid.c_str(), WpaSecStatus::UPLOADED);
         if (!quiet) showSuccessToast("Sent to pwncrack!");
-        return true;
+        return UploadResult::sent();
     }
 
     char msg[40];
     snprintf(msg, sizeof(msg), "pwncrack err %d", httpCode);
+    LOG_W("PWNCRACK", "upload rejected (HTTP %d) for %s", httpCode, filepath);
     showErrorToast(msg);
-    return false;
+    return UploadResult::failed("server rejected");
 #else
     (void)filepath;
-    return false;
+    (void)ssidArg;
+    (void)quiet;
+    return UploadResult::failed("not supported");
 #endif
 }
 

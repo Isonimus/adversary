@@ -164,9 +164,38 @@ void test_now_tracks_elapsed_after_source_change(void) {
     TEST_ASSERT_EQUAL(0, utc->tm_sec);
 }
 
+// ---------------------------------------------------------------------------
+// evaluateNtpPoll: the pure latch-vs-timeout decision behind the decoupled async
+// NTP sync (slice-0147). Guards that the WIFI_CONNECTED handler's fire-and-forget
+// sync eventually latches or times out, without ever blocking the caller.
+// ---------------------------------------------------------------------------
+
+void test_ntp_poll_pending_before_complete_and_before_timeout(void) {
+    // Not done yet, still inside the window -> keep waiting (handler already returned).
+    TEST_ASSERT_EQUAL(NtpPoll::PENDING, evaluateNtpPoll(false, 5000, 10000));
+}
+
+void test_ntp_poll_latches_when_complete(void) {
+    // SNTP reports completed within the window -> adopt NTP time.
+    TEST_ASSERT_EQUAL(NtpPoll::LATCH, evaluateNtpPoll(true, 300, 10000));
+}
+
+void test_ntp_poll_times_out_when_deadline_reached(void) {
+    // Deadline reached without completion -> give up (SD cache / GPS tiers hold).
+    TEST_ASSERT_EQUAL(NtpPoll::TIMEOUT, evaluateNtpPoll(false, 10000, 10000));
+    TEST_ASSERT_EQUAL(NtpPoll::TIMEOUT, evaluateNtpPoll(false, 12000, 10000));
+}
+
+void test_ntp_poll_complete_wins_over_timeout(void) {
+    // A late completion still beats the SD-cache tier, so completion is checked
+    // before the deadline: a sync that finishes exactly as the window closes latches.
+    TEST_ASSERT_EQUAL(NtpPoll::LATCH, evaluateNtpPoll(true, 10000, 10000));
+    TEST_ASSERT_EQUAL(NtpPoll::LATCH, evaluateNtpPoll(true, 999999, 10000));
+}
+
 int main() {
     UNITY_BEGIN();
-    
+
     RUN_TEST(test_time_calculation);
     RUN_TEST(test_priority_gps_vs_ntp);
     RUN_TEST(test_seconds_since_sync);
@@ -174,6 +203,11 @@ int main() {
     RUN_TEST(test_gps_produces_correct_utc_epoch);
     RUN_TEST(test_gps_overrides_stale_sd_cache);
     RUN_TEST(test_now_tracks_elapsed_after_source_change);
-    
+
+    RUN_TEST(test_ntp_poll_pending_before_complete_and_before_timeout);
+    RUN_TEST(test_ntp_poll_latches_when_complete);
+    RUN_TEST(test_ntp_poll_times_out_when_deadline_reached);
+    RUN_TEST(test_ntp_poll_complete_wins_over_timeout);
+
     return UNITY_END();
 }

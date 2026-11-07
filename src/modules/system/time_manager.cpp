@@ -11,7 +11,7 @@
 #include <ArduinoJson.h>
 #include <SD.h>
 #include <sys/time.h>
-#include <lwip/apps/sntp.h>
+#include "esp_sntp.h"
 #include "core/event_bus.h"
 #include "core/event_data.h"
 #include "core/event_types.h"
@@ -40,61 +40,100 @@ TimeManager::TimeManager()
     , syncMillis_(0)
     , source_(TimeSource::NONE) {
     
-    // Auto-sync from NTP when WiFi connects
+    // Auto-sync from NTP when WiFi connects. Fire-and-forget: beginNtpSync() only
+    // starts the async SNTP client and returns at once, so this handler never
+    // stalls the (synchronous) event-bus dispatch on the main loop. update()
+    // latches the result on a later tick (slice-0147).
     EventBus::getInstance().subscribe(EventType::WIFI_CONNECTED, [this](const EventData& e) {
         (void)e;
-        this->syncFromNTP();
+        this->beginNtpSync();
     });
+}
+
+void TimeManager::startSntp_(const char* server, int8_t tzOffsetH) {
+#ifdef ESP32
+    // Record the pre-sync clock so a later success can log the correction size.
+    ntpPreTime_ = time(nullptr);
+
+    // Start async SNTP. Pass two redundant fallbacks so a single unreachable
+    // server doesn't fail the sync (the time-domain twin of the DNS retry on the
+    // upload path). configTime() returns immediately; the client syncs in the
+    // background and sntp_get_sync_status() reports when it is done.
+    configTime(tzOffsetH * 3600, 0, server, "time.google.com", "time.cloudflare.com");
+    ntpStartMillis_ = millis();
+    ntpPending_ = true;
+#else
+    (void)server; (void)tzOffsetH;
+#endif
+}
+
+void TimeManager::latchNtpSuccess_() {
+#ifdef ESP32
+    syncedEpoch_ = time(nullptr);
+    syncMillis_ = millis();
+    source_ = TimeSource::NTP;
+    ntpPending_ = false;
+    LOG_I("TIME", "NTP Sync SUCCESS: %ld (was %ld, delta=%lds)",
+          (long)syncedEpoch_, (long)ntpPreTime_,
+          (long)(syncedEpoch_ - ntpPreTime_));
+    saveToSD();
+#endif
+}
+
+void TimeManager::beginNtpSync(const char* server, int8_t tzOffsetH) {
+#ifdef ESP32
+    LOG_I("TIME", "Starting async NTP sync with %s (TZ: %d)", server, tzOffsetH);
+    startSntp_(server, tzOffsetH);
+#else
+    (void)server; (void)tzOffsetH;
+#endif
+}
+
+void TimeManager::update() {
+#ifdef ESP32
+    if (!ntpPending_) return;
+
+    // Non-blocking poll of the in-flight async sync. Why status, not a time delta:
+    // when the SD cache has already set a near-correct clock a real NTP correction
+    // is only a few seconds, so a ">30s jump" heuristic logged FAILED on a genuine
+    // success and could not tell that apart from a real network failure (e.g. a LAN
+    // blocking UDP/123 while allowing HTTPS). sntp_get_sync_status() reports the
+    // true outcome regardless of how small the correction is.
+    bool complete = (sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED);
+    switch (evaluateNtpPoll(complete, millis() - ntpStartMillis_, NTP_SYNC_TIMEOUT_MS)) {
+        case NtpPoll::LATCH:
+            latchNtpSuccess_();
+            break;
+        case NtpPoll::TIMEOUT:
+            ntpPending_ = false;
+            LOG_W("TIME", "NTP Sync FAILED (async timeout)");
+            break;
+        case NtpPoll::PENDING:
+            break;
+    }
+#endif
 }
 
 bool TimeManager::syncFromNTP(const char* server, int8_t tzOffsetH) {
     LOG_I("TIME", "Attempting NTP sync with %s (TZ: %d)", server, tzOffsetH);
 
 #ifdef ESP32
-    // Record pre-NTP time to detect actual change
-    time_t preNtpTime = time(nullptr);
-    
-    // Set timezone and server - this starts SNTP async. Pass two redundant
-    // fallbacks so a single unreachable server doesn't fail the sync (the
-    // time-domain twin of the DNS retry on the upload path).
-    configTime(tzOffsetH * 3600, 0, server, "time.google.com", "time.cloudflare.com");
+    startSntp_(server, tzOffsetH);
 
-    // Wait for ACTUAL NTP sync by detecting time change.
-    // If SD cache set the clock, time(nullptr) is already > 1B but stale.
-    // We need to wait until time(nullptr) actually jumps from NTP response.
-    int retries = 100;  // 10 seconds max
-    bool synced = false;
-    
-    while (retries-- > 0) {
-        delay(100);
-        
-        time_t currentTime = time(nullptr);
-        
-        // NTP synced if time jumped significantly from pre-NTP value
-        // (more than the ~10 seconds we've been waiting)
-        long delta = (long)(currentTime - preNtpTime);
-        if (delta > 30 || delta < -30) {
-            synced = true;
-            break;
+    // Blocking poll for callers that must have the clock set before they proceed
+    // (TLS upload time gate, manual "Sync Now"). Shares the exact latch/timeout
+    // decision with the async update() path via evaluateNtpPoll().
+    for (;;) {
+        bool complete = (sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED);
+        NtpPoll poll = evaluateNtpPoll(complete, millis() - ntpStartMillis_, NTP_SYNC_TIMEOUT_MS);
+        if (poll == NtpPoll::LATCH) {
+            latchNtpSuccess_();
+            return true;
         }
-        
-        // Also handle the case where SD cache was never loaded (time was < 1B)
-        if (preNtpTime < 1000000000 && currentTime > 1000000000) {
-            synced = true;
-            break;
-        }
+        if (poll == NtpPoll::TIMEOUT) break;
+        delay(NTP_POLL_INTERVAL_MS);
     }
-
-    if (synced) {
-        syncedEpoch_ = time(nullptr);
-        syncMillis_ = millis();
-        source_ = TimeSource::NTP;
-        LOG_I("TIME", "NTP Sync SUCCESS: %ld (was %ld, delta=%lds)",
-              (long)syncedEpoch_, (long)preNtpTime,
-              (long)(syncedEpoch_ - preNtpTime));
-        saveToSD();
-        return true;
-    }
+    ntpPending_ = false;  // this blocking attempt owns the outcome; stop update() re-polling
 #endif
 
     LOG_W("TIME", "NTP Sync FAILED");

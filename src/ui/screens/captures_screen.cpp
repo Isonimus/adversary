@@ -6,6 +6,7 @@
 #include "captures_screen.h"
 #include "../../modules/network/pwncrack_service.h"
 #include "utils/count_format.h"
+#include "utils/filename_utils.h"  // canonical handshake artifact paths (ADR-0141)
 
 #ifdef ESP32
 #include <SD.h>
@@ -215,20 +216,31 @@ void CapturesScreen::update() {
             const char* svcName = (job.svc == SyncService::WPASEC) ? "WPA-SEC" : "pwncrack";
             // Live progress straight to the panel (canvas is purged this whole run).
             drawSyncProgressDirect(uploadAllPos_ + 1, (int)syncQueue_.size(), job.ssid, svcName);
+            // Build both artifact paths through filename_utils so they match the sanitized
+            // names the save paths wrote (ADR-0141); pass the SSID explicitly so the service
+            // keys the manifest status off the capture SSID, not the filename stem.
             char filepath[160];
+            UploadResult result;
+            ui::SyncRecapDialog::Service recapSvc;
             if (job.svc == SyncService::WPASEC) {
-                snprintf(filepath, sizeof(filepath),
-                         "/adversary/captures/handshakes/%s.pcap", job.ssid);
-                WpaSecService::getInstance().uploadHandshake(filepath, /*deferCleanup=*/true);
+                filename_utils::getHandshakePath(job.ssid, filepath, sizeof(filepath));
+                result = WpaSecService::getInstance().uploadHandshake(filepath, job.ssid, /*deferCleanup=*/true);
+                recapSvc = ui::SyncRecapDialog::Service::WpaSec;
             } else {
-                snprintf(filepath, sizeof(filepath),
-                         "/adversary/captures/handshakes/%s.22000", job.ssid);
-                PwncrackService::getInstance().uploadHandshake(filepath, /*quiet=*/true);
+                filename_utils::getHc22000Path(job.ssid, filepath, sizeof(filepath));
+                result = PwncrackService::getInstance().uploadHandshake(filepath, job.ssid, /*quiet=*/true);
+                recapSvc = ui::SyncRecapDialog::Service::Pwncrack;
             }
+            // Tally the outcome for the end-of-run recap (ADR-0142). The canvas is
+            // purged this whole run, so this is the only surface that survives.
+            syncRecap_.record(recapSvc, result.outcome, job.ssid, result.reason);
 
             // Tear WiFi down once, on the final job (reclaims ~34KB, clean idle),
-            // then restore the canvas from the cleanest possible heap state.
-            if (lastJob) {
+            // then restore the canvas from the cleanest possible heap state. An
+            // ESC-stop ends the run here too: without this the cancel path below
+            // left the canvas purged and WiFi up (dead UI), and the recap could
+            // not render (ADR-0142).
+            if (lastJob || syncCancelRequested_) {
                 wifiConn.disconnect();
                 WiFi.mode(WIFI_OFF);
                 logHeap("pre-restore (wifi off)");
@@ -366,6 +378,12 @@ void CapturesScreen::update() {
 
 bool CapturesScreen::handleInput(char key) {
     needsRedraw_ = true;
+
+    // The post-sync recap owns all input while up (ADR-0142): Enter/ESC close it,
+    // ;/. scroll the failure list. It only appears after a run has ended.
+    if (syncRecap_.isVisible()) {
+        return syncRecap_.handleInput(key);
+    }
 
     // While a sync run is active, ESC/back requests a graceful stop (after the
     // file currently uploading finishes — input is only seen between files).
@@ -673,25 +691,33 @@ void CapturesScreen::deleteSelectedFile() {
         
         // Also delete associated .json metadata file for handshakes
         if (selectedCategory_ == CaptureCategory::HANDSHAKES) {
-            // Derive SSID from filename (remove .pcap extension)
+            // Recover the SSID stem from the row's filename. The row may show a
+            // .pcap (4-way/EAPOL) or a .22000 (PMKID-only) name, so strip at the
+            // last dot instead of a fixed ".pcap" (ADR-0141): a .22000 name left
+            // the old strstr(".pcap") no-op, so the registry entry survived the
+            // delete and the real file was orphaned.
             char ssid[48];
             strncpy(ssid, filename, sizeof(ssid) - 1);
             ssid[sizeof(ssid) - 1] = '\0';
-            char* ext = strstr(ssid, ".pcap");
+            char* ext = strrchr(ssid, '.');
             if (ext) *ext = '\0';
-            
+
             // Remove from caches by SSID
             CaptureRegistry::getInstance().removeHandshake(ssid);
             WpaSecCache::getInstance().removeEntry(ssid);
-            
-            char jsonPath[128];
-            strncpy(jsonPath, filepath, sizeof(jsonPath) - 1);
-            char* jsonExt = strstr(jsonPath, ".pcap");
-            if (jsonExt) {
-                strcpy(jsonExt, ".json");
-                if (SD.remove(jsonPath)) {
-                    LOG_D("CAPTURES", "Deleted metadata: %s", jsonPath);
-                }
+
+            // A handshake can own up to three artifacts sharing the stem: the
+            // .pcap (WPA-SEC), the .22000 (pwncrack), and the .json sidecar.
+            // SD.remove above deleted whichever one the row named; remove the
+            // companions too so a 4-way delete never leaves its .22000 behind.
+            char companion[160];
+            filename_utils::getHandshakePath(ssid, companion, sizeof(companion));
+            SD.remove(companion);
+            filename_utils::getHc22000Path(ssid, companion, sizeof(companion));
+            SD.remove(companion);
+            filename_utils::getMetadataPath(ssid, companion, sizeof(companion));
+            if (SD.remove(companion)) {
+                LOG_D("CAPTURES", "Deleted metadata: %s", companion);
             }
         }
     } else {
@@ -856,6 +882,7 @@ void CapturesScreen::startSync(bool selectedOnly) {
     uploadAllActive_ = true;
     syncCancelRequested_ = false;
     uploadAllPos_ = 0;
+    syncRecap_.reset();  // fresh tally for this run (ADR-0142)
     pendingUpload_ = 2;  // deferred so the toast renders first
     char msg[40];
     snprintf(msg, sizeof(msg), "Syncing 1/%d (ESC=stop)", (int)syncQueue_.size());
@@ -864,16 +891,16 @@ void CapturesScreen::startSync(bool selectedOnly) {
 }
 
 void CapturesScreen::kickNextSync() {
-    // ESC requested mid-run: stop cleanly (the just-finished file is kept).
+    // ESC requested mid-run: stop cleanly (the just-finished file is kept). The
+    // canvas was restored in the tick above (lastJob || syncCancelRequested_), so
+    // the recap can render what we managed before the stop (ADR-0142).
     if (syncCancelRequested_) {
-        char msg[40];
-        snprintf(msg, sizeof(msg), "Sync stopped (%d/%d)",
-                 uploadAllPos_ + 1, (int)syncQueue_.size());
-        showToast(msg);
         uploadAllActive_ = false;
         syncCancelRequested_ = false;
         syncQueue_.clear();
         uploadAllPos_ = 0;
+        syncRecap_.setStopped(true);
+        syncRecap_.show();
         needsRedraw_ = true;
         return;
     }
@@ -888,12 +915,12 @@ void CapturesScreen::kickNextSync() {
         snprintf(msg, sizeof(msg), "Syncing %s (ESC=stop)", count);
         showToast(msg);
     } else {
-        char msg[40];
-        snprintf(msg, sizeof(msg), "Sync complete (%d)", (int)syncQueue_.size());
-        showSuccessToast(msg);
+        // Run finished: the canvas is restored, so end on the recap modal instead
+        // of a terse toast the purged-canvas run could never show (ADR-0142).
         uploadAllActive_ = false;
         syncQueue_.clear();
         uploadAllPos_ = 0;
+        syncRecap_.show();
     }
     needsRedraw_ = true;
 }
@@ -1208,6 +1235,8 @@ void CapturesScreen::render(Canvas& canvas) {
     }
     // Confirm overlay floats above everything (ADR-0085).
     confirmDialog_.render(canvas);
+    // Post-sync recap floats above all (ADR-0142); shown after the run finishes.
+    syncRecap_.render(canvas);
 #else
     (void)canvas;
 #endif
@@ -1333,12 +1362,22 @@ void CapturesScreen::drawFileList(Canvas& canvas) {
                 // pwncrack's negative states in: its status defaults to NOT_UPLOADED
                 // for every capture even when unkeyed, which would wrongly turn
                 // incomplete/invalid rows red. FILE INFO shows the per-service detail.
-                WpaSecStatus pcStatus = summaries[handshakeIndices_[i]].pwncrackStatus;
-                WpaSecStatus combined = wpaStatus;
-                if (wpaStatus == WpaSecStatus::CRACKED || pcStatus == WpaSecStatus::CRACKED) {
-                    combined = WpaSecStatus::CRACKED;
-                } else if (wpaStatus == WpaSecStatus::UPLOADED || pcStatus == WpaSecStatus::UPLOADED) {
-                    combined = WpaSecStatus::UPLOADED;
+                const auto& sRow = summaries[handshakeIndices_[i]];
+                WpaSecStatus pcStatus = sRow.pwncrackStatus;
+                // A PMKID-only capture (an actual .22000, no .pcap) has WPA-SEC N/A, so the dot
+                // tracks pwncrack, its only applicable service (ADR-0141), instead of a permanent
+                // white INCOMPLETE. The test is isPmkidOnly() (type==PMKID AND a .22000 exists),
+                // not the type label alone: a record mislabeled type=PMKID with no .22000 is a
+                // 4-way, so it falls through to the best-outcome dot and shows its real WPA-SEC
+                // status (ADR-0144). Otherwise the best outcome across both services wins.
+                const bool pmkidOnly = sRow.isPmkidOnly();
+                WpaSecStatus combined = pmkidOnly ? pcStatus : wpaStatus;
+                if (!pmkidOnly) {
+                    if (wpaStatus == WpaSecStatus::CRACKED || pcStatus == WpaSecStatus::CRACKED) {
+                        combined = WpaSecStatus::CRACKED;
+                    } else if (wpaStatus == WpaSecStatus::UPLOADED || pcStatus == WpaSecStatus::UPLOADED) {
+                        combined = WpaSecStatus::UPLOADED;
+                    }
                 }
 
                 uint16_t circleColor;
@@ -1411,6 +1450,7 @@ void CapturesScreen::drawFileInfo(Canvas& canvas) {
     WpaSecStatus wpaStatus = WpaSecStatus::NOT_UPLOADED;
     WpaSecStatus pcStatus = WpaSecStatus::NOT_UPLOADED;
     char pcPassword[65] = {0};
+    bool has22000 = false;  // an actual {ssid}.22000 exists (drives the PMKID-only N/A, ADR-0144)
 
     if (selectedCategory_ == CaptureCategory::HANDSHAKES) {
         // Load metadata on demand for FILE INFO from registry
@@ -1429,6 +1469,7 @@ void CapturesScreen::drawFileInfo(Canvas& canvas) {
             channel = metadata->channel;
             pcStatus = metadata->pwncrackStatus;
             strncpy(pcPassword, metadata->pwncrackPassword, sizeof(pcPassword) - 1);
+            has22000 = metadata->has22000;
         } else {
             strcpy(handshakeType, "UNK");
         }
@@ -1538,16 +1579,25 @@ void CapturesScreen::drawFileInfo(Canvas& canvas) {
         const char* statusStr = "Unknown";
         uint16_t statusColor = theme::TEXT_DISABLED();
 
-        // Row 3: WPA-SEC status (+ key if cracked)
+        // Row 3: WPA-SEC status (+ key if cracked). A PMKID-only capture has no .pcap for
+        // WPA-SEC, so it shows a neutral "N/A" rather than the misleading "INCOMPLETE" (ADR-0141).
+        // Requires an actual .22000 (has22000), not just the type label: a record mislabeled
+        // type=PMKID with no .22000 is a 4-way and shows its real WPA-SEC status (ADR-0144).
+        const bool isPmkidOnly = (strcmp(handshakeType, "PMKID") == 0) && has22000;
         canvas.setTextColor(theme::TEXT_SECONDARY());
         canvas.setCursor(4, y);
         canvas.print("WPA-SEC:");
-        statusText(wpaStatus, statusStr, statusColor);
+        if (isPmkidOnly) {
+            statusStr = "N/A";
+            statusColor = theme::TEXT_DISABLED();
+        } else {
+            statusText(wpaStatus, statusStr, statusColor);
+        }
         canvas.setTextColor(statusColor);
         canvas.setCursor(64, y);
         canvas.print(statusStr);
         y += lineHeight;
-        if (wpaStatus == WpaSecStatus::CRACKED) {
+        if (!isPmkidOnly && wpaStatus == WpaSecStatus::CRACKED) {
             const char* pwd = WpaSecService::getInstance().getCrackedPassword(fileName);
             if (pwd) drawKeyRow(pwd);
         }

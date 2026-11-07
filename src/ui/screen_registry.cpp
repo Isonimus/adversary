@@ -70,6 +70,8 @@ void registerAllScreens(ScreenManager& manager) {
         []() -> IScreen* { return new HandshakeScreen(HandshakeMode::AutoHunt); });
     manager.registerFactory(ScreenId::HANDSHAKE_MANUAL,
         []() -> IScreen* { return new HandshakeScreen(HandshakeMode::Manual); });
+    manager.registerFactory(ScreenId::HANDSHAKE_CLIENTLESS,
+        []() -> IScreen* { return new HandshakeScreen(HandshakeMode::Clientless); });
     manager.registerFactory(ScreenId::EVIL_TWIN,
         []() -> IScreen* { return new EvilTwinScreen(); });
     manager.registerFactory(ScreenId::PROBE_FLOOD,

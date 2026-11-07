@@ -41,6 +41,8 @@ struct SessionHandshakeEntry {
     bool    hasMsg2 = false;
     bool    hasMsg3 = false;
     bool    hasMsg4 = false;
+    bool    isPmkid = false;   ///< Clientless PMKID capture (no 4-way); drives the [PMKID] badge
+    bool    hadPmkid = false;  ///< A 4-way capture whose M1 also carried a PMKID KDE ([P] tag)
     int8_t  signalStrength = 0;
 };
 
@@ -78,7 +80,20 @@ enum class AutoHuntState : uint8_t {
  */
 enum class HandshakeMode : uint8_t {
     AutoHunt,
-    Manual
+    Manual,
+    Clientless  ///< Clientless PMKID solicitation (ADR-0137/0138): inject auth+assoc, no deauth
+};
+
+/**
+ * @brief Per-hunt capture strategy for Auto Hunt (ADR-0139).
+ *
+ * Deauth = the original client-forced path; Pmkid = inject solicitation only (no deauth);
+ * Both = solicit and deauth in the same per-target window (PMKID-first, deauth as fallback).
+ */
+enum class AutoHuntStrategy : uint8_t {
+    Deauth,
+    Pmkid,
+    Both
 };
 
 /**
@@ -110,7 +125,9 @@ public:
     
     const char* getName() const override { return "Handshake"; }
     ScreenId getId() const override {
-        return isAutoHunt() ? ScreenId::HANDSHAKE_AUTO : ScreenId::HANDSHAKE_MANUAL;
+        return mode_ == HandshakeMode::AutoHunt    ? ScreenId::HANDSHAKE_AUTO :
+               mode_ == HandshakeMode::Clientless  ? ScreenId::HANDSHAKE_CLIENTLESS :
+                                                     ScreenId::HANDSHAKE_MANUAL;
     }
     
     // =========================================================================
@@ -129,8 +146,17 @@ public:
 private:
     // Launch mode is fixed at construction (ADR-0094), not toggled at runtime.
     bool isAutoHunt() const { return mode_ == HandshakeMode::AutoHunt; }
-    // Selectable CONFIG rows: Auto Hunt has only START; Manual has Target + 3 options + START.
-    int configItemCount() const { return isAutoHunt() ? 1 : CONFIG_ITEMS; }
+    bool isClientless() const { return mode_ == HandshakeMode::Clientless; }
+    // Auto Hunt strategy uses solicitation (so the PMKID_CAPTURED path applies, ADR-0139).
+    bool autoUsesSolicit() const {
+        return autoStrategy_ == AutoHuntStrategy::Pmkid || autoStrategy_ == AutoHuntStrategy::Both;
+    }
+    // Selectable CONFIG rows: Auto Hunt has Strategy + START; Clientless has Target + START;
+    // Manual has Target + 3 options + START.
+    int configItemCount() const {
+        return isAutoHunt()   ? AUTOHUNT_CONFIG_ITEMS :
+               isClientless() ? CLIENTLESS_CONFIG_ITEMS : CONFIG_ITEMS;
+    }
     // Step a Manual value row (rows 1-3) forward (delta>0) or backward (delta<0),
     // the canonical config-form edit shared with the other forms (ADR-0092).
     void handleConfigEdit(int delta);
@@ -138,6 +164,9 @@ private:
     // Drawing methods
     void drawHeader(Canvas& canvas, const char* title);
     void drawConfig(Canvas& canvas);
+    // Format the Target row value: current SSID, or the shared "(select from scanner)"
+    // placeholder, truncated to fit the row. Shared by the Manual and Clientless forms.
+    void formatTargetValue(char* out, size_t outLen) const;
     void drawCapturing(Canvas& canvas);
     void drawAutoHuntCapturing(Canvas& canvas);
     void drawSuccess(Canvas& canvas);
@@ -149,8 +178,10 @@ private:
     void startCapture();
     void stopCapture();
     void saveHandshake();
-    void savePMKID22000(const CapturedPMKID& pmkid);
     void onHandshakeCaptured(const SessionHandshakeEntry& hs);
+    // Add an entry to the Auto Hunt session History buffer, deduped by BSSID. Shared by the
+    // 4-way (onHandshakeCaptured) and clientless-PMKID save paths.
+    void addSessionEntry(const SessionHandshakeEntry& entry);
     void onStateChanged(HandshakeState state);
     
     // Auto Hunt state machine
@@ -178,6 +209,10 @@ private:
     bool initialized_;
     uint32_t handshakeHandlerId_ = 0;  // EventBus subscription
     uint32_t stateHandlerId_ = 0;      // ATTACK_STATE_CHANGED subscription
+    uint32_t pmkidHandlerId_ = 0;      // PMKID_CAPTURED subscription (Clientless mode, ADR-0138)
+    // Set by the PMKID_CAPTURED subscriber (driver-task context: flag only), consumed by the
+    // main-loop update() which does the SD save. Not saved twice: cleared on a new capture.
+    volatile bool pmkidReady_ = false;
     
     // Target info
     bool hasTarget_;
@@ -200,6 +235,7 @@ private:
     
     // Launch mode, fixed at construction (ADR-0094).
     const HandshakeMode mode_;
+    AutoHuntStrategy autoStrategy_ = AutoHuntStrategy::Deauth;  // Auto Hunt capture strategy (ADR-0139)
     AutoHuntState autoState_;
     uint32_t autoStateStart_ = 0;
     uint32_t handshakesCaptured_ = 0;
@@ -235,6 +271,8 @@ private:
     static constexpr int16_t FOOTER_HEIGHT = 16;
     static constexpr uint32_t REDRAW_INTERVAL_MS = 100;
     static constexpr int CONFIG_ITEMS = 5;
+    static constexpr int CLIENTLESS_CONFIG_ITEMS = 2;  // Target + START (ADR-0138)
+    static constexpr int AUTOHUNT_CONFIG_ITEMS = 2;    // Strategy + START (ADR-0139)
     
     // Auto Hunt timing constants (ms)
     static constexpr uint32_t AUTO_SCAN_TIME = 5000;

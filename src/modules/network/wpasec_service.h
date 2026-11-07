@@ -12,6 +12,7 @@
 #include <cstring>
 #include <map>
 #include <string>
+#include "upload_result.h"
 
 #ifdef ESP32
 #include <WiFiClientSecure.h>
@@ -58,15 +59,20 @@ public:
     /**
      * @brief Upload a handshake file to WPA-SEC
      * @param filepath Full path to the pcap file
+     * @param ssid the capture SSID, used to key the manifest status (ADR-0141);
+     *        passed in rather than derived from the filename, which is sanitized and
+     *        would not match the display-SSID registry key for special-char SSIDs.
      * @param deferCleanup when true (bulk upload), skip the per-file WiFi
      *        disconnect + rescanSummaries() so the caller can keep one WiFi
      *        session and do a single cleanup at the end. The per-file rescan also
      *        re-allocates the summaries vector, which fragments the freed-canvas
      *        region and breaks the 64KB canvas restore — so deferring it is what
      *        makes bulk upload work.
-     * @return true if upload succeeded
+     * @return an UploadResult (ADR-0142): Sent when the server newly accepted it,
+     *         AlreadyUploaded on a local skip or a server duplicate, Failed with a
+     *         static reason otherwise.
      */
-    bool uploadHandshake(const char* filepath, bool deferCleanup = false);
+    UploadResult uploadHandshake(const char* filepath, const char* ssid, bool deferCleanup = false);
     
     /**
      * @brief Fetch cracked results from WPA-SEC
