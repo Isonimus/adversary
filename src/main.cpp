@@ -562,6 +562,7 @@ void loop() {
     // Update system components
     adversary::NotificationManager::getInstance().update();
     adversary::WiFiConnection::getInstance().update();
+    adversary::TimeManager::getInstance().update();  // non-blocking latch of an async NTP sync (slice-0147)
     adversary::ToastManager::getInstance().update();
     adversary::ServerManager::getInstance().update();
     adversary::EventBus::getInstance().processQueue();  // Process deferred events

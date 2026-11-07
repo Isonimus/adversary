@@ -21,6 +21,30 @@ enum class TimeSource : uint8_t {
     NTP         ///< Synced from NTP server
 };
 
+/// Outcome of one non-blocking poll of an in-flight async NTP sync.
+enum class NtpPoll : uint8_t {
+    PENDING,  ///< SNTP not done yet and still within the timeout window
+    LATCH,    ///< SNTP reports completed: adopt the NTP time
+    TIMEOUT   ///< Deadline passed without completion: give up (lower tiers hold)
+};
+
+/**
+ * @brief Pure latch-vs-timeout decision for a polled async NTP sync.
+ *
+ * Split out from the SNTP client (which is ESP-only) so the decoupled sync state
+ * machine is unit-testable off-device (slice-0147). A completed sync latches even
+ * past the deadline: a late success still beats the SD-cache tier.
+ *
+ * @param syncComplete  sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED
+ * @param elapsedMs     millis() since the sync was started
+ * @param timeoutMs     give-up window
+ */
+inline NtpPoll evaluateNtpPoll(bool syncComplete, uint32_t elapsedMs, uint32_t timeoutMs) {
+    if (syncComplete) return NtpPoll::LATCH;
+    if (elapsedMs >= timeoutMs) return NtpPoll::TIMEOUT;
+    return NtpPoll::PENDING;
+}
+
 /**
  * @brief Singleton for managing system time and synchronization
  * 
@@ -44,6 +68,29 @@ public:
      * @return true if sync successful
      */
     bool syncFromNTP(const char* server = "pool.ntp.org", int8_t tzOffsetH = 0);
+
+    /**
+     * @brief Start an NTP sync without blocking (fire-and-forget).
+     *
+     * Kicks off the async SNTP client and returns immediately; update() latches
+     * the result on a later main-loop tick. The WIFI_CONNECTED handler uses this
+     * so event-bus dispatch is never stalled by the sync (slice-0147). The
+     * blocking syncFromNTP() stays for callers that must have the clock set before
+     * proceeding (TLS upload time gate, manual "Sync Now").
+     *
+     * @param server NTP server address
+     * @param tzOffsetH Timezone offset in hours
+     */
+    void beginNtpSync(const char* server = "pool.ntp.org", int8_t tzOffsetH = 0);
+
+    /**
+     * @brief Main-loop tick: poll an in-flight async NTP sync (non-blocking).
+     *
+     * No-op unless a beginNtpSync() is pending. Latches a completed sync or
+     * abandons it once the timeout elapses; never blocks. Must be called on the
+     * same thread as every other TimeManager state write (the main loop).
+     */
+    void update();
 
     /**
      * @brief Synchronize from GPS date/time
@@ -122,9 +169,20 @@ private:
     TimeManager(const TimeManager&) = delete;
     TimeManager& operator=(const TimeManager&) = delete;
 
+    // --- Async (non-blocking) NTP sync, all touched only on the main loop ---
+    static constexpr uint32_t NTP_SYNC_TIMEOUT_MS = 10000;  ///< give up after 10 s
+    static constexpr uint32_t NTP_POLL_INTERVAL_MS = 100;   ///< blocking-path poll step
+
+    void startSntp_(const char* server, int8_t tzOffsetH);  ///< configTime + arm pending
+    void latchNtpSuccess_();                                 ///< adopt NTP time, persist, clear pending
+
     time_t syncedEpoch_;      ///< Epoch at moment of sync
     uint32_t syncMillis_;      ///< millis() at moment of sync
     TimeSource source_;        ///< Primary time source
+
+    bool ntpPending_ = false;      ///< a beginNtpSync() is in flight
+    uint32_t ntpStartMillis_ = 0;  ///< millis() when the current sync started
+    time_t ntpPreTime_ = 0;        ///< clock before sync (for the delta log)
 };
 
 } // namespace adversary
