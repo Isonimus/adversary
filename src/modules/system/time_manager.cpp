@@ -11,7 +11,7 @@
 #include <ArduinoJson.h>
 #include <SD.h>
 #include <sys/time.h>
-#include <lwip/apps/sntp.h>
+#include "esp_sntp.h"
 #include "core/event_bus.h"
 #include "core/event_data.h"
 #include "core/event_types.h"
@@ -51,38 +51,30 @@ bool TimeManager::syncFromNTP(const char* server, int8_t tzOffsetH) {
     LOG_I("TIME", "Attempting NTP sync with %s (TZ: %d)", server, tzOffsetH);
 
 #ifdef ESP32
-    // Record pre-NTP time to detect actual change
+    // Record pre-NTP time so the success log can report the correction size.
     time_t preNtpTime = time(nullptr);
-    
-    // Set timezone and server - this starts SNTP async. Pass two redundant
-    // fallbacks so a single unreachable server doesn't fail the sync (the
-    // time-domain twin of the DNS retry on the upload path).
+
+    // Start async SNTP. Pass two redundant fallbacks so a single unreachable
+    // server doesn't fail the sync (the time-domain twin of the DNS retry on the
+    // upload path).
     configTime(tzOffsetH * 3600, 0, server, "time.google.com", "time.cloudflare.com");
 
-    // Wait for ACTUAL NTP sync by detecting time change.
-    // If SD cache set the clock, time(nullptr) is already > 1B but stale.
-    // We need to wait until time(nullptr) actually jumps from NTP response.
+    // Ask the SNTP client directly whether it synced, via sntp_get_sync_status().
+    // We used to infer success from a >30s jump in time(nullptr), but when the SD
+    // cache has already set a near-correct clock a real NTP correction is only a few
+    // seconds: the heuristic then logged FAILED on a successful sync, and could not
+    // tell that apart from a genuine network failure (e.g. a LAN that blocks UDP/123
+    // while allowing HTTPS). The status flag reports the real outcome regardless of
+    // how small the correction is.
     int retries = 100;  // 10 seconds max
     bool synced = false;
-    
+
     while (retries-- > 0) {
+        if (sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED) {
+            synced = true;
+            break;
+        }
         delay(100);
-        
-        time_t currentTime = time(nullptr);
-        
-        // NTP synced if time jumped significantly from pre-NTP value
-        // (more than the ~10 seconds we've been waiting)
-        long delta = (long)(currentTime - preNtpTime);
-        if (delta > 30 || delta < -30) {
-            synced = true;
-            break;
-        }
-        
-        // Also handle the case where SD cache was never loaded (time was < 1B)
-        if (preNtpTime < 1000000000 && currentTime > 1000000000) {
-            synced = true;
-            break;
-        }
     }
 
     if (synced) {
