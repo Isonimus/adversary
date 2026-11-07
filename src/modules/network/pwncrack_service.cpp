@@ -5,6 +5,7 @@
 
 #include "pwncrack_service.h"
 #include <memory>
+#include "pwncrack_response.h"
 #include "../storage/settings_manager.h"
 #include "../storage/capture_registry.h"
 #include "tls_upload.h"
@@ -180,16 +181,14 @@ UploadResult PwncrackService::uploadHandshake(const char* filepath, const char* 
 
     LOG_D("PWNCRACK", "upload response: %s", response.c_str());
 
-    String lower = response;
-    lower.toLowerCase();
-    bool looksError = (lower.indexOf("error") != -1) ||
-                      (lower.indexOf("invalid") != -1) ||
-                      (lower.indexOf("denied") != -1) ||
-                      (lower.indexOf("unauthorized") != -1);
+    // Classify against the measured JSON contract, fail-closed (ADR-0148): accepted only on HTTP 200
+    // with a JSON {"success": true}. The body is everything past the header terminator; a missing
+    // terminator leaves it empty, which the classifier rejects. The full response is logged above, so
+    // an unrecognised reply keeps the capture at NOT_UPLOADED to retry instead of a silent false "sent".
+    int bodyStart = response.indexOf("\r\n\r\n");
+    String body = (bodyStart != -1) ? response.substring(bodyStart + 4) : String();
 
-    // Accept on 2xx without an error keyword. The body wording isn't documented,
-    // so we log the full response above for refinement during field testing.
-    if (httpCode >= 200 && httpCode < 300 && !looksError) {
+    if (pwncrackUploadAccepted(httpCode, body.c_str(), body.length())) {
         CaptureRegistry::getInstance().setPwncrackStatus(ssid.c_str(), WpaSecStatus::UPLOADED);
         if (!quiet) showSuccessToast("Sent to pwncrack!");
         return UploadResult::sent();
