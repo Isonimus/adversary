@@ -111,6 +111,34 @@ void test_eapol_requires_m2_plus_anonce_source(void) {
     TEST_ASSERT_FALSE(hc::buildEapolLine(hs, out, sizeof(out)));
 }
 
+void test_eapol_line_exact_golden_vector(void) {
+    // Pins the whole WPA*02 line against a vector computed independently of the
+    // builder (see the Python in the commit / ledger). The part no other test
+    // covered is the EAPOL field: it must be M2's frame verbatim with the 16-byte
+    // Key MIC (EAPOL offset 81) zeroed, because hashcat recomputes the MIC over
+    // exactly those bytes and checks it against field 3. A wrong offset or a
+    // dropped zeroing yields a correct-looking line that never cracks, which is
+    // invisible to a prefix/suffix check, so assert the exact bytes end to end.
+    CapturedHandshake hs = makeFourWay();
+    char out[1024];
+    TEST_ASSERT_TRUE(hc::buildEapolLine(hs, out, sizeof(out)));
+    static const char* kGolden =
+        "WPA*02*a0a1a2a3a4a5a6a7a8a9aaabacadaeaf*101112131415*202122232425*54657374*"
+        "303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f*"
+        "0203005f"  // EAPOL header: ver 02, type 03, len 005f (95)
+        "1111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
+        "00000000000000000000000000000000"  // Key MIC at EAPOL offset 81, zeroed
+        "1111"  // trailing key-data-length bytes
+        "*00";  // messagepair
+    TEST_ASSERT_EQUAL_STRING(kGolden, out);
+}
+
+void test_eapol_truncation_fails_rather_than_partial(void) {
+    CapturedHandshake hs = makeFourWay();
+    char out[32];  // far too small for a WPA*02 line
+    TEST_ASSERT_FALSE(hc::buildEapolLine(hs, out, sizeof(out)));
+}
+
 // --- PMKID -----------------------------------------------------------------
 
 void test_pmkid_line_uses_type_01(void) {
@@ -143,6 +171,8 @@ int main() {
     RUN_TEST(test_eapol_line_uses_type_02);
     RUN_TEST(test_eapol_field3_is_the_mic);
     RUN_TEST(test_eapol_requires_m2_plus_anonce_source);
+    RUN_TEST(test_eapol_line_exact_golden_vector);
+    RUN_TEST(test_eapol_truncation_fails_rather_than_partial);
     RUN_TEST(test_pmkid_line_uses_type_01);
     RUN_TEST(test_pmkid_line_exact_layout);
     RUN_TEST(test_pmkid_truncation_fails_rather_than_partial);
