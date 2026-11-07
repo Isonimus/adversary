@@ -5,7 +5,9 @@
 
 #include "pwncrack_service.h"
 #include <memory>
+#include <vector>
 #include "pwncrack_response.h"
+#include "pwncrack_potfile.h"
 #include "../storage/settings_manager.h"
 #include "../storage/capture_registry.h"
 #include "tls_upload.h"
@@ -27,6 +29,11 @@
 #endif
 
 namespace adversary {
+
+// Stop draining the potfile stream after this long with no new bytes: a stalled or half-closed TLS
+// socket must not hang the fetch. TCP flow control throttles the sender while we parse, so a slow
+// drain never loses data; only a genuine stall trips this (ADR-0149).
+constexpr unsigned long POTFILE_IDLE_TIMEOUT_MS = 5000;
 
 // API key check helper (referenced from the header's hasApiKey()).
 bool _pwncrackHasApiKey() {
@@ -273,113 +280,71 @@ int PwncrackService::fetchCrackedResults(bool quiet) {
         return 0;
     }
 
-    // Heap-allocated temp buffer; was static local (3KB BSS always).
-    struct CrackedEntry { char ssid[33]; char password[64]; uint8_t bssid[6]; };
-    std::unique_ptr<CrackedEntry[]> crackedBuffer(new (std::nothrow) CrackedEntry[32]);
-    if (!crackedBuffer) { http.end(); return 0; }
-    int crackedBufferCount = 0;
+    // Match every potfile row against resident captures during the drain (pure RAM, no SD), buffering
+    // only the matched rows, then apply them after http.end(). No SD write happens while the TLS socket
+    // is open, which is the no-PSRAM fragmentation discipline the deferral protects (ADR-0149). The
+    // buffer is bounded by the number of distinct local captures: the device can never apply more cracks
+    // than it has captures, and an unmatched row is discarded here as it was before. No fixed cap.
+    auto& registry = CaptureRegistry::getInstance();
+    struct PendingCrack { int summaryIndex; char password[65]; uint8_t bssid[6]; bool bssidValid; };
+    std::vector<PendingCrack> pending;
+    pending.reserve(registry.getHandshakeSummaries().size());
 
-    auto parseBssid = [](const char* s, uint8_t out[6]) -> bool {
-        if (!s) return false;
-        char hex[13];
+    // nextLine pulls one line from the TLS stream, applying the same idle timeout as before. It returns
+    // a trailing line that lacks a terminator once, then -1 when the stream is exhausted.
+    unsigned long idle = millis();
+    auto nextLine = [&](char* buf, size_t cap) -> int {
         int n = 0;
-        for (const char* p = s; *p && n < 12; ++p) {
-            if (*p != ':' && *p != '-') hex[n++] = *p;
+        for (;;) {
+            if (stream->available()) {
+                const char c = stream->read();
+                idle = millis();
+                if (c == '\n') { buf[n] = '\0'; return n; }
+                if (c != '\r' && n < static_cast<int>(cap) - 1) buf[n++] = c;
+            } else if (stream->connected() && millis() - idle <= POTFILE_IDLE_TIMEOUT_MS) {
+                delay(10);
+            } else {
+                if (n > 0) { buf[n] = '\0'; return n; }  // final line without a newline.
+                return -1;  // stream exhausted.
+            }
         }
-        if (n != 12) return false;
-        hex[12] = '\0';
-        for (int i = 0; i < 6; ++i) {
-            unsigned v;
-            if (sscanf(hex + i * 2, "%2x", &v) != 1) return false;
-            out[i] = (uint8_t)v;
-        }
-        return true;
     };
 
-    // Potfile line: colon-delimited, BSSID is the 2nd field, password is
-    // everything after the 4th colon (passwords may contain ':').
-    char lineBuffer[256];
-    int lineLen = 0;
-    int downloadedCount = 0;
-
-    auto parseLine = [&](char* line) {
-        int len = strlen(line);
-        while (len > 0 && (line[len-1] == '\r' || line[len-1] == '\n' || line[len-1] == ' ')) {
-            line[--len] = '\0';
+    auto onResult = [&](const PotfileResult& r) {
+        const int idx = registry.findSummaryIndexByBssidOrSsid(r.bssidValid ? r.bssid : nullptr, r.ssid);
+        if (idx < 0) {
+            LOG_W("PWNCRACK", "result unmatched: %s", r.ssid);
+            return;
         }
-        if (len == 0) return;
-
-        // Locate the first four colons.
-        int colon[4];
-        int found = 0;
-        for (int i = 0; i < len && found < 4; ++i) {
-            if (line[i] == ':') colon[found++] = i;
-        }
-        if (found < 4) return;  // not a result row
-
-        // field[1] = BSSID (between colon[0] and colon[1]); password = after colon[3].
-        char bssidStr[32] = {0};
-        int bl = colon[1] - colon[0] - 1;
-        if (bl > 0 && bl < (int)sizeof(bssidStr)) {
-            strncpy(bssidStr, line + colon[0] + 1, bl);
-            bssidStr[bl] = '\0';
-        }
-        const char* password = line + colon[3] + 1;
-        // field[0] = best-effort SSID/essid for the fallback match.
-        char ssid0[33] = {0};
-        if (colon[0] > 0 && colon[0] < (int)sizeof(ssid0)) {
-            strncpy(ssid0, line, colon[0]);
-            ssid0[colon[0]] = '\0';
-        }
-
-        if (password[0] == '\0') return;
-        downloadedCount++;
-        if (crackedBufferCount < 32) {
-            strncpy(crackedBuffer[crackedBufferCount].ssid, ssid0, 32);
-            crackedBuffer[crackedBufferCount].ssid[32] = '\0';
-            strncpy(crackedBuffer[crackedBufferCount].password, password, 63);
-            crackedBuffer[crackedBufferCount].password[63] = '\0';
-            if (!parseBssid(bssidStr, crackedBuffer[crackedBufferCount].bssid)) {
-                memset(crackedBuffer[crackedBufferCount].bssid, 0, 6);
+        LOG_D("PWNCRACK", "Cracked: %s / %s", r.ssid, r.password);
+        // De-dup by capture so the buffer stays bounded by the local capture count; a later row for the
+        // same capture (e.g. matched once by BSSID, once by SSID) just refreshes the password.
+        for (auto& p : pending) {
+            if (p.summaryIndex == idx) {
+                strncpy(p.password, r.password, sizeof(p.password) - 1);
+                p.password[sizeof(p.password) - 1] = '\0';
+                p.bssidValid = r.bssidValid;
+                if (r.bssidValid) memcpy(p.bssid, r.bssid, 6);
+                return;
             }
-            crackedBufferCount++;
         }
-        LOG_D("PWNCRACK", "Cracked: %s / %s", bssidStr, password);
+        PendingCrack pc{};
+        pc.summaryIndex = idx;
+        strncpy(pc.password, r.password, sizeof(pc.password) - 1);
+        pc.password[sizeof(pc.password) - 1] = '\0';
+        pc.bssidValid = r.bssidValid;
+        if (r.bssidValid) memcpy(pc.bssid, r.bssid, 6);
+        pending.push_back(pc);
     };
 
-    unsigned long timeout = millis();
-    while (stream->connected() || stream->available()) {
-        if (stream->available()) {
-            char c = stream->read();
-            if (c == '\n') {
-                lineBuffer[lineLen] = '\0';
-                parseLine(lineBuffer);
-                lineLen = 0;
-            } else if (c != '\r' && lineLen < (int)sizeof(lineBuffer) - 1) {
-                lineBuffer[lineLen++] = c;
-            }
-            timeout = millis();
-        } else {
-            if (millis() - timeout > 5000) break;
-            delay(10);
-        }
-    }
-    if (lineLen > 0) {
-        lineBuffer[lineLen] = '\0';
-        parseLine(lineBuffer);
-    }
+    const int downloadedCount = collectPotfileResults(nextLine, onResult);
 
     http.end();  // heap available again
 
     int appliedCount = 0;
-    if (crackedBufferCount > 0) {
-        auto& registry = CaptureRegistry::getInstance();
-        for (int i = 0; i < crackedBufferCount; i++) {
-            if (registry.setPwncrackCrackedPassword(crackedBuffer[i].bssid,
-                                                    crackedBuffer[i].ssid,
-                                                    crackedBuffer[i].password)) {
-                appliedCount++;
-            }
+    for (auto& p : pending) {
+        if (registry.applyCrackedAt(p.summaryIndex, p.bssidValid ? p.bssid : nullptr, p.password)) {
+            appliedCount++;
         }
     }
 

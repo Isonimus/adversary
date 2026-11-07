@@ -342,11 +342,26 @@ public:
     void setPwncrackStatus(const char* ssid, WpaSecStatus status);
 
     /**
-     * @brief Mark a capture CRACKED by pwncrack and store its password.
-     *        Parallel to setCrackedPassword() (BSSID match first, then SSID).
-     * @return true if a matching capture was found and persisted.
+     * @brief Find the resident capture a pwncrack result belongs to, without touching SD.
+     *
+     * Pure RAM scan: BSSID match first (when @p bssid is non-null and non-zero), then SSID. Lets the
+     * pwncrack fetch match every potfile row while the TLS socket is still open and defer all manifest
+     * writes until after it closes (ADR-0149), on the no-PSRAM board where SD work under a live TLS
+     * allocation is the fragmentation hazard the deferral avoids.
+     *
+     * @return the index into the resident summaries for a match, or -1 if none matches.
      */
-    bool setPwncrackCrackedPassword(const uint8_t bssid[6], const char* ssid, const char* password);
+    int findSummaryIndexByBssidOrSsid(const uint8_t* bssid, const char* ssid) const;
+
+    /**
+     * @brief Mark the capture at @p summaryIndex CRACKED by pwncrack and persist its password.
+     *
+     * The SD half of a pwncrack apply, split from the match above so the caller does all matching
+     * during the socket drain and all writes after `http.end()`. @p summaryIndex must come from
+     * findSummaryIndexByBssidOrSsid during the same fetch (nothing mutates the summaries in between).
+     * @return true if the record was persisted.
+     */
+    bool applyCrackedAt(int summaryIndex, const uint8_t* bssid, const char* password);
 
     /**
      * @brief Re-sync the manifest with the actual .pcap files on the SD card.
@@ -1058,46 +1073,54 @@ inline void CaptureRegistry::setPwncrackStatus(const char* ssid, WpaSecStatus st
     }
 }
 
-inline bool CaptureRegistry::setPwncrackCrackedPassword(const uint8_t bssid[6],
-                                                        const char* ssid,
-                                                        const char* password) {
-#ifdef ESP32
-    if (!ssid || !password) return false;
+inline int CaptureRegistry::findSummaryIndexByBssidOrSsid(const uint8_t* bssid,
+                                                          const char* ssid) const {
+    if (!ssid) return -1;
 
     auto nonZeroMac = [](const uint8_t* m) {
         return m && (m[0] | m[1] | m[2] | m[3] | m[4] | m[5]) != 0;
     };
-    bool bssidKnown = nonZeroMac(bssid);
 
-    HandshakeSummary* summary = nullptr;
-    if (bssidKnown) {
-        for (auto& s : summaries_) {
-            if (nonZeroMac(s.bssid) && memcmp(s.bssid, bssid, 6) == 0) { summary = &s; break; }
+    if (nonZeroMac(bssid)) {
+        for (size_t i = 0; i < summaries_.size(); ++i) {
+            if (nonZeroMac(summaries_[i].bssid) && memcmp(summaries_[i].bssid, bssid, 6) == 0) {
+                return static_cast<int>(i);
+            }
         }
     }
-    if (!summary) {
-        for (auto& s : summaries_) {
-            if (strcmp(s.ssid, ssid) == 0) { summary = &s; break; }
-        }
+    for (size_t i = 0; i < summaries_.size(); ++i) {
+        if (strcmp(summaries_[i].ssid, ssid) == 0) return static_cast<int>(i);
     }
-    if (!summary) {
-        LOG_W("CAPREG", "pwncrack result unmatched: %s", ssid);
+    return -1;
+}
+
+inline bool CaptureRegistry::applyCrackedAt(int summaryIndex,
+                                            const uint8_t* bssid,
+                                            const char* password) {
+#ifdef ESP32
+    if (summaryIndex < 0 || static_cast<size_t>(summaryIndex) >= summaries_.size() || !password) {
         return false;
     }
 
-    summary->pwncrackStatus = WpaSecStatus::CRACKED;
-    if (bssidKnown) memcpy(summary->bssid, bssid, 6);
+    auto nonZeroMac = [](const uint8_t* m) {
+        return m && (m[0] | m[1] | m[2] | m[3] | m[4] | m[5]) != 0;
+    };
+    const bool bssidKnown = nonZeroMac(bssid);
+
+    HandshakeSummary& summary = summaries_[summaryIndex];
+    summary.pwncrackStatus = WpaSecStatus::CRACKED;
+    if (bssidKnown) memcpy(summary.bssid, bssid, 6);
 
     HandshakeRecord rec;
-    bool haveRecord = (summary->recIndex != NO_RECORD) &&
-                      manifest_.readAt(summary->recIndex, rec);
+    bool haveRecord = (summary.recIndex != NO_RECORD) &&
+                      manifest_.readAt(summary.recIndex, rec);
     if (!haveRecord) {
         memset(&rec, 0, sizeof(rec));
         rec.state = static_cast<uint8_t>(RecordState::ACTIVE);
-        memcpy(rec.bssid, bssidKnown ? bssid : summary->bssid, 6);
-        strncpy(rec.ssid, summary->ssid, sizeof(rec.ssid) - 1);
+        memcpy(rec.bssid, bssidKnown ? bssid : summary.bssid, 6);
+        strncpy(rec.ssid, summary.ssid, sizeof(rec.ssid) - 1);
         rec.type = static_cast<uint8_t>(RecordType::FOURWAY);
-        rec.pcapSize = summary->size;
+        rec.pcapSize = summary.size;
     }
 
     rec.pwncrackStatus = static_cast<uint8_t>(WpaSecStatus::CRACKED);
@@ -1107,15 +1130,15 @@ inline bool CaptureRegistry::setPwncrackCrackedPassword(const uint8_t bssid[6],
     rec.pwncrackCrackedAt = TimeManager::getInstance().isSynced()
                                 ? (uint32_t)TimeManager::getInstance().now() : 0;
 
-    if (summary->recIndex != NO_RECORD) {
-        return manifest_.writeAt(summary->recIndex, rec);
+    if (summary.recIndex != NO_RECORD) {
+        return manifest_.writeAt(summary.recIndex, rec);
     }
     uint32_t idx = 0;
     if (!manifest_.append(rec, &idx)) return false;
-    summary->recIndex = static_cast<uint16_t>(idx);
+    summary.recIndex = static_cast<uint16_t>(idx);
     return true;
 #else
-    (void)bssid; (void)ssid; (void)password;
+    (void)summaryIndex; (void)bssid; (void)password;
     return false;
 #endif
 }
