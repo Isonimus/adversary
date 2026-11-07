@@ -25,10 +25,11 @@ listed here, that is drift — investigate before trusting the build.
   below predates the latest release tag, so a release can't be cut on an unverified
   snapshot (slice-0080). Keeping this stamp current on every release keeps the gate green.
 
-Last verified: 2026-11-03: native 971/971, cardputer + m5stick builds SUCCESS.
+Last verified: 2026-11-07: native 1037/1037, cardputer + m5stick builds SUCCESS.
 Re-resolved all three envs: the trees below are unchanged since the previous stamp (no
-version drift), only the date and native count moved (964 to 971 over the 0.7.2 cycle,
-which added the host-tested PMKID extraction suite and reset-reason enum cases).
+version drift), only the date and native count moved (971 to 1037 over the 0.8.0 cycle,
+which added the clientless-PMKID solicitation, handshake-pairing, hc22000-format,
+pwncrack-contract and potfile-parser host suites).
 
 Note on the shared package cache: `pio pkg list -e native` can report
 `framework-arduinoespressif32 @ 3.3.7` because resolving the host `native` platform pings

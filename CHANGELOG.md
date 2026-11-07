@@ -7,6 +7,22 @@ releases, this can be replaced by a git-tag-generated changelog.
 ---
 
 
+## 2026-11-07 (v0.8.0-alpha)
+
+Clientless PMKID capture, and the end-to-end crack path made to actually work.
+
+- **Capture a PMKID from an AP with no clients connected.** A new "Clientless PMKID" capture mode solicits the handshake directly from the access point by injecting an association, so you can grab a crackable PMKID from an AP that has no associated clients, which deauth cannot reach. The frame builders are pure and byte-exact host-tested, and the mechanism was proven on-device before the mode was built. (slice; ADR-0137, ADR-0138)
+- **Auto Hunt chooses its capture strategy: Deauth, PMKID, or Both.** A hunt can now solicit client-less APs that a deauth-only pass would skip, and solicited PMKIDs appear in the session History with a `[PMKID]` badge. (ADR-0139)
+- **The hashcat .22000 crack path works end to end.** The 22000 type tags were swapped (a 4-way EAPOL line was written as a PMKID and a PMKID as an EAPOL), so every uploaded hash was mislabelled and rejected by crackers: the whole pwncrack path had been uncrackable since it shipped. Tags are now correct (01=PMKID, 02=EAPOL), the line builders are deduplicated into one host-tested helper, and the writer fails loud instead of registering an empty .22000. (confirmed off-device against field-card captures)
+- **4-way handshakes are paired by client and replay counter.** Capture now treats a 4-way as valid only when its messages come from one exchange (same client MAC and matching replay counters), so a busy-air capture (and every clientless solicitation, where an ambient client's M2 can arrive against our injected M1) no longer mixes frames from different stations into an invalid handshake that WPA-SEC rejects as "no valid handshakes". (ADR-0145, slice-0146)
+- **Clientless PMKIDs persist across reboot and actually upload.** A solicited PMKID now writes a full manifest record (BSSID, channel, type, GPS, timestamp), so it survives a reboot instead of being re-targeted as un-captured; and all three sites that touch the .22000 artifact use one canonical filename, so PMKID-only captures reach pwncrack instead of being stuck at "NOT SENT" forever. The captures UI renders a PMKID row only when a .22000 truly exists. (ADR-0140, ADR-0141, ADR-0144)
+- **Bulk sync ends on a recap with per-file outcomes.** A bulk upload now reports sent / already-uploaded / failed counts and a scrollable list of failures with reasons, instead of a canvas-purged run that always ended on a green "Sync complete" and silently swallowed every per-file failure. Upload services return a structured result, and the formerly silent SD-open bail logs loud. (ADR-0142, slice-0143)
+- **pwncrack upload and cracked-result handling are contract-accurate.** Upload success is now classified against the measured pwncrack JSON reply (HTTP 200 `{"success": true}`) instead of a fail-open "any 2xx without an error word" guess, so an unrecognised reply stays unsent and retries rather than being silently marked uploaded; and fetching cracked results now applies every recovered password instead of only the first 32 per fetch, matching rows against local captures by the verified potfile ESSID field. (ADR-0148, ADR-0149)
+- **NTP sync no longer stalls the UI and reports its real status.** The sync is non-blocking, so WiFi coming up no longer freezes the main loop for up to 10 s, and it reads the actual SNTP completion status instead of inferring success from a time delta, which falsely logged "NTP Sync FAILED" after a successful small correction. (slice-0147)
+
+Internal: native suite 971 to 1037. The handshake action menu and nine consuming popups gained scrolling (shared `ScrollableList`), and `ActionMenu` is now non-copyable so a captured-`this` predicate cannot dangle.
+
+
 ## 2026-11-03 (v0.7.2-alpha)
 
 Stability and security point release: field-reported fixes, no new features.

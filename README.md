@@ -87,7 +87,7 @@ and **Radio** (Sub-GHz / 2.4 GHz, shown when the multi-radio cap is attached), p
 - **Scanner** - Discover networks with security type, signal strength, and channel info; context action menu per network.
 - **AP Proximity Tracker** - Hunt an access point by beacon signal strength: a live meter with a closer/farther direction (labelled signal, not distance), launched from the scanner, working on hidden or idle APs.
 - **Packet Sniffer** - Raw 802.11 frame capture with channel hopping and filtering.
-- **Handshake Capture** - WPA/WPA2/WPA3 handshake acquisition (4-way, PMKID, partial EAPOL), with Auto Hunt (autonomous multi-target hunting + whitelist) and manual modes.
+- **Handshake Capture** - WPA/WPA2/WPA3 handshake acquisition (4-way, PMKID, partial EAPOL) in three modes: Manual, Auto Hunt (autonomous multi-target hunting + whitelist, with a Deauth / PMKID / Both capture strategy), and Clientless PMKID (solicits a PMKID directly from an AP that has no connected clients).
 - **Deauthentication** - Targeted or mass 802.11 deauth frames.
 - **Evil Twin** - Rogue AP with captive-portal credential harvesting; deauth or block individual connected clients from the clients list.
 - **Karma AP** - Auto-responds to any client probe request.
@@ -374,7 +374,7 @@ Main Carousel
 │   ├── Deauth Attack      - Client disconnection
 │   ├── Beacon Spam        - Fake network flooding
 │   ├── Probe Flood        - Probe request saturation
-│   ├── Handshake Capture  - WPA handshake acquisition (Manual / Auto Hunt)
+│   ├── Handshake Capture  - WPA handshake acquisition (Manual / Auto Hunt / Clientless PMKID)
 │   ├── Evil Twin          - Rogue AP + credential capture
 │   ├── Karma AP           - Probe request auto-response
 │   ├── Wardriving         - GPS network mapping (requires GPS module)
@@ -412,7 +412,7 @@ Main Carousel
 
 #### Handshake Capture
 
-Reached from **Wireless -> Handshake**, which offers two modes:
+Reached from **Wireless -> Handshake**, which offers three modes:
 
 **Manual Capture** (single target):
 1. Select a target from the scanner (the Target row opens the scanner, or launch
@@ -429,6 +429,15 @@ Reached from **Wireless -> Handshake**, which offers two modes:
 4. Press `` ` `` to stop at any time
 5. Press `h` to view the handshake list during the hunt
 6. Press `w` to whitelist the current target
+
+The capture strategy (Deauth / PMKID / Both) is set on the Auto Hunt config form: PMKID
+and Both can solicit client-less APs that a deauth-only pass cannot reach.
+
+**Clientless PMKID** (no connected client required):
+1. Launch **Clientless PMKID** from the scanner's action menu on a chosen AP
+2. The device injects an association to solicit the AP's PMKID directly, with no deauth
+3. Works against an AP that has no associated clients
+4. A solicited PMKID saves and uploads (pwncrack) like any other capture
 
 **Handshake List (during Auto Hunt):**
 - Press `h` to enter list view
