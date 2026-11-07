@@ -516,13 +516,13 @@ void HandshakeCapture::processEAPOL(const uint8_t* data, uint16_t length, int8_t
             break;
         case HandshakeMessage::MSG2:
             stats_.msg2Count++;
-            processMessage2(eapolStart, eapolLen, data, length);
+            processMessage2(eapolStart, eapolLen, data, length, clientMac);
             // Save client MAC
             memcpy(handshake_.clientMac, clientMac, 6);
             break;
         case HandshakeMessage::MSG3:
             stats_.msg3Count++;
-            processMessage3(eapolStart, eapolLen, data, length);
+            processMessage3(eapolStart, eapolLen, data, length, clientMac);
             break;
         case HandshakeMessage::MSG4:
             stats_.msg4Count++;
@@ -553,20 +553,37 @@ void HandshakeCapture::setState(HandshakeState newState) {
 #endif
 }
 
+namespace {
+/// Read the 8-byte big-endian EAPOL-Key replay counter. @p eapolData points at
+/// the EAPOL header; the key frame follows at +4, with the counter at key-frame
+/// offset 5 (after descriptor type, key info, key length). Caller guarantees
+/// eapolLen >= 99, so these bytes are present.
+uint64_t readReplayCounter(const uint8_t* eapolData) {
+    const uint8_t* keyFrame = eapolData + 4;
+    uint64_t counter = 0;
+    for (int i = 0; i < 8; ++i) counter = (counter << 8) | keyFrame[5 + i];
+    return counter;
+}
+}  // namespace
+
 void HandshakeCapture::processMessage1(const uint8_t* eapolData, uint16_t eapolLen,
                                         const uint8_t* frameData, uint16_t frameLen,
                                         const uint8_t* clientMac) {
     if (eapolLen < 99) return;
-    
+
     // Extract ANonce (32 bytes at offset 17 in EAPOL-Key)
     const uint8_t* keyFrame = eapolData + 4;  // Skip EAPOL header
     memcpy(handshake_.anonce, keyFrame + 13, 32);  // Nonce offset in key frame
-    
+
     // Save FULL 802.11 frame (not just EAPOL) for WPA-SEC/hashcat compatibility
     uint16_t copyLen = (frameLen < sizeof(handshake_.msg1Data)) ? frameLen : sizeof(handshake_.msg1Data);
     memcpy(handshake_.msg1Data, frameData, copyLen);
     handshake_.msg1Len = copyLen;
     handshake_.hasMsg1 = true;
+
+    // Record station + replay counter so M1 can be paired with M2 (ADR-0145).
+    memcpy(handshake_.msg1Client, clientMac, 6);
+    handshake_.msg1Replay = readReplayCounter(eapolData);
     
     // Key descriptor version
     uint16_t keyInfo = (keyFrame[1] << 8) | keyFrame[2];
@@ -593,21 +610,26 @@ void HandshakeCapture::processMessage1(const uint8_t* eapolData, uint16_t eapolL
 }
 
 void HandshakeCapture::processMessage2(const uint8_t* eapolData, uint16_t eapolLen,
-                                        const uint8_t* frameData, uint16_t frameLen) {
+                                        const uint8_t* frameData, uint16_t frameLen,
+                                        const uint8_t* clientMac) {
     if (eapolLen < 99) return;
-    
+
     // Extract SNonce (32 bytes)
     const uint8_t* keyFrame = eapolData + 4;
     memcpy(handshake_.snonce, keyFrame + 13, 32);
-    
+
     // Extract MIC (16 bytes at offset 77 in key frame)
     memcpy(handshake_.mic, keyFrame + 77, 16);
-    
+
     // Save FULL 802.11 frame for WPA-SEC/hashcat compatibility
     uint16_t copyLen = (frameLen < sizeof(handshake_.msg2Data)) ? frameLen : sizeof(handshake_.msg2Data);
     memcpy(handshake_.msg2Data, frameData, copyLen);
     handshake_.msg2Len = copyLen;
     handshake_.hasMsg2 = true;
+
+    // Record station + replay counter so M2 can be paired with M1/M3 (ADR-0145).
+    memcpy(handshake_.msg2Client, clientMac, 6);
+    handshake_.msg2Replay = readReplayCounter(eapolData);
     
     // Update state (order-independent)
     updateCaptureState();
@@ -621,22 +643,27 @@ void HandshakeCapture::processMessage2(const uint8_t* eapolData, uint16_t eapolL
 }
 
 void HandshakeCapture::processMessage3(const uint8_t* eapolData, uint16_t eapolLen,
-                                        const uint8_t* frameData, uint16_t frameLen) {
+                                        const uint8_t* frameData, uint16_t frameLen,
+                                        const uint8_t* clientMac) {
     if (eapolLen < 99) return;
-    
+
     // MSG3 also contains ANonce - extract it if we don't have MSG1
     const uint8_t* keyFrame = eapolData + 4;
-    
+
     // If we don't have MSG1 yet, get ANonce from MSG3
     if (!handshake_.hasMsg1) {
         memcpy(handshake_.anonce, keyFrame + 13, 32);
     }
-    
+
     // Save FULL 802.11 frame for WPA-SEC/hashcat compatibility
     uint16_t copyLen = (frameLen < sizeof(handshake_.msg3Data)) ? frameLen : sizeof(handshake_.msg3Data);
     memcpy(handshake_.msg3Data, frameData, copyLen);
     handshake_.msg3Len = copyLen;
     handshake_.hasMsg3 = true;
+
+    // Record station + replay counter so M3 can pair with M2 when M1 was missed (ADR-0145).
+    memcpy(handshake_.msg3Client, clientMac, 6);
+    handshake_.msg3Replay = readReplayCounter(eapolData);
     
     // Update state (order-independent)
     updateCaptureState();

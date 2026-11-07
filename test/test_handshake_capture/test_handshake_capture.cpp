@@ -146,24 +146,35 @@ void test_captured_handshake_is_valid(void) {
 }
 
 void test_captured_handshake_is_minimum_valid(void) {
+    // Minimum-valid now requires a crackable pair from one exchange: same client
+    // MAC and corresponding replay counters, not mere message presence (ADR-0145).
+    const uint8_t sta[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
     CapturedHandshake hs;
     hs.reset();
-    
+
     // Neither MSG2 nor any of MSG1/MSG3
     TEST_ASSERT_FALSE(hs.isMinimumValid());
-    
+
     // Only MSG1 - not enough (need MSG2)
     hs.hasMsg1 = true;
+    memcpy(hs.msg1Client, sta, 6);
+    hs.msg1Replay = 4;
     TEST_ASSERT_FALSE(hs.isMinimumValid());
-    
-    // MSG1 + MSG2 = minimum valid
+
+    // MSG1 + MSG2 from the same station with the same replay counter = minimum valid
     hs.hasMsg2 = true;
+    memcpy(hs.msg2Client, sta, 6);
+    hs.msg2Replay = 4;
     TEST_ASSERT_TRUE(hs.isMinimumValid());
-    
-    // Reset and try MSG2 + MSG3
+
+    // Reset and try MSG2 + MSG3 (M3 replay one past M2 in the same exchange)
     hs.reset();
     hs.hasMsg2 = true;
+    memcpy(hs.msg2Client, sta, 6);
+    hs.msg2Replay = 4;
     hs.hasMsg3 = true;
+    memcpy(hs.msg3Client, sta, 6);
+    hs.msg3Replay = 5;
     TEST_ASSERT_TRUE(hs.isMinimumValid());
 }
 

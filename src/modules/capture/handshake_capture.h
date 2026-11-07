@@ -145,7 +145,19 @@ struct CapturedHandshake {
     uint16_t msg3Len;
     uint8_t msg4Data[256];
     uint16_t msg4Len;
-    
+
+    // Pairing validation (ADR-0145): the client MAC and EAPOL replay counter of
+    // each stored ANonce/MIC message, so M1/M2 (or M2/M3) can be confirmed to
+    // belong to one exchange before the capture is treated as complete. Without
+    // this, M1 from one station (e.g. our clientless-PMKID solicitation) gets
+    // paired with an unrelated client's M2, yielding an invalid handshake.
+    uint8_t msg1Client[6] = {0};
+    uint8_t msg2Client[6] = {0};
+    uint8_t msg3Client[6] = {0};
+    uint64_t msg1Replay = 0;
+    uint64_t msg2Replay = 0;
+    uint64_t msg3Replay = 0;
+
     // Beacon frame (required for hashcat PCAP). std::vector so the struct has
     // correct value semantics: it is stored BY VALUE in std::vector<CapturedHandshake>
     // (session buffers), and a raw owning pointer here was shallow-copied across
@@ -165,18 +177,45 @@ struct CapturedHandshake {
     }
     
     /**
-     * @brief Minimum for saving (M2 has SNonce + MIC, need ANonce from M1 or M3)
+     * @brief A crackable M1+M2 pair: same station and identical replay counter.
+     *
+     * M2 echoes M1's replay counter, and both are between the same AP and STA
+     * (ADR-0145). Replay/client equality is a necessary condition for the ANonce
+     * (M1) and MIC (M2) to belong to one exchange.
      */
-    bool isMinimumValid() const {
-        return hasMsg2 && (hasMsg1 || hasMsg3);
+    bool hasM1M2Pair() const {
+        return hasMsg1 && hasMsg2 &&
+               memcmp(msg1Client, msg2Client, 6) == 0 && msg1Replay == msg2Replay;
     }
-    
+
+    /**
+     * @brief A crackable M2+M3 pair: same station, M3's replay one past M2's.
+     *
+     * When M1 was missed, M3 also carries the ANonce; M3's replay counter is
+     * M2's + 1 in the same exchange (ADR-0145).
+     */
+    bool hasM2M3Pair() const {
+        return hasMsg2 && hasMsg3 &&
+               memcmp(msg3Client, msg2Client, 6) == 0 && msg3Replay == msg2Replay + 1;
+    }
+
+    /**
+     * @brief True when a crackable ANonce+MIC pair from one exchange exists.
+     */
+    bool hasValidPair() const { return hasM1M2Pair() || hasM2M3Pair(); }
+
+    /**
+     * @brief Minimum for saving: a crackable pair (M1+M2 or M2+M3) from one
+     * exchange, not merely the messages present (ADR-0145).
+     */
+    bool isMinimumValid() const { return hasValidPair(); }
+
     /**
      * @brief Check if handshake is valid for WPA-SEC upload
-     * WPA-SEC needs: Beacon + M1 + M2 (minimum valid pair with all nonces)
+     * WPA-SEC needs: Beacon + a crackable M1+M2 pair from one exchange.
      */
     bool isWpaSecValid() const {
-        return hasBeacon() && hasMsg1 && hasMsg2;
+        return hasBeacon() && hasM1M2Pair();
     }
     
     /**
@@ -347,9 +386,11 @@ private:
                          const uint8_t* frameData, uint16_t frameLen,
                          const uint8_t* clientMac);
     void processMessage2(const uint8_t* eapolData, uint16_t eapolLen,
-                         const uint8_t* frameData, uint16_t frameLen);
+                         const uint8_t* frameData, uint16_t frameLen,
+                         const uint8_t* clientMac);
     void processMessage3(const uint8_t* eapolData, uint16_t eapolLen,
-                         const uint8_t* frameData, uint16_t frameLen);
+                         const uint8_t* frameData, uint16_t frameLen,
+                         const uint8_t* clientMac);
     void processMessage4(const uint8_t* eapolData, uint16_t eapolLen,
                          const uint8_t* frameData, uint16_t frameLen);
     void updateCaptureState();  ///< Check what we have and update state
