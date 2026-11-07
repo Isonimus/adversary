@@ -1364,11 +1364,15 @@ void CapturesScreen::drawFileList(Canvas& canvas) {
                 // incomplete/invalid rows red. FILE INFO shows the per-service detail.
                 const auto& sRow = summaries[handshakeIndices_[i]];
                 WpaSecStatus pcStatus = sRow.pwncrackStatus;
-                // A PMKID-only capture has no .pcap, so WPA-SEC is N/A: the dot tracks pwncrack,
-                // its only applicable service (ADR-0141), instead of showing a permanent white
-                // INCOMPLETE. Otherwise the best outcome across both services wins.
-                WpaSecStatus combined = sRow.isPmkid ? pcStatus : wpaStatus;
-                if (!sRow.isPmkid) {
+                // A PMKID-only capture (an actual .22000, no .pcap) has WPA-SEC N/A, so the dot
+                // tracks pwncrack, its only applicable service (ADR-0141), instead of a permanent
+                // white INCOMPLETE. The test is isPmkidOnly() (type==PMKID AND a .22000 exists),
+                // not the type label alone: a record mislabeled type=PMKID with no .22000 is a
+                // 4-way, so it falls through to the best-outcome dot and shows its real WPA-SEC
+                // status (ADR-0144). Otherwise the best outcome across both services wins.
+                const bool pmkidOnly = sRow.isPmkidOnly();
+                WpaSecStatus combined = pmkidOnly ? pcStatus : wpaStatus;
+                if (!pmkidOnly) {
                     if (wpaStatus == WpaSecStatus::CRACKED || pcStatus == WpaSecStatus::CRACKED) {
                         combined = WpaSecStatus::CRACKED;
                     } else if (wpaStatus == WpaSecStatus::UPLOADED || pcStatus == WpaSecStatus::UPLOADED) {
@@ -1446,6 +1450,7 @@ void CapturesScreen::drawFileInfo(Canvas& canvas) {
     WpaSecStatus wpaStatus = WpaSecStatus::NOT_UPLOADED;
     WpaSecStatus pcStatus = WpaSecStatus::NOT_UPLOADED;
     char pcPassword[65] = {0};
+    bool has22000 = false;  // an actual {ssid}.22000 exists (drives the PMKID-only N/A, ADR-0144)
 
     if (selectedCategory_ == CaptureCategory::HANDSHAKES) {
         // Load metadata on demand for FILE INFO from registry
@@ -1464,6 +1469,7 @@ void CapturesScreen::drawFileInfo(Canvas& canvas) {
             channel = metadata->channel;
             pcStatus = metadata->pwncrackStatus;
             strncpy(pcPassword, metadata->pwncrackPassword, sizeof(pcPassword) - 1);
+            has22000 = metadata->has22000;
         } else {
             strcpy(handshakeType, "UNK");
         }
@@ -1575,7 +1581,9 @@ void CapturesScreen::drawFileInfo(Canvas& canvas) {
 
         // Row 3: WPA-SEC status (+ key if cracked). A PMKID-only capture has no .pcap for
         // WPA-SEC, so it shows a neutral "N/A" rather than the misleading "INCOMPLETE" (ADR-0141).
-        const bool isPmkidOnly = (strcmp(handshakeType, "PMKID") == 0);
+        // Requires an actual .22000 (has22000), not just the type label: a record mislabeled
+        // type=PMKID with no .22000 is a 4-way and shows its real WPA-SEC status (ADR-0144).
+        const bool isPmkidOnly = (strcmp(handshakeType, "PMKID") == 0) && has22000;
         canvas.setTextColor(theme::TEXT_SECONDARY());
         canvas.setCursor(4, y);
         canvas.print("WPA-SEC:");

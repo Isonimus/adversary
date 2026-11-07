@@ -180,11 +180,19 @@ struct HandshakeSummary {
         if (s) strncpy(ssid, s, sizeof(ssid) - 1);
     }
 
+    /// True when the capture's only uploadable artifact is a .22000 and WPA-SEC
+    /// does not apply: a real PMKID-only capture. Requires an actual .22000 on
+    /// disk (has22000), not merely a PMKID type label, so an older record
+    /// mislabeled type=PMKID with no .22000 (a misclassified 4-way) renders
+    /// honestly as its .pcap instead of an unsyncable .22000 row (ADR-0144,
+    /// refining ADR-0141).
+    bool isPmkidOnly() const { return isPmkid && has22000; }
+
     /// Derive the display filename from the SSID. A PMKID-only capture has no
     /// .pcap on disk, only the hashcat "{ssid}.22000" (ADR-0141), so it must
     /// render as .22000 in the captures list; everything else is a .pcap.
     void getFilename(char* output, size_t outputLen) const {
-        if (isPmkid) {
+        if (isPmkidOnly()) {
             filename_utils::getHc22000Filename(ssid, output, outputLen);
         } else {
             filename_utils::getHandshakeFilename(ssid, output, outputLen);
