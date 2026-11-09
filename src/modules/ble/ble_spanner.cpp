@@ -10,6 +10,7 @@
 #include "core/event_bus.h"
 #include <esp_mac.h>
 #include <esp_system.h>
+#include <esp_bt.h> // esp_bt_controller_get_status() for the teardown pre-flight
 #include <NimBLEDevice.h>
 #include <esp_random.h>
 #include <freertos/FreeRTOS.h>
@@ -348,11 +349,24 @@ void BLESpanner::stop() {
 
             vTaskDelay(pdMS_TO_TICKS(100));
 
-            LOG_I("BLE", "Releasing controller radio (deinit false)...");
-            try {
-                NimBLEDevice::deinit(false);
-            } catch (...) {
-                LOG_E("BLE", "Exception during radio deinit");
+            // Teardown pre-flight: NimBLEDevice::deinit(false) chains nimble_port_deinit()
+            // ahead of esp_nimble_hci_and_controller_deinit(); in this NimBLE-Arduino version,
+            // the first call leaves the controller no longer in ENABLED state, so the second
+            // returns ESP_ERR_INVALID_STATE (259) and logs E internally. The cleanup is still
+            // functionally complete (the later esp_bt_controller_disable/_deinit are idempotent
+            // and do run), so the error was only log noise, but it was indistinguishable in a
+            // serial trace from a real teardown failure during the ADR-0151 pool-validation
+            // campaign. Skip deinit(false) if the controller isn't ENABLED: nothing to tear
+            // down at the HCI level, and NimBLE's internal ESP_LOGE never fires.
+            if (esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_ENABLED) {
+                LOG_I("BLE", "Releasing controller radio (deinit false)...");
+                try {
+                    NimBLEDevice::deinit(false);
+                } catch (...) {
+                    LOG_E("BLE", "Exception during radio deinit");
+                }
+            } else {
+                LOG_I("BLE", "Controller already disabled; skipping deinit(false).");
             }
             
             m_pServer = nullptr;
