@@ -5,6 +5,7 @@
 
 #include "ble_bad_ble_screen.h"
 #include "modules/ble/ble_hid_keyboard.h"
+#include "modules/badusb/hid_report.h" // MOUSE_BUTTON_* bitmask constants
 #include "ui/theme.h"
 #include "ui/components/status_bar.h"
 #include "ui/components/action_button.h"
@@ -16,6 +17,51 @@
 #include <SD.h>
 
 namespace adversary {
+
+namespace {
+
+// Mouse nudge/scroll magnitudes and gamepad full-deflection value for the demo action menus
+// (ADR-0150). Kept modest so a single press is a visible-but-controllable movement on the host.
+constexpr int8_t  MOUSE_MOVE_STEP   = 20;  // pixels per directional nudge
+constexpr int8_t  MOUSE_WHEEL_STEP  = 1;   // wheel detents per scroll action
+constexpr int8_t  GAMEPAD_AXIS_MAX  = 127; // full stick deflection (int8 max)
+constexpr int     MOUSE_JIGGLE_CYCLES = 3; // left/right pairs for the anti-idle jiggle
+
+// Gamepad button bitmask (bit 0 = button 1). The report core owns only the count/layout, so the
+// named buttons are this screen's domain (hid_report::GAMEPAD_BUTTON_COUNT).
+constexpr uint8_t GAMEPAD_BTN_A   = 1 << 0;
+constexpr uint8_t GAMEPAD_BTN_B   = 1 << 1;
+constexpr uint8_t GAMEPAD_BTN_X   = 1 << 2;
+constexpr uint8_t GAMEPAD_BTN_Y   = 1 << 3;
+constexpr uint8_t GAMEPAD_BTN_ALL = 0xFF;
+
+// Spacing between a press report and its release so the host registers a discrete event rather
+// than coalescing the two into no-op.
+constexpr uint32_t HID_ACTION_GAP_MS = 30;
+
+// Mouse and gamepad action labels are OS-agnostic (unlike the keyboard menu), so they are fixed
+// tables. Row order must match the switch in injectMouseCommand()/injectGamepadCommand().
+const char* const MOUSE_ACTIONS[] = {
+    "1. Move Up", "2. Move Down", "3. Move Left", "4. Move Right",
+    "5. Left Click", "6. Right Click", "7. Middle Click", "8. Double Click",
+    "9. Scroll Up", "10. Scroll Down", "11. Jiggle (anti-idle)"
+};
+const char* const GAMEPAD_ACTIONS[] = {
+    "1. Up", "2. Down", "3. Left", "4. Right",
+    "5. Button A", "6. Button B", "7. Button X", "8. Button Y",
+    "9. All Buttons"
+};
+
+const char* hidClassName(BleHidClass hidClass) {
+    switch (hidClass) {
+        case BleHidClass::KEYBOARD: return "Keyboard";
+        case BleHidClass::MOUSE:    return "Mouse";
+        case BleHidClass::GAMEPAD:  return "Gamepad";
+    }
+    return "Keyboard";
+}
+
+} // namespace
 
 BleBadBleScreen::BleBadBleScreen()
     : m_state(State::IDLE)
@@ -40,19 +86,20 @@ void BleBadBleScreen::show() {
     m_shouldExit = false;
     m_needsRedraw = true;
     m_state = State::IDLE;
-    m_actionList.setItemCount(ACTION_ITEM_COUNT); // Connected menu
     m_actionList.setSelectedIndex(0);
     m_configList.setItemCount(0);   // For Idle Config: reset selection + scroll to the top
-    
+
     // Load Defaults for Session
     auto& settings = SettingsManager::getInstance().get();
     m_targetOs = TargetOS::LINUX; // Default
     strncpy(m_sessionName, settings.wireless.bleName, 32);
     m_sessionName[32] = '\0';
     if (m_sessionName[0] == '\0') strcpy(m_sessionName, "Universal Key");
-    m_appearance = settings.wireless.bleAppearance;
-    if (m_appearance == 0) m_appearance = 0x03C1;
-    
+    // The persisted GAP appearance maps to the real class (joystick folds into gamepad, unknown
+    // falls back to keyboard); the class is the honest session selector from here on (ADR-0150).
+    m_hidClass = hidClassForAppearance(settings.wireless.bleAppearance);
+    m_actionList.setItemCount(connectedActionCount()); // Connected menu, sized for the class
+
     footerHints_.setHints({
         {'\n', "Select", true},
         {'`', "Back", true}
@@ -157,10 +204,11 @@ void BleBadBleScreen::drawIdle(Canvas& canvas) {
 
     const char* labels[] = {
         "Name:",
-        // GAP appearance hint only (icon), not the HID class: the report map is always a keyboard
-        // (ADR-0134 ledger / v0.8.0 real-device-type item). Labeled honestly so it does not imply
-        // it changes behavior.
-        "Appearance:",
+        // Real device-class selector (ADR-0150): drives the report map, the GAP icon, and the
+        // connected action menu, so the device enumerates as exactly this class.
+        "HID Class:",
+        // Only consulted for the Keyboard class (chooses the OS command set); inert for Mouse
+        // and Gamepad, whose actions are OS-agnostic.
         "Target:"
     };
 
@@ -179,14 +227,8 @@ void BleBadBleScreen::drawIdle(Canvas& canvas) {
                 case 0: // Name
                     strncpy(valueStr, m_sessionName, sizeof(valueStr) - 1);
                     break;
-                case 1: // Appearance (GAP icon hint only; HID class is always keyboard)
-                    switch (m_appearance) {
-                        case 0x03C1: strncpy(valueStr, "Keyboard", sizeof(valueStr) - 1); break;
-                        case 0x03C2: strncpy(valueStr, "Mouse", sizeof(valueStr) - 1); break;
-                        case 0x03C3: strncpy(valueStr, "Joystick", sizeof(valueStr) - 1); break;
-                        case 0x03C4: strncpy(valueStr, "Gamepad", sizeof(valueStr) - 1); break;
-                        default: strncpy(valueStr, "Unknown", sizeof(valueStr) - 1); break;
-                    }
+                case 1: // HID class (drives report map + GAP icon + action menu)
+                    strncpy(valueStr, hidClassName(m_hidClass), sizeof(valueStr) - 1);
                     break;
                 case 2: // Target
                     switch (m_targetOs) {
@@ -221,7 +263,9 @@ void BleBadBleScreen::drawAdvertising(Canvas& canvas) {
     canvas.drawString("Waiting for Pair...", centerX, y);
     
     canvas.setTextColor(theme::TEXT_SECONDARY());
-    canvas.drawString("Target: Linux / Universal", centerX, y + 15);
+    char classLine[32];
+    snprintf(classLine, sizeof(classLine), "Class: %s", hidClassName(m_hidClass));
+    canvas.drawString(classLine, centerX, y + 15);
     canvas.setTextDatum(top_left); // Reset
 }
 
@@ -249,11 +293,20 @@ void BleBadBleScreen::drawConnected(Canvas& canvas) {
         "9. Ctrl+Alt+Del", "10. Custom Input...", layoutStr, "12. DuckyScript..."
     };
 
-    const char** currentActions = nullptr;
-    switch (m_targetOs) {
-        case TargetOS::WINDOWS: currentActions = actions_win; break;
-        case TargetOS::LINUX:   currentActions = actions_lin; break;
-        case TargetOS::MACOS:   currentActions = actions_mac; break;
+    // The action table is the OS-specific keyboard set, or the OS-agnostic mouse/gamepad set,
+    // selected by the active HID class (ADR-0150). The keyboard arrays above are built regardless
+    // (cheap) and only referenced on the keyboard branch.
+    const char* const* currentActions = nullptr;
+    switch (m_hidClass) {
+        case BleHidClass::KEYBOARD:
+            switch (m_targetOs) {
+                case TargetOS::WINDOWS: currentActions = actions_win; break;
+                case TargetOS::LINUX:   currentActions = actions_lin; break;
+                case TargetOS::MACOS:   currentActions = actions_mac; break;
+            }
+            break;
+        case BleHidClass::MOUSE:   currentActions = MOUSE_ACTIONS;   break;
+        case BleHidClass::GAMEPAD: currentActions = GAMEPAD_ACTIONS; break;
     }
 
     // The shared component paints the selected-row band (dimmed when the footer holds focus) and
@@ -261,7 +314,7 @@ void BleBadBleScreen::drawConnected(Canvas& canvas) {
     // (slice-0063/0066). The list spans from just under the status bar to the footer.
     const int16_t listTop = 22; // status bar is 20px; 2px padding
     const int16_t listH   = (int16_t)(config::SCREEN_HEIGHT - ui::FOOTER_HEIGHT - listTop);
-    m_actionList.setItemCount(ACTION_ITEM_COUNT);
+    m_actionList.setItemCount(connectedActionCount());
     ScrollableList::render(canvas, m_actionList, 0, listTop, config::SCREEN_WIDTH, listH,
         theme::LIST_ROW_HEIGHT, [currentActions](Canvas& c, int idx, int16_t rowY, bool /*sel*/) {
             c.setTextColor(theme::TEXT_PRIMARY());
@@ -310,9 +363,9 @@ void BleBadBleScreen::startAdvertising() {
     
     cfg.name[0] = '\0';
     if (m_sessionName[0] != '\0') strncpy(cfg.name, m_sessionName, 32);
-    // m_appearance is the persisted GAP value; the honest runtime selector is the HID class
-    // derived from it (ADR-0150). The device now enumerates as exactly this class.
-    cfg.hidClass = hidClassForAppearance(m_appearance);
+    // The selected class drives both the report map and the GAP appearance, so the device
+    // enumerates as exactly this class (ADR-0150).
+    cfg.hidClass = m_hidClass;
 
     BLESpanner::getInstance().start(cfg);
     m_state = State::ADVERTISING;
@@ -333,11 +386,21 @@ void BleBadBleScreen::stopAdvertising() {
 }
 
 void BleBadBleScreen::injectCommand() {
+    // The connected menu is class-specific: keyboard runs OS command macros, mouse/gamepad drive
+    // their own HID reports (ADR-0150). Dispatch to the handler for the class in use this session.
+    switch (m_hidClass) {
+        case BleHidClass::KEYBOARD: injectKeyboardCommand(); break;
+        case BleHidClass::MOUSE:    injectMouseCommand();    break;
+        case BleHidClass::GAMEPAD:  injectGamepadCommand();  break;
+    }
+}
+
+void BleBadBleScreen::injectKeyboardCommand() {
     auto& spanner = BLESpanner::getInstance();
-    
+
     // Re-focus helper (Alt+Tab / Cmd+Tab logic could be added here if needed)
     // For now, assume user has focus.
-    
+
     switch (m_targetOs) {
         case TargetOS::WINDOWS:
             switch (m_actionList.selectedIndex()) {
@@ -452,6 +515,77 @@ void BleBadBleScreen::injectCommand() {
     }
 }
 
+void BleBadBleScreen::injectMouseCommand() {
+    auto& spanner = BLESpanner::getInstance();
+    switch (m_actionList.selectedIndex()) {
+        case 0: spanner.sendMouseMove(0, -MOUSE_MOVE_STEP); break; // Up
+        case 1: spanner.sendMouseMove(0,  MOUSE_MOVE_STEP); break; // Down
+        case 2: spanner.sendMouseMove(-MOUSE_MOVE_STEP, 0); break; // Left
+        case 3: spanner.sendMouseMove( MOUSE_MOVE_STEP, 0); break; // Right
+        case 4: clickMouse(hid_report::MOUSE_BUTTON_LEFT);   break;
+        case 5: clickMouse(hid_report::MOUSE_BUTTON_RIGHT);  break;
+        case 6: clickMouse(hid_report::MOUSE_BUTTON_MIDDLE); break;
+        case 7: // Double click
+            clickMouse(hid_report::MOUSE_BUTTON_LEFT);
+            clickMouse(hid_report::MOUSE_BUTTON_LEFT);
+            break;
+        case 8: spanner.sendMouseMove(0, 0, 0,  MOUSE_WHEEL_STEP); break; // Scroll up
+        case 9: spanner.sendMouseMove(0, 0, 0, -MOUSE_WHEEL_STEP); break; // Scroll down
+        case 10: // Jiggle (anti-idle): small symmetric moves that net to zero displacement
+            for (int i = 0; i < MOUSE_JIGGLE_CYCLES; i++) {
+                spanner.sendMouseMove(MOUSE_MOVE_STEP, 0);
+                vTaskDelay(pdMS_TO_TICKS(HID_ACTION_GAP_MS));
+                spanner.sendMouseMove(-MOUSE_MOVE_STEP, 0);
+                vTaskDelay(pdMS_TO_TICKS(HID_ACTION_GAP_MS));
+            }
+            break;
+    }
+}
+
+void BleBadBleScreen::injectGamepadCommand() {
+    switch (m_actionList.selectedIndex()) {
+        case 0: pulseGamepad(0, -GAMEPAD_AXIS_MAX, 0); break; // Up
+        case 1: pulseGamepad(0,  GAMEPAD_AXIS_MAX, 0); break; // Down
+        case 2: pulseGamepad(-GAMEPAD_AXIS_MAX, 0, 0); break; // Left
+        case 3: pulseGamepad( GAMEPAD_AXIS_MAX, 0, 0); break; // Right
+        case 4: pulseGamepad(0, 0, GAMEPAD_BTN_A); break;
+        case 5: pulseGamepad(0, 0, GAMEPAD_BTN_B); break;
+        case 6: pulseGamepad(0, 0, GAMEPAD_BTN_X); break;
+        case 7: pulseGamepad(0, 0, GAMEPAD_BTN_Y); break;
+        case 8: pulseGamepad(0, 0, GAMEPAD_BTN_ALL); break;
+    }
+}
+
+void BleBadBleScreen::clickMouse(uint8_t button) {
+    auto& spanner = BLESpanner::getInstance();
+    spanner.sendMouseMove(0, 0, button, 0);           // press
+    vTaskDelay(pdMS_TO_TICKS(HID_ACTION_GAP_MS));
+    spanner.sendMouseMove(0, 0, 0, 0);                // release (buttons cleared)
+    vTaskDelay(pdMS_TO_TICKS(HID_ACTION_GAP_MS));
+}
+
+void BleBadBleScreen::pulseGamepad(int8_t x, int8_t y, uint8_t buttons) {
+    auto& spanner = BLESpanner::getInstance();
+    spanner.sendGamepad(x, y, buttons);               // deflect / press
+    vTaskDelay(pdMS_TO_TICKS(HID_ACTION_GAP_MS));
+    spanner.sendGamepad(0, 0, 0);                      // return to neutral / release
+    vTaskDelay(pdMS_TO_TICKS(HID_ACTION_GAP_MS));
+}
+
+int BleBadBleScreen::connectedActionCount() const {
+    // Row counts must match the action tables / injectXxxCommand() switches above.
+    static_assert(sizeof(MOUSE_ACTIONS)   / sizeof(MOUSE_ACTIONS[0])   == MOUSE_ACTION_COUNT,
+                  "MOUSE_ACTIONS size must match MOUSE_ACTION_COUNT");
+    static_assert(sizeof(GAMEPAD_ACTIONS) / sizeof(GAMEPAD_ACTIONS[0]) == GAMEPAD_ACTION_COUNT,
+                  "GAMEPAD_ACTIONS size must match GAMEPAD_ACTION_COUNT");
+    switch (m_hidClass) {
+        case BleHidClass::KEYBOARD: return KEYBOARD_ACTION_COUNT;
+        case BleHidClass::MOUSE:    return MOUSE_ACTION_COUNT;
+        case BleHidClass::GAMEPAD:  return GAMEPAD_ACTION_COUNT;
+    }
+    return KEYBOARD_ACTION_COUNT;
+}
+
 bool BleBadBleScreen::handleInput(char key) {
     m_needsRedraw = true;
 
@@ -512,11 +646,8 @@ bool BleBadBleScreen::handleInput(char key) {
                 m_configList.moveDown();  // wraps to first; model keeps the selection on screen
                 return true;
             case ui::ConfigKeyAction::EditPrev:
-                if (sel == 1) { // Appearance
-                    if (m_appearance == 0x03C1) m_appearance = 0x03C4; // Key -> Gamepad
-                    else if (m_appearance == 0x03C4) m_appearance = 0x03C3;
-                    else if (m_appearance == 0x03C3) m_appearance = 0x03C2;
-                    else if (m_appearance == 0x03C2) m_appearance = 0x03C1;
+                if (sel == 1) { // HID class
+                    m_hidClass = prevHidClass(m_hidClass);
                 } else if (sel == 2) { // OS
                     int os = (int)m_targetOs - 1;
                     if (os < 0) os = 2;
@@ -524,11 +655,8 @@ bool BleBadBleScreen::handleInput(char key) {
                 }
                 return true;
             case ui::ConfigKeyAction::EditNext:  // also ENTER on a value row (never inert, ADR-0092)
-                if (sel == 1) { // Appearance
-                    if (m_appearance == 0x03C1) m_appearance = 0x03C2; // Key -> Mouse
-                    else if (m_appearance == 0x03C2) m_appearance = 0x03C3;
-                    else if (m_appearance == 0x03C3) m_appearance = 0x03C4;
-                    else if (m_appearance == 0x03C4) m_appearance = 0x03C1;
+                if (sel == 1) { // HID class
+                    m_hidClass = nextHidClass(m_hidClass);
                 } else if (sel == 2) { // OS
                     int os = (int)m_targetOs + 1;
                     if (os > 2) os = 0;
@@ -611,14 +739,14 @@ bool BleBadBleScreen::handleInput(char key) {
         case ';': // UP
         case 'k':
             if (m_state == State::CONNECTED) {
-                m_actionList.setItemCount(ACTION_ITEM_COUNT);
+                m_actionList.setItemCount(connectedActionCount());
                 m_actionList.moveUp();
             }
             return true;
         case '.': // DOWN
         case 'j':
             if (m_state == State::CONNECTED) {
-                m_actionList.setItemCount(ACTION_ITEM_COUNT);
+                m_actionList.setItemCount(connectedActionCount());
                 m_actionList.moveDown();
             }
             return true;

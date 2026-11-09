@@ -62,6 +62,27 @@ inline BleHidClass hidClassForAppearance(uint16_t appearance) {
     }
 }
 
+// Cycle the class selector forward/backward over the three real classes, wrapping at the ends
+// (ADR-0150). Joystick is not in the cycle: it has no separate class. Inline so the pure cycle
+// is reachable from the native test suite (the UI screen that drives it is device-only).
+inline BleHidClass nextHidClass(BleHidClass hidClass) {
+    switch (hidClass) {
+        case BleHidClass::KEYBOARD: return BleHidClass::MOUSE;
+        case BleHidClass::MOUSE:    return BleHidClass::GAMEPAD;
+        case BleHidClass::GAMEPAD:  return BleHidClass::KEYBOARD;
+    }
+    return BleHidClass::KEYBOARD;
+}
+
+inline BleHidClass prevHidClass(BleHidClass hidClass) {
+    switch (hidClass) {
+        case BleHidClass::KEYBOARD: return BleHidClass::GAMEPAD;
+        case BleHidClass::MOUSE:    return BleHidClass::KEYBOARD;
+        case BleHidClass::GAMEPAD:  return BleHidClass::MOUSE;
+    }
+    return BleHidClass::KEYBOARD;
+}
+
 enum class BleSpamPrompt {
     PAIRING,
     ACTION_REQUIRED,

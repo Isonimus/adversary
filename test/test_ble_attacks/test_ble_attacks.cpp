@@ -56,6 +56,18 @@ void test_unknown_appearance_defaults_to_keyboard(void) {
     TEST_ASSERT_EQUAL(BleHidClass::KEYBOARD, hidClassForAppearance(0xFFFF));
 }
 
+void test_hid_class_selector_cycles_and_wraps(void) {
+    // The HID-class selector cycles Keyboard -> Mouse -> Gamepad and wraps at both ends
+    // (ADR-0150). Joystick is not in the cycle.
+    TEST_ASSERT_EQUAL(BleHidClass::MOUSE,    nextHidClass(BleHidClass::KEYBOARD));
+    TEST_ASSERT_EQUAL(BleHidClass::GAMEPAD,  nextHidClass(BleHidClass::MOUSE));
+    TEST_ASSERT_EQUAL(BleHidClass::KEYBOARD, nextHidClass(BleHidClass::GAMEPAD)); // wraps forward
+
+    TEST_ASSERT_EQUAL(BleHidClass::GAMEPAD,  prevHidClass(BleHidClass::KEYBOARD)); // wraps backward
+    TEST_ASSERT_EQUAL(BleHidClass::KEYBOARD, prevHidClass(BleHidClass::MOUSE));
+    TEST_ASSERT_EQUAL(BleHidClass::MOUSE,    prevHidClass(BleHidClass::GAMEPAD));
+}
+
 void test_config_bounds() {
     BleSpamConfig cfg;
     
@@ -87,6 +99,7 @@ int main(int argc, char **argv) {
     RUN_TEST(test_hid_class_appearance_roundtrips);
     RUN_TEST(test_legacy_joystick_appearance_folds_into_gamepad);
     RUN_TEST(test_unknown_appearance_defaults_to_keyboard);
+    RUN_TEST(test_hid_class_selector_cycles_and_wraps);
     RUN_TEST(test_config_bounds);
     RUN_TEST(test_payload_generation_minimal);
     return UNITY_END();

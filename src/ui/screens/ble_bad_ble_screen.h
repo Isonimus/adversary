@@ -63,7 +63,16 @@ private:
 
     void startAdvertising();
     void stopAdvertising();
+    // Dispatches the selected connected-menu action to the handler for the active HID class.
     void injectCommand();
+    void injectKeyboardCommand();
+    void injectMouseCommand();
+    void injectGamepadCommand();
+    // Press-then-release helpers so a host registers a discrete click/button event (ADR-0150).
+    void clickMouse(uint8_t button);
+    void pulseGamepad(int8_t x, int8_t y, uint8_t buttons);
+    // Number of connected-menu rows for the active HID class.
+    int connectedActionCount() const;
 
     void loadBleScripts();
     void runBleScript(int index);
@@ -72,8 +81,11 @@ private:
     // Load the SD scripts and enter SCRIPT_SELECT; shared by all three target-OS action switches.
     void enterScriptSelect();
 
-    // Connected action-menu holds exactly this many OS-command rows (indices 0-11).
-    static constexpr int ACTION_ITEM_COUNT = 12;
+    // Connected action-menu row counts per HID class (ADR-0150). Keyboard keeps the 12 OS-command
+    // rows; mouse and gamepad have their own fixed action sets. connectedActionCount() selects one.
+    static constexpr int KEYBOARD_ACTION_COUNT = 12;
+    static constexpr int MOUSE_ACTION_COUNT    = 11;
+    static constexpr int GAMEPAD_ACTION_COUNT  = 9;
 
     State m_state;
     bool m_active;
@@ -90,7 +102,9 @@ private:
     TargetOS m_targetOs;
     
     char m_sessionName[33];
-    uint16_t m_appearance;
+    // The HID device class BadBLE will present this session (ADR-0150). Derived from the persisted
+    // GAP appearance on show(); drives the report map, the GAP icon, and the connected action menu.
+    BleHidClass m_hidClass;
     TextInputPopup m_namePopup;
     
     char m_customInputBuf[64];
