@@ -787,15 +787,23 @@ std::vector<uint8_t> BLESpanner::buildPayload() {
         }
             
         case BleSpamProvider::CAROUSEL: {
-            // Select random provider and recurse
+            // Select random provider and recurse. The recursion needs the switch below to
+            // dispatch on the chosen provider, which means mutating m_config.provider for the
+            // length of the inner call. Save and restore around the recursion so the external
+            // view of m_config.provider stays CAROUSEL: the UI label, telemetry, HID guards,
+            // and any future reader see the operator-selected mode, not whatever branch the
+            // last rotation happened to land on.
             static uint32_t lastRotate = 0;
             static BleSpamProvider current = BleSpamProvider::APPLE;
             if (millis() - lastRotate > 2000) {
                 current = (BleSpamProvider)(esp_random() % 4);
                 lastRotate = millis();
             }
+            const BleSpamProvider savedProvider = m_config.provider;
             m_config.provider = current;
-            return buildPayload();
+            std::vector<uint8_t> inner = buildPayload();
+            m_config.provider = savedProvider;
+            return inner;
         }
 
         default:
