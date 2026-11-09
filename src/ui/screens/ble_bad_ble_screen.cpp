@@ -302,7 +302,7 @@ void BleBadBleScreen::drawInputCustom(Canvas& canvas) {
 
 void BleBadBleScreen::startAdvertising() {
     BleSpamConfig cfg;
-    cfg.provider = BleSpamProvider::HID_KEYBOARD;
+    cfg.provider = BleSpamProvider::HID;
     cfg.intensity = 10;
     
     // GAP Name handled by BLESpanner via config
@@ -310,8 +310,10 @@ void BleBadBleScreen::startAdvertising() {
     
     cfg.name[0] = '\0';
     if (m_sessionName[0] != '\0') strncpy(cfg.name, m_sessionName, 32);
-    cfg.appearance = m_appearance;
-    
+    // m_appearance is the persisted GAP value; the honest runtime selector is the HID class
+    // derived from it (ADR-0150). The device now enumerates as exactly this class.
+    cfg.hidClass = hidClassForAppearance(m_appearance);
+
     BLESpanner::getInstance().start(cfg);
     m_state = State::ADVERTISING;
     

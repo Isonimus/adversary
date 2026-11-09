@@ -31,8 +31,29 @@ void test_apple_pairing_payload() {
 
 void test_hid_provider_enum() {
     BleSpamConfig cfg;
-    cfg.provider = BleSpamProvider::HID_KEYBOARD;
-    TEST_ASSERT_EQUAL(BleSpamProvider::HID_KEYBOARD, cfg.provider);
+    cfg.provider = BleSpamProvider::HID;
+    TEST_ASSERT_EQUAL(BleSpamProvider::HID, cfg.provider);
+}
+
+void test_hid_class_appearance_roundtrips(void) {
+    // The class drives the GAP appearance, and the persisted appearance maps back to a class
+    // (ADR-0150). Keyboard/Mouse/Gamepad round-trip exactly.
+    TEST_ASSERT_EQUAL(BLE_APPEARANCE_KEYBOARD, appearanceForHidClass(BleHidClass::KEYBOARD));
+    TEST_ASSERT_EQUAL(BLE_APPEARANCE_MOUSE, appearanceForHidClass(BleHidClass::MOUSE));
+    TEST_ASSERT_EQUAL(BLE_APPEARANCE_GAMEPAD, appearanceForHidClass(BleHidClass::GAMEPAD));
+    TEST_ASSERT_EQUAL(BleHidClass::KEYBOARD, hidClassForAppearance(BLE_APPEARANCE_KEYBOARD));
+    TEST_ASSERT_EQUAL(BleHidClass::MOUSE, hidClassForAppearance(BLE_APPEARANCE_MOUSE));
+    TEST_ASSERT_EQUAL(BleHidClass::GAMEPAD, hidClassForAppearance(BLE_APPEARANCE_GAMEPAD));
+}
+
+void test_legacy_joystick_appearance_folds_into_gamepad(void) {
+    // Joystick has no separate class; a persisted joystick appearance selects GAMEPAD.
+    TEST_ASSERT_EQUAL(BleHidClass::GAMEPAD, hidClassForAppearance(BLE_APPEARANCE_JOYSTICK));
+}
+
+void test_unknown_appearance_defaults_to_keyboard(void) {
+    TEST_ASSERT_EQUAL(BleHidClass::KEYBOARD, hidClassForAppearance(0x0000));
+    TEST_ASSERT_EQUAL(BleHidClass::KEYBOARD, hidClassForAppearance(0xFFFF));
 }
 
 void test_config_bounds() {
@@ -41,10 +62,11 @@ void test_config_bounds() {
     // Intensity clamping
     cfg.intensity = 15;
     TEST_ASSERT_EQUAL(15, cfg.intensity);
-    
-    // Appearance test
-    cfg.appearance = 0x0123;
-    TEST_ASSERT_EQUAL(0x0123, cfg.appearance);
+
+    // HID class defaults to keyboard and is settable
+    TEST_ASSERT_EQUAL(BleHidClass::KEYBOARD, cfg.hidClass);
+    cfg.hidClass = BleHidClass::GAMEPAD;
+    TEST_ASSERT_EQUAL(BleHidClass::GAMEPAD, cfg.hidClass);
 }
 
 void test_payload_generation_minimal() {
@@ -62,6 +84,9 @@ int main(int argc, char **argv) {
     UNITY_BEGIN();
     RUN_TEST(test_apple_pairing_payload);
     RUN_TEST(test_hid_provider_enum);
+    RUN_TEST(test_hid_class_appearance_roundtrips);
+    RUN_TEST(test_legacy_joystick_appearance_folds_into_gamepad);
+    RUN_TEST(test_unknown_appearance_defaults_to_keyboard);
     RUN_TEST(test_config_bounds);
     RUN_TEST(test_payload_generation_minimal);
     return UNITY_END();

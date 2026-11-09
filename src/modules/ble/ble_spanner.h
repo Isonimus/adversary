@@ -21,9 +21,46 @@ enum class BleSpamProvider {
     WINDOWS,
     SAMSUNG,
     CAROUSEL,
-    HID_KEYBOARD, // BadBLE targeting Linux/Everything
-    CLONE         // Identity spoofing of a specific target
+    HID,   // BadBLE: a real HID device (class chosen via BleHidClass)
+    CLONE  // Identity spoofing of a specific target
 };
+
+// The HID device class BadBLE presents (ADR-0150). The class selects the report map and
+// the GAP appearance at attack start; the device enumerates as exactly this class. Joystick
+// is folded into GAMEPAD (same axes+buttons model), so there is no separate joystick class.
+enum class BleHidClass {
+    KEYBOARD,
+    MOUSE,
+    GAMEPAD
+};
+
+// GAP appearance values (Bluetooth SIG) for each HID class. The appearance is derived from
+// the class so the advertised icon always matches the real device (ADR-0150).
+constexpr uint16_t BLE_APPEARANCE_KEYBOARD = 0x03C1;
+constexpr uint16_t BLE_APPEARANCE_MOUSE    = 0x03C2;
+constexpr uint16_t BLE_APPEARANCE_JOYSTICK = 0x03C3; // legacy persisted value -> GAMEPAD
+constexpr uint16_t BLE_APPEARANCE_GAMEPAD  = 0x03C4;
+
+// Map a HID class to its GAP appearance value, and back. hidClassForAppearance treats the
+// legacy joystick appearance as GAMEPAD and any unknown value as KEYBOARD. Inline so the pure
+// mapping is reachable from the native test suite (ble_spanner.cpp is device-only).
+inline uint16_t appearanceForHidClass(BleHidClass hidClass) {
+    switch (hidClass) {
+        case BleHidClass::MOUSE:    return BLE_APPEARANCE_MOUSE;
+        case BleHidClass::GAMEPAD:  return BLE_APPEARANCE_GAMEPAD;
+        case BleHidClass::KEYBOARD: return BLE_APPEARANCE_KEYBOARD;
+    }
+    return BLE_APPEARANCE_KEYBOARD; // unreachable; keeps the compiler happy without a default
+}
+
+inline BleHidClass hidClassForAppearance(uint16_t appearance) {
+    switch (appearance) {
+        case BLE_APPEARANCE_MOUSE:    return BleHidClass::MOUSE;
+        case BLE_APPEARANCE_JOYSTICK: return BleHidClass::GAMEPAD; // joystick folded into gamepad
+        case BLE_APPEARANCE_GAMEPAD:  return BleHidClass::GAMEPAD;
+        default:                      return BleHidClass::KEYBOARD;
+    }
+}
 
 enum class BleSpamPrompt {
     PAIRING,
@@ -46,7 +83,7 @@ struct BleSpamConfig {
     BleSpamPrompt prompt = BleSpamPrompt::PAIRING;
     uint8_t intensity = 5; // 1-10
     char name[33] = ""; // Optional override
-    uint16_t appearance = 0; // Optional override (0 = use default/HID)
+    BleHidClass hidClass = BleHidClass::KEYBOARD; // HID device class (ADR-0150)
 };
 
 class BLESpanner : public NimBLEServerCallbacks {
@@ -125,10 +162,27 @@ public:
     KeyboardLayout getLayout() const { return m_layout; }
 
     /**
-     * @brief Send a keystroke (requires connection)
+     * @brief Send a keystroke (requires a connection and KEYBOARD class)
      */
     void sendKey(uint8_t keycode, uint8_t modifiers = 0);
     void typeString(const std::string& text);
+
+    /**
+     * @brief Send one mouse report (requires a connection and MOUSE class).
+     *
+     * dx/dy/wheel are relative, signed (-127..127); buttons is a bitmask of the
+     * hid_report::MOUSE_BUTTON_* constants. The caller composes press/release and movement
+     * from successive reports.
+     */
+    void sendMouseMove(int8_t dx, int8_t dy, uint8_t buttons = 0, int8_t wheel = 0);
+
+    /**
+     * @brief Send one gamepad report (requires a connection and GAMEPAD class).
+     *
+     * x/y are absolute axis positions, signed (-127..127); buttons is a bitmask of buttons
+     * 1..8 (bit 0 = button 1).
+     */
+    void sendGamepad(int8_t x, int8_t y, uint8_t buttons = 0);
 
 private:
     BLESpanner();
@@ -136,6 +190,12 @@ private:
 
     void updatePayload();
     std::vector<uint8_t> buildPayload();
+
+    // Shared precondition for every HID input send: a live input characteristic, at least one
+    // connection, and the active class matching the report map built at start. Fails loud (logs
+    // and returns false) on a mismatch, because a report that does not match the report map is a
+    // silent protocol error on the host (ADR-0150).
+    bool hidInputReady(BleHidClass expected, const char* op);
 
     BleSpamConfig m_config;
     volatile bool m_active;

@@ -6,6 +6,7 @@
 #include "modules/ble/ble_spanner.h"
 #include "modules/storage/settings_manager.h"
 #include "modules/badusb/hid_keycodes.h"
+#include "modules/badusb/hid_report.h"
 #include "core/event_bus.h"
 #include <esp_mac.h>
 #include <esp_system.h>
@@ -46,7 +47,7 @@ static HIDSecurityCallbacks securityCallbacks;
 namespace adversary {
 
 
-BLESpanner::BLESpanner() : 
+BLESpanner::BLESpanner() :
     m_active(false), 
     m_taskRunning(false),
     m_packetCount(0), 
@@ -82,7 +83,7 @@ void BLESpanner::start(const BleSpamConfig& config) {
     
     // For HID mode: If stack is already initialized (restart), query actual connection count
     // instead of resetting to 0, since the connection may persist across stop/start
-    if (config.provider == BleSpamProvider::HID_KEYBOARD && 
+    if (config.provider == BleSpamProvider::HID && 
         NimBLEDevice::getInitialized() && m_pServer != nullptr) {
         m_connectedCount = m_pServer->getConnectedCount();
         LOG_I("BLE", "HID restart: %d existing connection(s) detected", (int)m_connectedCount);
@@ -116,7 +117,7 @@ void BLESpanner::start(const BleSpamConfig& config) {
     m_pServer->advertiseOnDisconnect(true);
 
     // HID / BadBLE Security Configuration
-    if (m_config.provider == BleSpamProvider::HID_KEYBOARD) {
+    if (m_config.provider == BleSpamProvider::HID) {
         NimBLEDevice::setSecurityAuth(true, false, true); // Bond=YES, MITM=NO, SC=YES (Just Works)
         NimBLEDevice::setSecurityIOCap(BLE_HS_IO_NO_INPUT_OUTPUT);
         NimBLEDevice::setSecurityInitKey(BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID);
@@ -130,7 +131,7 @@ void BLESpanner::start(const BleSpamConfig& config) {
     
 
     // Force GAP Name for HID (Overrides init default)
-    if (m_config.provider == BleSpamProvider::HID_KEYBOARD) {
+    if (m_config.provider == BleSpamProvider::HID) {
         NimBLEDevice::setDeviceName("Universal Key");
     }
 
@@ -142,7 +143,7 @@ void BLESpanner::start(const BleSpamConfig& config) {
     // The default sidesteps the endless-reconnect loop, where a host keeps a stale LTK keyed to a
     // fixed identity after a reflash and spins trying to encrypt against our wiped key. A fresh
     // random address each session never matches that stale bond, so the host always pairs clean.
-    if (m_config.provider == BleSpamProvider::HID_KEYBOARD) {
+    if (m_config.provider == BleSpamProvider::HID) {
         NimBLEDevice::setOwnAddrType(BLE_OWN_ADDR_PUBLIC);
 
         const char* fixedMac = SettingsManager::getInstance().get().wireless.fixedBleMac;
@@ -177,27 +178,29 @@ void BLESpanner::start(const BleSpamConfig& config) {
     updatePayload();
 
     // If HID mode, initialize HID service
-    if (m_config.provider == BleSpamProvider::HID_KEYBOARD) {
+    if (m_config.provider == BleSpamProvider::HID) {
         NimBLEService* pHidService = m_pServer->getServiceByUUID(NimBLEUUID((uint16_t)0x1812));
         if (!pHidService) {
             pHidService = m_pServer->createService(NimBLEUUID((uint16_t)0x1812));
             
-            // HID Report Map (Simplified: Input ONLY, No LEDs/Output)
-            const uint8_t reportMap[] = {
-                0x05, 0x01, 0x09, 0x06, 0xa1, 0x01,       // Usage Page (Generic Desktop), Usage (Keyboard), Collection (Application)
-                0x05, 0x07, 0x19, 0xe0, 0x29, 0xe7,       // Usage Page (Key Codes), Usage Min (224), Usage Max (231)
-                0x15, 0x00, 0x25, 0x01,                   // Logical Min (0), Logical Max (1)
-                0x75, 0x01, 0x95, 0x08,                   // Report Size (1), Report Count (8)
-                0x81, 0x02,                               // Input (Data, Variable, Absolute) -> Modifiers
-                0x95, 0x01, 0x75, 0x08,                   // Report Count (1), Report Size (8)
-                0x81, 0x01,                               // Input (Constant) -> Reserved byte
-                0x95, 0x06, 0x75, 0x08,                   // Report Count (6), Report Size (8)
-                0x15, 0x00, 0x25, 0x65,                   // Logical Min (0), Logical Max (101)
-                0x05, 0x07, 0x19, 0x00, 0x29, 0x65,       // Usage Page (Key Codes), Usage Min (0), Usage Max (101)
-                0x81, 0x00,                               // Input (Data, Array) -> Key arrays
-                0xc0                                      // End Collection
-            };
-            pHidService->createCharacteristic(NimBLEUUID((uint16_t)0x2a4b))->setValue(reportMap, sizeof(reportMap));
+            // HID Report Map: the selected class picks one descriptor from the shared,
+            // transport-agnostic report core (ADR-0150). One map, one input characteristic,
+            // Report ID 0 per session, so the device enumerates as exactly this class.
+            const uint8_t* reportMap = hid_report::KEYBOARD_REPORT_MAP;
+            size_t reportMapSize = hid_report::KEYBOARD_REPORT_MAP_SIZE;
+            switch (m_config.hidClass) {
+                case BleHidClass::MOUSE:
+                    reportMap = hid_report::MOUSE_REPORT_MAP;
+                    reportMapSize = hid_report::MOUSE_REPORT_MAP_SIZE;
+                    break;
+                case BleHidClass::GAMEPAD:
+                    reportMap = hid_report::GAMEPAD_REPORT_MAP;
+                    reportMapSize = hid_report::GAMEPAD_REPORT_MAP_SIZE;
+                    break;
+                case BleHidClass::KEYBOARD:
+                    break; // keyboard is the default selected above
+            }
+            pHidService->createCharacteristic(NimBLEUUID((uint16_t)0x2a4b))->setValue(reportMap, reportMapSize);
             
             // HID Input Report (Force Encryption to trigger Bonding)
             m_pHidInput = pHidService->createCharacteristic(
@@ -308,7 +311,7 @@ void BLESpanner::stop() {
     // For HID mode: DO NOT call deinit() - this corrupts internal handles!
     // Just stop advertising and let the connection drop naturally.
     // The BLE stack and services remain intact for quick restart.
-    if (m_config.provider == BleSpamProvider::HID_KEYBOARD) {
+    if (m_config.provider == BleSpamProvider::HID) {
         LOG_I("BLE", "HID mode - skipping deinit to preserve stack state");
         // Just stop advertising, don't tear down the stack
         if (m_pAdvertising) m_pAdvertising->stop();
@@ -379,7 +382,7 @@ void BLESpanner::spamTask(void* pvParameters) {
     instance->m_taskRunning = true;
     
     // For HID/BadBLE, we want a STABLE address, not rotation
-    if (instance->m_config.provider == BleSpamProvider::HID_KEYBOARD) {
+    if (instance->m_config.provider == BleSpamProvider::HID) {
         // instance->runSpamCycle(); // SKIP rotation!
         instance->updatePayload();   // Just build the ADV packet
         instance->m_pAdvertising->start();
@@ -531,7 +534,7 @@ void BLESpanner::onDisconnect(NimBLEServer* pServer) {
     // Loop-breaker (ADR-0134): a HID link that drops before it ever encrypted is a failed-auth
     // reconnect, the signature of a host retrying a stale bond. Count the churn; once it storms,
     // stop auto-re-advertising so the device stops spinning and the operator sees why.
-    if (m_config.provider == BleSpamProvider::HID_KEYBOARD && !m_hidLinkEncrypted) {
+    if (m_config.provider == BleSpamProvider::HID && !m_hidLinkEncrypted) {
         if (m_churnGuard.recordFailure(millis())) {
             m_hidAdvertiseSuppressed = true;
             if (m_pServer) m_pServer->advertiseOnDisconnect(false);
@@ -614,7 +617,7 @@ void BLESpanner::updatePayload() {
         m_pAdvertising->setScanResponseData(scanResponse);
         
         m_pAdvertising->setAdvertisementType(BLE_HCI_ADV_TYPE_ADV_IND);
-    } else if (m_config.provider == BleSpamProvider::HID_KEYBOARD) {
+    } else if (m_config.provider == BleSpamProvider::HID) {
         // Special handling for HID: Don't wrap in Manufacturer Data
         // The payload was built with Flags, UUIDs, Name, etc. in buildPayload()
         // But NimBLE's setAdvertisementData wraps everything in Len+Type structure automatically for some fields
@@ -634,9 +637,9 @@ void BLESpanner::updatePayload() {
         NimBLEAdvertisementData advertData;
         advertData.setFlags(0x06); // General Disc + BR/EDR Not Supported
 
-        uint16_t appear = m_config.appearance;
-        if (appear == 0) appear = 0x03C1; // Default Keyboard
-        advertData.setAppearance(appear);
+        // Appearance is derived from the HID class so the advertised icon always matches the
+        // real device (ADR-0150): selecting Mouse advertises a mouse and speaks mouse.
+        advertData.setAppearance(appearanceForHidClass(m_config.hidClass));
 
         advertData.setCompleteServices(NimBLEUUID((uint16_t)0x1812)); // HID Service
         m_pAdvertising->setAdvertisementData(advertData);
@@ -703,7 +706,7 @@ std::vector<uint8_t> BLESpanner::buildPayload() {
             break;
         }
             
-        case BleSpamProvider::HID_KEYBOARD: {
+        case BleSpamProvider::HID: {
             // Linux/BlueZ Targeting: 
             // Needs AD Type 0x01 (Flags) to be discoverable
             // Needs AD Type 0x19 (Appearance) to be identified as Keyboard
@@ -778,31 +781,37 @@ std::vector<uint8_t> BLESpanner::buildPayload() {
     return data;
 }
 
-void BLESpanner::sendKey(uint8_t keycode, uint8_t modifiers) {
-    LOG_D("BLE", "sendKey called: m_pHidInput=%p, m_connectedCount=%d",
-                  (void*)m_pHidInput, (int)m_connectedCount);
+bool BLESpanner::hidInputReady(BleHidClass expected, const char* op) {
     if (!m_pHidInput || m_connectedCount == 0) {
-        LOG_W("BLE", "sendKey failed: HidInput=%p, connCount=%d",
-                     (void*)m_pHidInput, (int)m_connectedCount);
-        return;
+        LOG_W("BLE", "%s ignored: no HID link (HidInput=%p, connCount=%d)",
+              op, (void*)m_pHidInput, (int)m_connectedCount);
+        return false;
     }
-    
-    // HID Report: [modifiers, reserved(0), key1, key2, key3, key4, key5, key6]
-    uint8_t report[8] = {modifiers, 0, keycode, 0, 0, 0, 0, 0};
-    m_pHidInput->setValue(report, 8);
-    m_pHidInput->setValue(report, 8);
+    if (m_config.hidClass != expected) {
+        // The report map built at start is for a different class; a report that does not match
+        // it is a silent protocol error on the host (ADR-0150). Fail loud rather than send it.
+        LOG_W("BLE", "%s ignored: active HID class does not match this report", op);
+        return false;
+    }
+    return true;
+}
+
+void BLESpanner::sendKey(uint8_t keycode, uint8_t modifiers) {
+    if (!hidInputReady(BleHidClass::KEYBOARD, "sendKey")) return;
+
+    uint8_t report[hid_report::KEYBOARD_REPORT_SIZE];
+    hid_report::buildKeyboardReport(report, modifiers, keycode);
+    m_pHidInput->setValue(report, sizeof(report));
     m_pHidInput->notify();
-    LOG_D("BLE", "Key sent: 0x%02X (notify called)", keycode);
-    
-    vTaskDelay(pdMS_TO_TICKS(10));
-    
-    vTaskDelay(pdMS_TO_TICKS(10));
-    
-    // Release
-    uint8_t release[8] = {0, 0, 0, 0, 0, 0, 0, 0};
-    m_pHidInput->setValue(release, 8);
+    LOG_D("BLE", "Key sent: 0x%02X", keycode);
+
+    vTaskDelay(pdMS_TO_TICKS(10)); // brief hold so the host registers the press before release
+
+    uint8_t release[hid_report::KEYBOARD_REPORT_SIZE];
+    hid_report::buildKeyboardReport(release, 0, 0);
+    m_pHidInput->setValue(release, sizeof(release));
     m_pHidInput->notify();
-    
+
     vTaskDelay(pdMS_TO_TICKS(10));
 }
 
@@ -824,6 +833,26 @@ void BLESpanner::typeString(const std::string& text) {
             sendKey(key, mod);
         }
     }
+}
+
+void BLESpanner::sendMouseMove(int8_t dx, int8_t dy, uint8_t buttons, int8_t wheel) {
+    if (!hidInputReady(BleHidClass::MOUSE, "sendMouseMove")) return;
+
+    uint8_t report[hid_report::MOUSE_REPORT_SIZE];
+    hid_report::buildMouseReport(report, dx, dy, buttons, wheel);
+    m_pHidInput->setValue(report, sizeof(report));
+    m_pHidInput->notify();
+    vTaskDelay(pdMS_TO_TICKS(10));
+}
+
+void BLESpanner::sendGamepad(int8_t x, int8_t y, uint8_t buttons) {
+    if (!hidInputReady(BleHidClass::GAMEPAD, "sendGamepad")) return;
+
+    uint8_t report[hid_report::GAMEPAD_REPORT_SIZE];
+    hid_report::buildGamepadReport(report, x, y, buttons);
+    m_pHidInput->setValue(report, sizeof(report));
+    m_pHidInput->notify();
+    vTaskDelay(pdMS_TO_TICKS(10));
 }
 
 
