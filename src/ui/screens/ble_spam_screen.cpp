@@ -74,18 +74,27 @@ void BleSpamScreen::drawConfig(Canvas& canvas) {
     const int16_t footerHeight = ui::FOOTER_HEIGHT;
     const int16_t availableHeight = config::SCREEN_HEIGHT - FIRST_LINE_Y - footerHeight - 4;
 
-    const char* optionLabels[] = {"Provider:", "Prompt:", "Intensity:"};
+    const char* optionLabels[] = {"Provider:", "Prompt:", "Intensity:", "Expect:"};
     const char* providers[] = {"Apple", "Android", "Windows", "Samsung", "Carousel"};
-    const char* prompts[] = {"Pairing", "Action", "Battery", "Link"};
+    // Prompt labels ordered to match BleSpamPrompt (PAIRING, ACTION_REQUIRED, APPLE_ID_MODAL,
+    // SOFTWARE_UPDATE, TRANSFER_PHONE, GUIDED_ACCESS, BATTERY_LOW, LINK_PROMPT). The SourApple
+    // action-type prompts (indices 2..5) are tagged LEGACY by effectivenessFor() and are now
+    // reachable from the UI (ADR-0151) so the operator can still pick them for pre-iOS-17.2
+    // devices rather than finding a dead enum value.
+    const char* prompts[] = {"Pairing", "Action", "AppleID", "SW Update", "Transfer", "Guided", "Battery", "Link"};
+    constexpr int PROMPT_COUNT = (int)(sizeof(prompts) / sizeof(prompts[0]));
     char intStr[8];
     sprintf(intStr, "%dx", m_config.intensity);
+    // Advisory effectiveness tag (ADR-0151): LIVE / THROTTLED / LEGACY per (provider,prompt).
+    // Advisory copy, not a gate; every row above still selects freely.
+    const char* effectStr = effectivenessLabel(effectivenessFor(m_config.provider, m_config.prompt));
 
     // The shared component derives the visible-row count from the list rect, keeps the selection
     // on screen, and draws the unified thumb in place of the old ^/v markers; this callback paints
     // one config row.
     m_configList.setItemCount(CONFIG_OPTION_COUNT);
     ScrollableList::render(canvas, m_configList, 0, FIRST_LINE_Y, canvas.width(), availableHeight,
-        theme::LIST_ROW_HEIGHT, [this, &optionLabels, &providers, &prompts, &intStr](Canvas& c, int idx, int16_t rowY, bool selected) {
+        theme::LIST_ROW_HEIGHT, [this, &optionLabels, &providers, &prompts, &intStr, &effectStr](Canvas& c, int idx, int16_t rowY, bool selected) {
             if (idx == CONFIG_OPTION_COUNT - 1) { // Terminal start row: shared green ActionButton (slice-0089)
                 ui::ActionButton::render(c, rowY, "START SPAM", selected);
                 return;
@@ -94,11 +103,13 @@ void BleSpamScreen::drawConfig(Canvas& canvas) {
             if (idx == 0) val = providers[(int)m_config.provider];
             else if (idx == 1) val = prompts[(int)m_config.prompt];
             else if (idx == 2) val = intStr;
+            else if (idx == 3) val = effectStr; // read-only advisory row
             // Shared chrome-only ConfigRow: label left, value right-aligned and dim, selection
             // shown by the band alone (was a fixed value column at x=80) (ADR-0096, slice-0106).
             ui::ConfigRow::render(c, rowY, optionLabels[idx], val);
         },
         !footerHints_.hasFocus());
+    (void)PROMPT_COUNT; // see handleInput where this count is reused
 }
 
 void BleSpamScreen::drawAttack(Canvas& canvas) {
@@ -107,14 +118,19 @@ void BleSpamScreen::drawAttack(Canvas& canvas) {
     
     // 1. Target Section (Autohunt style)
     const char* providers[] = {"Apple", "Android", "Windows", "Samsung", "Carousel"};
-    const char* prompts[] = {"Pairing", "Action", "Battery", "Link"};
-    
+    // Prompt labels aligned with BleSpamPrompt (ADR-0151 exposes all 8 values).
+    const char* prompts[] = {"Pairing", "Action", "AppleID", "SW Update", "Transfer", "Guided", "Battery", "Link"};
+
     canvas.setTextColor(theme::TEXT_SECONDARY());
     canvas.setCursor(4, y);
     canvas.print("Target: ");
     canvas.setTextColor(theme::TEXT_PRIMARY());
     canvas.print(providers[(int)m_config.provider]);
     canvas.printf(" (%s)", prompts[(int)m_config.prompt]);
+    // Effectiveness tag next to the target (ADR-0151): honest advisory of what the current OS will
+    // actually do, so the operator is never misled into expecting a popup from a patched vector.
+    canvas.setTextColor(theme::TEXT_SECONDARY());
+    canvas.printf(" [%s]", effectivenessLabel(effectivenessFor(m_config.provider, m_config.prompt)));
     
     // 2. Central Activity Pulse with BLE Icon (Re-centered)
     // Vertically centered between target line (38) and telemetry line (110)
@@ -195,20 +211,24 @@ bool BleSpamScreen::handleInput(char key) {
                 m_needsRedraw = true;
                 return true;
             case ui::ConfigKeyAction::EditPrev:
+                // Row 3 ("Expect:") is a read-only effectiveness tag (ADR-0151): no edit action.
                 if (m_configList.selectedIndex() == 0) {
                     m_config.provider = (BleSpamProvider)((int)m_config.provider == 0 ? 4 : (int)m_config.provider - 1);
                 } else if (m_configList.selectedIndex() == 1) {
-                    m_config.prompt = (BleSpamPrompt)((int)m_config.prompt == 0 ? 3 : (int)m_config.prompt - 1);
+                    // Prompt wraps over the full 8-value BleSpamPrompt enum (ADR-0151 exposes the
+                    // SourApple-specific prompts in the UI, tagged LEGACY by effectivenessFor()).
+                    m_config.prompt = (BleSpamPrompt)((int)m_config.prompt == 0 ? 7 : (int)m_config.prompt - 1);
                 } else if (m_configList.selectedIndex() == 2) {
                     if (m_config.intensity > 1) m_config.intensity--;
                 }
                 m_needsRedraw = true;
                 return true;
             case ui::ConfigKeyAction::EditNext:  // also ENTER on a value row (never inert, ADR-0092)
+                // Row 3 ("Expect:") is a read-only effectiveness tag (ADR-0151): no edit action.
                 if (m_configList.selectedIndex() == 0) {
                     m_config.provider = (BleSpamProvider)(((int)m_config.provider + 1) % 5);
                 } else if (m_configList.selectedIndex() == 1) {
-                    m_config.prompt = (BleSpamPrompt)(((int)m_config.prompt + 1) % 4);
+                    m_config.prompt = (BleSpamPrompt)(((int)m_config.prompt + 1) % 8);
                 } else if (m_configList.selectedIndex() == 2) {
                     if (m_config.intensity < 10) m_config.intensity++;
                 }

