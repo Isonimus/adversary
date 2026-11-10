@@ -269,14 +269,14 @@ void redetectModules() {
     // mounted by the launcher (we don't own the SPIClass). A no-op once we own it;
     // a forced override needs no probe so it never pays this cost.
     if (ov == CapOverride::Auto && sd.spiBus() == nullptr) {
-        LOG_D("MODULES", "Claiming SD bus for cap probe: %s",
+        LOG_I("MODULES", "Claiming SD bus for cap probe: %s",
               sd.remount() ? "OK" : "FAILED");
     }
     ui::g_expansionCap = detectExpansionCap(ov);
     // The shared-bus cap probe desyncs the card's SPI state machine; re-mount to
     // re-sync it whenever the probe could have run (any non-forced-None override).
     if (ov != CapOverride::ForceNone) {
-        LOG_D("MODULES", "SD re-mount after cap probe: %s",
+        LOG_I("MODULES", "SD re-mount after cap probe: %s",
               sd.remount() ? "OK" : "FAILED");
     }
     LOG_I("MODULES", "Cap: %s",
