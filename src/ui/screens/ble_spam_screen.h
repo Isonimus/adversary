@@ -48,7 +48,7 @@ private:
     BleSpamConfig m_config;
     // The shared model owns selection + scroll window + wrap; drawConfig feeds it the live
     // viewport each frame so the two can't drift (slice-0062).
-    // Indices: 0=Provider, 1=Prompt, 2=Intensity, 3=START
+    // Indices: 0=Provider, 1=Prompt, 2=Intensity, 3=Expect(read-only effectiveness tag), 4=START
     ListScrollModel m_configList;
     
     bool m_active;
@@ -60,7 +60,7 @@ private:
     
     uint32_t m_pulseStartTime;
     
-    static constexpr int CONFIG_OPTION_COUNT = 4;
+    static constexpr int CONFIG_OPTION_COUNT = 5;
     static constexpr int MARGIN_LEFT = 4;
     static constexpr int FIRST_LINE_Y = 26;
 };
