@@ -6,6 +6,7 @@
 #include "wifi_connection.h"
 #include "modules/storage/settings_manager.h"
 #include "utils/log.h"
+#include "utils/wifi_utils.h"
 #include <cstdio>
 
 #ifdef ESP32
@@ -67,6 +68,12 @@ bool WiFiConnection::connect(const char* ssid, const char* password,
         WiFi.mode(WIFI_STA);
     }
     
+    // Pin the 1-14 manual regulatory before begin(): esp_wifi_init (triggered by
+    // mode/disconnect cycling above) resets the country to a conservative 1-11
+    // default, under which a saved AP on ch12-13 (standard under ETSI) fails to
+    // associate. Matches the scan/capture/attack bring-ups (wifi_utils.h:41).
+    wifi_utils::applyFullChannelRegulatory();
+
     // Start connection
     if (channel > 0) {
         // Use channel hint if provided
