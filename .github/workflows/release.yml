@@ -64,6 +64,14 @@ jobs:
           # direct URL. It is firmware.bin unmodified.
           cp "$build/firmware.bin" "dist/adversary-cardputer-${version}-app.bin"
 
+          # Unstripped ELF with DWARF symbols: the one input espcoredump.py info_corefile
+          # needs to decode a field coredump rescued from SD (ADR-0152). The on-device
+          # rescue (SystemManager::logResetReason) writes the ELF the panic handler
+          # produced to /adversary/coredumps/, and scripts/decode_coredump.sh expects
+          # the firmware.elf that was running at the crash. Not operator-facing: only
+          # useful to someone decoding a reported crash against this exact release.
+          cp "$build/firmware.elf" "dist/adversary-cardputer-${version}-firmware.elf"
+
           # Full factory image for a fresh esptool / web-flasher install at 0x0. Offsets
           # are the default_8MB.csv layout (S3 bootloader at 0x0, otadata 0xe000, app0
           # 0x10000).
@@ -100,7 +108,7 @@ jobs:
           cp "dist/adversary-cardputer-${version}-factory.bin" \
              "dist/adversary-cardputer-factory.bin"
 
-          ( cd dist && sha256sum adversary-cardputer-*.bin > SHA256SUMS.txt )
+          ( cd dist && sha256sum adversary-cardputer-*.bin adversary-cardputer-*-firmware.elf > SHA256SUMS.txt )
           ls -la dist
 
       - name: Create GitHub Release
@@ -115,6 +123,7 @@ jobs:
             "dist/adversary-cardputer-${version}-app.bin" \
             "dist/adversary-cardputer-${version}-factory.bin" \
             "dist/adversary-cardputer-factory.bin" \
+            "dist/adversary-cardputer-${version}-firmware.elf" \
             dist/SHA256SUMS.txt
 
       # The web flasher serves the factory image same-origin, so a new release

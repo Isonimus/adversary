@@ -84,4 +84,23 @@ int formatCrashEntry(char* out, size_t outSize,
                      const HeapSnapshot& snapshot,
                      const char* timestamp);
 
+/**
+ * @brief Compose the SD path for a rescued esp_core_dump image (ADR-0152).
+ *
+ * Pure: no I/O, no globals. Produces
+ *   `/adversary/coredumps/<stamp>-<TAG>.elf`
+ * where @p stamp is `YYYYMMDDTHHMMSSZ` derived from @p epochSec when non-zero, else
+ * `boot-<uptimeMs>ms` so a crash before the clock was synced still names a unique
+ * file. @p TAG is the leading identifier of @p reasonName (characters up to the
+ * first space, parenthesis, or NUL), uppercased; this turns a classification string
+ * like `"WDT (other watchdog)"` into `WDT`.
+ *
+ * snprintf semantics: always NUL-terminates when @p outSize > 0, returns the length
+ * a large-enough buffer would hold.
+ */
+int composeCoredumpPath(char* out, size_t outSize,
+                        uint32_t epochSec,
+                        uint32_t uptimeMs,
+                        const char* reasonName);
+
 } // namespace adversary

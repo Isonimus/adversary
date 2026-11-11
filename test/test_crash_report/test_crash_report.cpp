@@ -16,6 +16,7 @@
 #include "core/crash_report.h"
 
 using adversary::classifyReset;
+using adversary::composeCoredumpPath;
 using adversary::formatCrashEntry;
 using adversary::HeapSnapshot;
 using adversary::ResetClassification;
@@ -108,6 +109,45 @@ void test_format_truncation_is_safe(void) {
     TEST_ASSERT_TRUE(needed > static_cast<int>(sizeof(buf)));
 }
 
+// ADR-0152: the SD-rescue path composes its filename from the reset classification
+// name plus the RTC epoch. The composer is pure (string manipulation only), so its
+// defects (bad tag parsing, missing fallback when the clock was unsynced) can hide
+// here with no device-side symptom until a field dump lands in a bad directory.
+
+// A synced epoch produces a chronological YYYYMMDDTHHMMSSZ stamp and the reason's
+// leading identifier as the tag. "WDT (other watchdog)" -> tag "WDT", so the common
+// Int-WDT case gets a short, greppable filename.
+void test_coredump_path_synced_clock(void) {
+    char path[96];
+    ResetClassification c = classifyReset(ResetReason::OtherWdt);
+    // 2026-10-23 13:55:18 UTC == 1792763718 (one of the three recorded events).
+    composeCoredumpPath(path, sizeof(path), /*epoch*/ 1792763718U, /*uptime*/ 0, c.name);
+
+    TEST_ASSERT_EQUAL_STRING("/adversary/coredumps/20261023T135518Z-WDT.elf", path);
+}
+
+// Unsynced clock (RTC never got a real time): fall back to an uptime-based name so
+// the file is still unique and placed in the same directory. The ADR explicitly
+// requires the rescue to work even when the clock was never set.
+void test_coredump_path_unsynced_falls_back_to_uptime(void) {
+    char path[96];
+    ResetClassification c = classifyReset(ResetReason::Panic);
+    composeCoredumpPath(path, sizeof(path), /*epoch*/ 0, /*uptime*/ 61000U, c.name);
+
+    // Not an ISO stamp, so a reader does not mistake uptime seconds for a wall clock.
+    TEST_ASSERT_NULL(strstr(path, "Z-"));
+    TEST_ASSERT_NOT_NULL(strstr(path, "/adversary/coredumps/boot-61000ms-PANIC.elf"));
+}
+
+// Null reason name must still produce a well-formed path, so a future caller that
+// forgets to pass a classification never writes a half-formed filename to SD.
+void test_coredump_path_null_reason_falls_back(void) {
+    char path[96];
+    composeCoredumpPath(path, sizeof(path), /*epoch*/ 1792763718U, /*uptime*/ 0, nullptr);
+
+    TEST_ASSERT_NOT_NULL(strstr(path, "-UNK.elf"));
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_abnormal_resets_are_crashes);
@@ -115,5 +155,8 @@ int main(int, char **) {
     RUN_TEST(test_format_valid_snapshot_includes_numbers);
     RUN_TEST(test_format_invalid_snapshot_says_unavailable);
     RUN_TEST(test_format_truncation_is_safe);
+    RUN_TEST(test_coredump_path_synced_clock);
+    RUN_TEST(test_coredump_path_unsynced_falls_back_to_uptime);
+    RUN_TEST(test_coredump_path_null_reason_falls_back);
     return UNITY_END();
 }

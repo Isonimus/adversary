@@ -1,5 +1,7 @@
 #include "system_manager.h"
 #include <esp_system.h>
+#include <esp_core_dump.h>
+#include <esp_partition.h>
 #include <SD.h>
 #include <WiFi.h>
 #include <esp_wifi.h>
@@ -71,6 +73,81 @@ adversary::ResetReason mapResetReason(esp_reset_reason_t reason) {
 
 RTC_NOINIT_ATTR static HeapRecorder rtcHeapRecorder;
 
+namespace {
+
+// ADR-0152: pull the esp_core_dump ELF that the panic handler wrote into the
+// `coredump` partition out onto SD, then erase the partition so the next panic
+// writes into a clean slot. Runs on every boot, before the 3-strike bootloop guard,
+// so a developing bootloop still preserves at least the first dump.
+//
+// Returns the size written to SD on success, 0 when there is no image or the rescue
+// failed. `outPath` is populated with the SD path when the write succeeds, so the
+// caller can append a pointer line to crash.log.
+size_t rescueCoredumpToSD(const adversary::ResetClassification& cls,
+                          uint32_t epochSec,
+                          uint32_t uptimeMs,
+                          char* outPath, size_t outPathSize) {
+    if (esp_core_dump_image_check() != ESP_OK) {
+        return 0;  // No valid image: a clean boot or the partition never written to.
+    }
+
+    size_t imgAddr = 0;
+    size_t imgSize = 0;
+    if (esp_core_dump_image_get(&imgAddr, &imgSize) != ESP_OK || imgSize == 0) {
+        return 0;
+    }
+
+    const esp_partition_t* part = esp_partition_find_first(
+        ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_COREDUMP, nullptr);
+    if (part == nullptr || imgAddr < part->address ||
+        imgAddr + imgSize > part->address + part->size) {
+        return 0;  // Partition missing or image geometry outside its bounds.
+    }
+    const size_t partOffsetBase = imgAddr - part->address;
+
+    adversary::composeCoredumpPath(outPath, outPathSize, epochSec, uptimeMs, cls.name);
+
+    if (!SD.exists("/adversary/coredumps")) {
+        SD.mkdir("/adversary/coredumps");
+    }
+
+    File dumpFile = SD.open(outPath, FILE_WRITE);
+    if (!dumpFile) {
+        return 0;
+    }
+
+    // 1 KB chunks: no PSRAM budget to allocate the whole image; the coredump partition
+    // caps at 64 KB anyway (see ADR-0152), so loop cost is bounded.
+    uint8_t buf[1024];
+    size_t remaining = imgSize;
+    size_t partOffset = partOffsetBase;
+    while (remaining > 0) {
+        const size_t chunk = remaining < sizeof(buf) ? remaining : sizeof(buf);
+        if (esp_partition_read(part, partOffset, buf, chunk) != ESP_OK) {
+            dumpFile.close();
+            SD.remove(outPath);  // Partial file is worse than none: espcoredump.py would misread it.
+            outPath[0] = '\0';
+            return 0;
+        }
+        if (dumpFile.write(buf, chunk) != chunk) {
+            dumpFile.close();
+            SD.remove(outPath);
+            outPath[0] = '\0';
+            return 0;
+        }
+        partOffset += chunk;
+        remaining -= chunk;
+    }
+    dumpFile.close();
+
+    // Erase the flash image so the next panic writes into a clean partition and a
+    // repeated boot without a new panic does not re-rescue the same bytes.
+    esp_core_dump_image_erase();
+    return imgSize;
+}
+
+}  // namespace
+
 SystemManager::SystemManager()
     : m_isStabilized(false)
     , m_canvasPurged(false)
@@ -125,6 +202,21 @@ void SystemManager::logResetReason() {
     rtcCrashCount++;
     crashCount_ = rtcCrashCount;
 
+    // ADR-0152: rescue the esp_core_dump ELF to SD before the 3-strike bootloop gate,
+    // so a developing bootloop still preserves at least the first dump. One bounded
+    // (<=64 KB) SD write + one flash erase per crash boot; cheap compared to the
+    // diagnostic value of a backtrace on an unattended field unit.
+    char coredumpPath[80] = {0};
+    const size_t coredumpBytes = rescueCoredumpToSD(
+        cls,
+        snapshotValid ? rtcHeapRecorder.epochSec : 0,
+        snapshotValid ? rtcHeapRecorder.snapshot.uptimeMs : 0,
+        coredumpPath, sizeof(coredumpPath));
+    if (coredumpBytes > 0) {
+        LOG_I("BOOT", "Coredump rescued: %s (%u bytes)",
+              coredumpPath, static_cast<unsigned>(coredumpBytes));
+    }
+
     // Bootloop protection: skip SD write if too many consecutive crashes
     if (rtcCrashCount > 3) {
         LOG_W("BOOT", "%d consecutive crashes! Skipping SD log to prevent bootloop.", rtcCrashCount);
@@ -161,6 +253,13 @@ void SystemManager::logResetReason() {
         return;
     }
     logFile.print(entry);
+    // One-line pointer to the rescued dump so the existing crash.log stays the single
+    // read-this-first file (ADR-0152). Omitted when no rescue happened, so the log for
+    // pre-ADR-0152 flashes is unchanged.
+    if (coredumpBytes > 0) {
+        logFile.printf("Coredump: %s (%u bytes)\n\n",
+                       coredumpPath, static_cast<unsigned>(coredumpBytes));
+    }
     logFile.close();
 
     LOG_I("BOOT", "Crash logged to /adversary/logs/crash.log");

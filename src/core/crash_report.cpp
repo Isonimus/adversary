@@ -1,6 +1,8 @@
 #include "core/crash_report.h"
 
+#include <cctype>
 #include <cstdio>
+#include <ctime>
 
 namespace adversary {
 
@@ -58,6 +60,46 @@ int formatCrashEntry(char* out, size_t outSize,
         "  cold power-on or brownout wipes it, and the session had not yet sampled)\n"
         "========================================\n\n",
         static_cast<unsigned>(crashCount), classification.name, timestamp);
+}
+
+int composeCoredumpPath(char* out, size_t outSize,
+                        uint32_t epochSec,
+                        uint32_t uptimeMs,
+                        const char* reasonName) {
+    // Extract the leading identifier of reasonName into a filename-safe tag:
+    // chars until the first space, '(' or NUL, uppercased, bounded at 16 chars so an
+    // unexpected long name still produces a bounded filename. A null or empty name
+    // falls back to "UNK" so the path is always well-formed.
+    char tag[17];
+    size_t tagLen = 0;
+    if (reasonName != nullptr) {
+        for (const char* p = reasonName;
+             *p != '\0' && *p != ' ' && *p != '(' && tagLen < sizeof(tag) - 1;
+             ++p) {
+            tag[tagLen++] = static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
+        }
+    }
+    if (tagLen == 0) {
+        tag[tagLen++] = 'U';
+        tag[tagLen++] = 'N';
+        tag[tagLen++] = 'K';
+    }
+    tag[tagLen] = '\0';
+
+    // Stamp: wall-clock when the RTC flight recorder had a synced time, else uptime so
+    // a boot-time crash still names a unique file. Compact ISO-ish YYYYMMDDTHHMMSSZ so
+    // the filename sorts chronologically on the SD browser.
+    char stamp[24];
+    if (epochSec != 0) {
+        const time_t when = static_cast<time_t>(epochSec);
+        struct tm utc;
+        gmtime_r(&when, &utc);
+        strftime(stamp, sizeof(stamp), "%Y%m%dT%H%M%SZ", &utc);
+    } else {
+        snprintf(stamp, sizeof(stamp), "boot-%lums", static_cast<unsigned long>(uptimeMs));
+    }
+
+    return snprintf(out, outSize, "/adversary/coredumps/%s-%s.elf", stamp, tag);
 }
 
 } // namespace adversary
