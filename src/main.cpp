@@ -806,26 +806,6 @@ void handleInput() {
             return;
         }
 
-#ifdef DEV_DEBUG_PANIC
-        // Dev-only panic trigger for ADR-0152 on-device confirmation. Fn+P forces a
-        // null-pointer dereference, producing a PANIC whose esp_core_dump image lands
-        // in the `coredump` partition. The next boot's SystemManager::logResetReason
-        // rescues it to /adversary/coredumps/ and writes the pointer line into
-        // crash.log; decode with scripts/decode_coredump.sh. Gated so shipped firmware
-        // (which does not define DEV_DEBUG_PANIC) cannot reach it. Compile with
-        //   pio run -e cardputer --build-flags="-DDEV_DEBUG_PANIC=1"
-        // or via the env override.
-        if (state.fn && (key == 'p' || key == 'P')) {
-            LOG_W("DEV", "Fn+P: forcing PANIC for ADR-0152 coredump verification");
-            delay(50);  // Let the serial line flush before the fault
-            volatile int* nullp = nullptr;
-            // cppcheck-suppress nullPointer
-            *nullp = 0xDEAD;  // StoreProhibited -> PANIC (intentional, dev-only)
-            return;  // Unreachable; silences -Wreturn in case the write ever elides
-        }
-#endif
-
-
         // Route to active screen via adversary::ScreenManager (handles all non-menu screens)
         if (!routeInputToActiveScreen(key)) {
             // On menu screen - handle menu input directly
