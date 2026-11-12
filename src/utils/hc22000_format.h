@@ -73,8 +73,15 @@ inline bool buildEapolLine(const CapturedHandshake& hs, char* out, size_t outLen
     int declared = 4 + ((eapol[2] << 8) | eapol[3]);
     int eapolLen = (declared >= 99 && declared <= avail) ? declared : avail;
 
-    static uint8_t buf[256];
-    if (eapolLen > static_cast<int>(sizeof(buf))) eapolLen = sizeof(buf);
+    // Stack-local, sized to the upstream msg2Data cap: no function-local static
+    // (which would be a reentrancy/race hazard if ever reached from two tasks),
+    // no silent truncation (fail loud instead). The static_assert pins the
+    // invariant so a future bump of msg2Data breaks the build here rather than
+    // silently clipping the hashline.
+    uint8_t buf[sizeof(CapturedHandshake::msg2Data)];
+    static_assert(sizeof(buf) >= sizeof(CapturedHandshake::msg2Data),
+                  "buf must cover the full msg2Data cap");
+    if (eapolLen < 0 || eapolLen > static_cast<int>(sizeof(buf))) return false;
     memcpy(buf, eapol, eapolLen);
     for (int i = 81; i < 81 + 16 && i < eapolLen; ++i) buf[i] = 0;  // zero the MIC
 

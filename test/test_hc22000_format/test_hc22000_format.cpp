@@ -139,6 +139,33 @@ void test_eapol_truncation_fails_rather_than_partial(void) {
     TEST_ASSERT_FALSE(hc::buildEapolLine(hs, out, sizeof(out)));
 }
 
+void test_eapol_declared_length_larger_than_available_trims_to_avail(void) {
+    // Pins the trim-to-avail boundary: when the EAPOL length field advertises
+    // more than the msg2Data cap can hold, the builder trims to what is actually
+    // available instead of silently capping at a hard-coded 256 (the former bug).
+    // Fill msg2Data to its full 256-byte cap, place the marker at offset 0 so
+    // avail is maximal (248), and declare a bogus 65535-byte EAPOL frame.
+    CapturedHandshake hs = makeFourWay();
+    static const uint8_t marker[8] = {0xAA, 0xAA, 0x03, 0x00, 0x00, 0x00, 0x88, 0x8E};
+    memcpy(hs.msg2Data, marker, 8);
+    hs.msg2Data[8]  = 0x02;  // EAPOL version
+    hs.msg2Data[9]  = 0x03;  // EAPOL type = Key
+    hs.msg2Data[10] = 0xFF;  // length hi
+    hs.msg2Data[11] = 0xFF;  // length lo -> declared = 4 + 65535, far above avail
+    for (int i = 12; i < 256; ++i) hs.msg2Data[i] = 0x22;
+    hs.msg2Len = 256;
+
+    char out[2048];
+    TEST_ASSERT_TRUE(hc::buildEapolLine(hs, out, sizeof(out)));
+
+    // Avail here is 256 - 8 = 248 bytes of EAPOL hex -> 496 hex chars.
+    std::string line(out);
+    size_t star = line.rfind('*');  // last '*' is before the "00" messagepair
+    size_t prev = line.rfind('*', star - 1);  // '*' before the EAPOL field
+    TEST_ASSERT_EQUAL_UINT(248 * 2, star - prev - 1);
+    TEST_ASSERT_TRUE(endsWith(line, "*00"));
+}
+
 // --- PMKID -----------------------------------------------------------------
 
 void test_pmkid_line_uses_type_01(void) {
@@ -173,6 +200,7 @@ int main() {
     RUN_TEST(test_eapol_requires_m2_plus_anonce_source);
     RUN_TEST(test_eapol_line_exact_golden_vector);
     RUN_TEST(test_eapol_truncation_fails_rather_than_partial);
+    RUN_TEST(test_eapol_declared_length_larger_than_available_trims_to_avail);
     RUN_TEST(test_pmkid_line_uses_type_01);
     RUN_TEST(test_pmkid_line_exact_layout);
     RUN_TEST(test_pmkid_truncation_fails_rather_than_partial);
