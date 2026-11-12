@@ -127,22 +127,51 @@ void test_captured_handshake_set_message_flags(void) {
 }
 
 void test_captured_handshake_is_valid(void) {
+    // isValid() means a fully-captured 4-way whose messages belong to one exchange
+    // (ADR-0145). The four flags alone are not enough: the positive case needs
+    // matching M1/M2 client MACs and equal replay counters too.
+    const uint8_t sta[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
     CapturedHandshake hs;
     hs.reset();
-    
+
     TEST_ASSERT_FALSE(hs.isValid());
-    
+
     hs.hasMsg1 = true;
+    memcpy(hs.msg1Client, sta, 6);
+    hs.msg1Replay = 4;
     TEST_ASSERT_FALSE(hs.isValid());
-    
+
     hs.hasMsg2 = true;
-    TEST_ASSERT_FALSE(hs.isValid());
-    
+    memcpy(hs.msg2Client, sta, 6);
+    hs.msg2Replay = 4;
+    TEST_ASSERT_FALSE(hs.isValid());  // still need M3+M4
+
     hs.hasMsg3 = true;
     TEST_ASSERT_FALSE(hs.isValid());
-    
+
     hs.hasMsg4 = true;
     TEST_ASSERT_TRUE(hs.isValid());
+}
+
+void test_captured_handshake_is_valid_rejects_divergent_m1_m2(void) {
+    // Regression for the LA ROCA DEL FRAILE field case: a capture whose four EAPOL
+    // flags are all set but whose M2 came from a different station than M1 (here,
+    // a malformed/reflected M2 whose extracted client MAC is the AP's own, not the
+    // real STA's) must NOT be reported complete. Before the fix, the COMPLETE
+    // transition short-circuited on the four flags alone and WPA-SEC rejected the
+    // resulting .pcap with "no valid handshakes" even though every flag said ok.
+    const uint8_t sta[6] = {0x44, 0x4a, 0xdb, 0x2f, 0x90, 0x8a};
+    const uint8_t ap[6]  = {0x38, 0x70, 0x0c, 0xfc, 0x53, 0x00};
+    CapturedHandshake hs;
+    hs.reset();
+    hs.hasMsg1 = hs.hasMsg2 = hs.hasMsg3 = hs.hasMsg4 = true;
+    memcpy(hs.msg1Client, sta, 6);  // M1 addressed to the real STA
+    memcpy(hs.msg2Client, ap, 6);   // M2's malformed header makes extractClientMac return the AP
+    memcpy(hs.msg3Client, sta, 6);
+    hs.msg1Replay = 3;
+    hs.msg2Replay = 3;              // counters line up, but the clients do not
+    hs.msg3Replay = 4;
+    TEST_ASSERT_FALSE(hs.isValid());
 }
 
 void test_captured_handshake_is_minimum_valid(void) {
@@ -564,6 +593,7 @@ int main(int argc, char **argv) {
     RUN_TEST(test_captured_handshake_set_channel);
     RUN_TEST(test_captured_handshake_set_message_flags);
     RUN_TEST(test_captured_handshake_is_valid);
+    RUN_TEST(test_captured_handshake_is_valid_rejects_divergent_m1_m2);
     RUN_TEST(test_captured_handshake_is_minimum_valid);
     
     // Config tests

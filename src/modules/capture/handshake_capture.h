@@ -170,10 +170,16 @@ struct CapturedHandshake {
     bool hasBeacon() const { return !beaconData.empty(); }
     
     /**
-     * @brief Full 4-way handshake captured
+     * @brief Full 4-way handshake captured AND the messages belong to one exchange.
+     *
+     * Mere flag presence is not enough: a malformed M2 (e.g. a reflected frame with
+     * wrong 802.11 addressing, LA ROCA DEL FRAILE field case) can set all four flags
+     * while the extracted M2 station disagrees with M1's. ADR-0145's pair check must
+     * gate the COMPLETE transition too, not only the degraded CRACKABLE path, or
+     * such captures get saved and are then rejected by WPA-SEC/hcxtools.
      */
     bool isValid() const {
-        return hasMsg1 && hasMsg2 && hasMsg3 && hasMsg4;
+        return hasMsg1 && hasMsg2 && hasMsg3 && hasMsg4 && hasValidPair();
     }
     
     /**
