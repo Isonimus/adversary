@@ -819,7 +819,8 @@ void handleInput() {
             LOG_W("DEV", "Fn+P: forcing PANIC for ADR-0152 coredump verification");
             delay(50);  // Let the serial line flush before the fault
             volatile int* nullp = nullptr;
-            *nullp = 0xDEAD;  // StoreProhibited -> PANIC
+            // cppcheck-suppress nullPointer
+            *nullp = 0xDEAD;  // StoreProhibited -> PANIC (intentional, dev-only)
             return;  // Unreachable; silences -Wreturn in case the write ever elides
         }
 #endif
