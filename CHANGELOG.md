@@ -7,6 +7,20 @@ releases, this can be replaced by a git-tag-generated changelog.
 ---
 
 
+## 2026-11-12 (v0.9.0-alpha)
+
+HID device types + BLE spam polish, plus field-driven hardening of capture and crash paths.
+
+- **BadBLE is more than a keyboard.** The BadBLE module now presents as a real HID Keyboard, Mouse or Gamepad: picking the device type reconfigures the advertised appearance and the exposed HID service so the host pairs with what you chose, and scripted actions (keystrokes, mouse moves/clicks, gamepad buttons/axes) emit the right report descriptors. Report builders are pure and host-tested byte-exact; the transport wrapper is NimBLE-only, as before. (ADR-0150)
+- **BLE spam is now honest about what it is doing.** The spam payload mix was audited: unverified entries were dropped, provider pacing is now per-channel honest (no tighter-than-the-stack-allows bursts), the Fast Pair pool is pruned to the entries that actually still pop against current Google Mobile Services, and the UI reports the real inter-advert gap instead of a wished-for one. A session now does what the status bar says it does. (ADR-0151)
+- **Field panics now land as decodable backtraces.** The ESP-IDF coredump partition was already receiving an ELF on every panic; we just overwrote it on the next boot without reading it. A boot-time SD-rescue prelude now copies the dump off before the bootloop gate runs, `scripts/decode_coredump.sh` decodes it against the matching release ELF, and `release.yml` ships `firmware.elf` as a release artifact so a field dump can be decoded against a known build. The recurring BOTH-mode Int-WDT is now instrumented to yield a real backtrace the next time it fires. (ADR-0152)
+- **Four-way handshakes are gated by pair match for the all-four case too.** ADR-0145's client+replay check was only consulted on the degraded path (M1+M2 or M2+M3 without all four), so a capture with all four flags set but a malformed M2 (reflected frame with wrong 802.11 addressing, LA ROCA DEL FRAILE field case) could still reach `COMPLETE` and be saved, then rejected by WPA-SEC with "no valid handshakes". The full-capture path now runs the same pair check, so the broken frame no longer slips through.
+- **hashcat .22000 builder is reentrancy-safe and fails loud on oversize.** The internal EAPOL-copy buffer was a function-local `static` sized to a magic 256 and silently truncating anything larger into the hashline; it is now a stack-local sized against the upstream M2 cap, a `static_assert` pins the invariant to any future bump of `msg2Data`, and an oversize declared length returns false instead of writing a clipped line. A regression test pins the max-avail trim boundary.
+- **WiFi regulatory domain is pinned before an STA connect, not after.** The 1-14 channel domain is now re-applied on every WiFi bring-up before the STA association begins, so a bring-up sequence can no longer leave the radio clamped to a narrower set after a prior AP-mode or re-init cycle. (commit b4cbd49)
+
+Internal: native suite 1037 to 1059 across the HID report descriptor packers, the BLE spam audit and pacing suite, the hc22000 max-avail EAPOL-trim regression and the ADR-0145 four-way completeness tightening. A new `cardputer_dev_panic` build env defines `DEV_DEBUG_PANIC=1` to unlock the Fn+P coredump-rescue hook; the shipped release image never defines the flag, so the hook is unreachable in anything a user installs.
+
+
 ## 2026-11-07 (v0.8.0-alpha)
 
 Clientless PMKID capture, and the end-to-end crack path made to actually work.
