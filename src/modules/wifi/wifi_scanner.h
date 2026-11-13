@@ -241,6 +241,17 @@ private:
      * @brief Process raw scan results from WiFi driver
      */
     void processResults();
+
+    /**
+     * @brief Beacon-sniff pass that fills PMF bits on each NetworkInfo.
+     *
+     * Runs after `WiFi.scanNetworks` completes and before `WIFI_SCAN_COMPLETED`
+     * is published (ADR-0153, slice-0154). Iterates distinct channels from the
+     * scan result, dwells on each, and on every received beacon or probe-response
+     * parses the RSN IE and merges the two bits into the matching row. No-op on
+     * the native build.
+     */
+    void runPmfSniffPass();
     
     /**
      * @brief Convert WiFi auth mode to our security enum
