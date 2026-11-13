@@ -12,8 +12,7 @@
  * nine-cell truth table lives here, exercised by test_pmf_resolver.cpp.
  *
  * `CaptureIntent` is the authoritative name for the ADR-0139 enum; the UI side
- * (`AutoHuntStrategy`) aliases onto this when the screen integration lands in
- * slice-0154's step 5.
+ * (`AutoHuntStrategy`) aliases onto this so both share one enum (slice-0154).
  */
 
 namespace adversary {

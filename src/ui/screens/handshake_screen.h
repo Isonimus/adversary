@@ -18,6 +18,7 @@
 #include "ui/components/confirm_dialog.h"
 #include "utils/handshake_utils.h"
 #include "utils/mac_utils.h"
+#include "utils/pmf_resolver.h"
 #include "screen_interface.h"
 #include <cstdint>
 #include <vector>
@@ -87,14 +88,14 @@ enum class HandshakeMode : uint8_t {
 /**
  * @brief Per-hunt capture strategy for Auto Hunt (ADR-0139).
  *
- * Deauth = the original client-forced path; Pmkid = inject solicitation only (no deauth);
+ * Deauth = the original client-forced path; PMKID = inject solicitation only (no deauth);
  * Both = solicit and deauth in the same per-target window (PMKID-first, deauth as fallback).
+ *
+ * Aliased onto the resolver's `CaptureIntent` so the UI and the pure resolver
+ * (`utils::resolveEffectiveStrategy`) share one enum (ADR-0153, slice-0154). The UI side
+ * keeps the historical name so existing call sites and logs read unchanged.
  */
-enum class AutoHuntStrategy : uint8_t {
-    Deauth,
-    Pmkid,
-    Both
-};
+using AutoHuntStrategy = utils::CaptureIntent;
 
 /**
  * @brief Handshake capture screen
@@ -149,7 +150,7 @@ private:
     bool isClientless() const { return mode_ == HandshakeMode::Clientless; }
     // Auto Hunt strategy uses solicitation (so the PMKID_CAPTURED path applies, ADR-0139).
     bool autoUsesSolicit() const {
-        return autoStrategy_ == AutoHuntStrategy::Pmkid || autoStrategy_ == AutoHuntStrategy::Both;
+        return autoStrategy_ == AutoHuntStrategy::PMKID || autoStrategy_ == AutoHuntStrategy::Both;
     }
     // Selectable CONFIG rows: Auto Hunt has Strategy + START; Clientless has Target + START;
     // Manual has Target + 3 options + START.

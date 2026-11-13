@@ -1137,7 +1137,7 @@ void HandshakeScreen::drawConfig(Canvas& canvas) {
                     return;
                 }
                 const char* strat = autoStrategy_ == AutoHuntStrategy::Deauth ? "Deauth" :
-                                    autoStrategy_ == AutoHuntStrategy::Pmkid  ? "PMKID"  : "Both";
+                                    autoStrategy_ == AutoHuntStrategy::PMKID  ? "PMKID"  : "Both";
                 ui::ConfigRow::render(c, rowY, "Strategy:", strat);
             },
             !footerHints_.hasFocus());
