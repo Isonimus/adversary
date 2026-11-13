@@ -400,10 +400,24 @@ void WiFiScanner::sortBySSID() {
 void WiFiScanner::setContinuousMode(bool enable, uint32_t intervalMs) {
     m_continuousMode = enable;
     m_continuousInterval = intervalMs;
-    
+
     if (enable && m_state != ScannerState::SCANNING) {
         startScan();
     }
+}
+
+bool WiFiScanner::applyPmfBitsByBssid(std::vector<NetworkInfo>& list,
+                                      const uint8_t bssid[6],
+                                      bool pmfCapable,
+                                      bool pmfRequired) {
+    for (auto& net : list) {
+        if (memcmp(net.bssid, bssid, 6) == 0) {
+            net.pmfCapable = pmfCapable;
+            net.pmfRequired = pmfRequired;
+            return true;
+        }
+    }
+    return false;
 }
 
 } // namespace adversary

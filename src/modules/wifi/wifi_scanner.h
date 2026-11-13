@@ -51,6 +51,8 @@ struct NetworkInfo {
     uint8_t channel;            ///< WiFi channel (1-14)
     WiFiSecurity security;      ///< Security type
     bool isHidden;              ///< True if SSID is hidden
+    bool pmfCapable = false;    ///< RSN Capabilities MFPC (bit 7). Advisory; MFPR is the actionable bit.
+    bool pmfRequired = false;   ///< RSN Capabilities MFPR (bit 6). Suppresses deauth in autohunt (ADR-0153).
     uint32_t lastSeen;          ///< Timestamp when last seen (millis)
     
     /**
@@ -196,6 +198,25 @@ public:
      * @brief Check if continuous mode is enabled
      */
     bool isContinuousMode() const { return m_continuousMode; }
+
+    /**
+     * @brief Apply a PMF-bit pair to the scan result row with the matching BSSID.
+     *
+     * Pure merge step used by the beacon-sniff pass (ADR-0153, slice-0154): the
+     * promiscuous callback parses the RSN IE out of a beacon and calls this
+     * with the sender BSSID and the two bits. A BSSID not in @p list is a no-op
+     * (an AP heard while sniffing that was not in the scan result: ignore it).
+     *
+     * @param list        Scan result to mutate.
+     * @param bssid       6-byte BSSID of the sender.
+     * @param pmfCapable  MFPC bit from the RSN Capabilities field.
+     * @param pmfRequired MFPR bit from the RSN Capabilities field.
+     * @return true when a matching row was found and updated; false otherwise.
+     */
+    static bool applyPmfBitsByBssid(std::vector<NetworkInfo>& list,
+                                    const uint8_t bssid[6],
+                                    bool pmfCapable,
+                                    bool pmfRequired);
     
 #ifdef UNIT_TEST
     /**
