@@ -637,6 +637,14 @@ void ScannerScreen::drawNetworkEntry(Canvas& canvas, const NetworkInfo& net,
             canvas.setCursor(indicatorX, badgeY);
             canvas.setTextColor(theme::WARNING());
             canvas.print("S");
+            indicatorX += 8;
+        }
+        // PMF required - blue P (advisory; autohunt will not spend deauth
+        // on this target by default: ADR-0153 / slice-0154).
+        if (net.pmfRequired) {
+            canvas.setCursor(indicatorX, badgeY);
+            canvas.setTextColor(theme::ACCENT());
+            canvas.print("P");
         }
     }
 #else
