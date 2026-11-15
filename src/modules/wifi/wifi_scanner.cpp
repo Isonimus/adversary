@@ -8,8 +8,10 @@
 #include "config/config.h"
 #include "utils/log.h"
 #include "utils/wifi_utils.h"
+#include "utils/rsn_ie_parser.h"
 
 #ifndef UNIT_TEST
+#include <Arduino.h>
 #include <WiFi.h>
 #include <esp_wifi.h>
 #endif
@@ -280,14 +282,19 @@ void WiFiScanner::processResults() {
     
     // Clean up scan results
     WiFi.scanDelete();
-    
+
+    // Fill PMF bits by sniffing beacons on each discovered channel. Done
+    // between scan completion and the WIFI_SCAN_COMPLETED event so every
+    // consumer sees the bits already on the record (ADR-0153, slice-0154).
+    runPmfSniffPass();
+
     m_scanCount++;
     m_lastScanTime = millis();
     m_state = ScannerState::COMPLETED;
-    
+
     LOG_I("WIFISCAN", "Found %d networks in %lu ms",
           count, m_lastScanTime - m_scanStartTime);
-                  
+
     // Publish scan completion event
     adversary::EventData event(adversary::EventType::WIFI_SCAN_COMPLETED);
     event.payload.scan.count = count;
@@ -400,10 +407,131 @@ void WiFiScanner::sortBySSID() {
 void WiFiScanner::setContinuousMode(bool enable, uint32_t intervalMs) {
     m_continuousMode = enable;
     m_continuousInterval = intervalMs;
-    
+
     if (enable && m_state != ScannerState::SCANNING) {
         startScan();
     }
 }
+
+bool WiFiScanner::applyPmfBitsByBssid(std::vector<NetworkInfo>& list,
+                                      const uint8_t bssid[6],
+                                      bool pmfCapable,
+                                      bool pmfRequired) {
+    for (auto& net : list) {
+        if (memcmp(net.bssid, bssid, 6) == 0) {
+            net.pmfCapable = pmfCapable;
+            net.pmfRequired = pmfRequired;
+            return true;
+        }
+    }
+    return false;
+}
+
+#ifndef UNIT_TEST
+
+namespace {
+
+// Dwell per channel. Typical 2.4 GHz beacon interval is ~100 ms, so one dwell
+// catches at least one beacon from every BSSID on that channel under normal
+// conditions. Tunable from here if on-device latency measurement motivates it.
+constexpr uint32_t PMF_SNIFF_DWELL_MS = 120;
+
+// Module-local pointer the RX callback consults: the promiscuous callback
+// signature carries no context, and the scan path is single-threaded, so a
+// pointer owned by runPmfSniffPass and cleared on exit is sufficient.
+std::vector<NetworkInfo>* g_pmfSniffList = nullptr;
+
+// 802.11 management frame subtypes we care about: beacon (8) and probe-response
+// (5). Both carry the same fixed-parameter + tagged-parameter layout.
+constexpr uint8_t MGMT_SUBTYPE_BEACON = 8;
+constexpr uint8_t MGMT_SUBTYPE_PROBE_RESPONSE = 5;
+
+// MAC-header + fixed-parameters offset constants (bytes from frame start).
+constexpr size_t MGMT_HEADER_LEN = 24;      // FC(2)+Dur(2)+DA(6)+SA(6)+BSSID(6)+Seq(2)
+constexpr size_t MGMT_FIXED_PARAMS_LEN = 12;  // Timestamp(8)+Interval(2)+Caps(2)
+constexpr size_t MGMT_TAGGED_OFFSET = MGMT_HEADER_LEN + MGMT_FIXED_PARAMS_LEN;
+constexpr size_t MGMT_BSSID_OFFSET = 16;
+
+void IRAM_ATTR pmfSniffRxCallback(void* buf, wifi_promiscuous_pkt_type_t type) {
+    if (type != WIFI_PKT_MGMT || g_pmfSniffList == nullptr) return;
+    auto* pkt = static_cast<wifi_promiscuous_pkt_t*>(buf);
+    const uint8_t* payload = pkt->payload;
+    const uint32_t len = pkt->rx_ctrl.sig_len;
+    if (len < MGMT_TAGGED_OFFSET) return;
+
+    // Frame Control byte 0 carries Type (bits 2-3) and Subtype (bits 4-7).
+    // The type filter already selected mgmt; check subtype for beacon/probe-resp.
+    const uint8_t subtype = (payload[0] >> 4) & 0x0F;
+    if (subtype != MGMT_SUBTYPE_BEACON && subtype != MGMT_SUBTYPE_PROBE_RESPONSE) {
+        return;
+    }
+
+    const uint8_t* bssid = payload + MGMT_BSSID_OFFSET;
+
+    // Walk the tagged parameters. Stop at the first RSN IE: one per beacon.
+    size_t off = MGMT_TAGGED_OFFSET;
+    while (off + 2 <= len) {
+        const uint8_t tag = payload[off];
+        const uint8_t tagLen = payload[off + 1];
+        if (off + 2 + tagLen > len) break;
+        if (tag == adversary::utils::RSN_IE_ELEMENT_ID) {
+            bool mfpc = false, mfpr = false;
+            if (adversary::utils::parseRsnPmfBits(payload + off,
+                                                   static_cast<size_t>(2) + tagLen,
+                                                   &mfpc, &mfpr)) {
+                WiFiScanner::applyPmfBitsByBssid(*g_pmfSniffList, bssid, mfpc, mfpr);
+            }
+            return;
+        }
+        off += static_cast<size_t>(2) + tagLen;
+    }
+}
+
+} // namespace
+
+void WiFiScanner::runPmfSniffPass() {
+    if (m_networks.empty()) return;
+
+    // Distinct 2.4 GHz channels appearing in the scan result.
+    std::vector<uint8_t> channels;
+    channels.reserve(14);
+    for (const auto& net : m_networks) {
+        if (net.channel < 1 || net.channel > 14) continue;
+        if (std::find(channels.begin(), channels.end(), net.channel) == channels.end()) {
+            channels.push_back(net.channel);
+        }
+    }
+    if (channels.empty()) return;
+
+    g_pmfSniffList = &m_networks;
+
+    wifi_promiscuous_filter_t filter = wifi_utils::managementFrameFilter();
+    if (!wifi_utils::enablePromiscuous(pmfSniffRxCallback, &filter)) {
+        g_pmfSniffList = nullptr;
+        LOG_W("WIFISCAN", "PMF sniff: enablePromiscuous failed, skipping");
+        return;
+    }
+
+    const uint32_t start = millis();
+    for (uint8_t ch : channels) {
+        wifi_utils::setChannel(ch);
+        delay(PMF_SNIFF_DWELL_MS);
+    }
+
+    wifi_utils::disablePromiscuous();
+    g_pmfSniffList = nullptr;
+
+    LOG_I("WIFISCAN", "PMF sniff: %u channels in %lu ms",
+          static_cast<unsigned>(channels.size()),
+          static_cast<unsigned long>(millis() - start));
+}
+
+#else
+
+void WiFiScanner::runPmfSniffPass() {
+    // No-op on the native host build: no radio.
+}
+
+#endif
 
 } // namespace adversary

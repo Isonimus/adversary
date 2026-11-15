@@ -18,6 +18,7 @@
 #include "ui/components/confirm_dialog.h"
 #include "utils/handshake_utils.h"
 #include "utils/mac_utils.h"
+#include "utils/pmf_resolver.h"
 #include "screen_interface.h"
 #include <cstdint>
 #include <vector>
@@ -87,14 +88,14 @@ enum class HandshakeMode : uint8_t {
 /**
  * @brief Per-hunt capture strategy for Auto Hunt (ADR-0139).
  *
- * Deauth = the original client-forced path; Pmkid = inject solicitation only (no deauth);
+ * Deauth = the original client-forced path; PMKID = inject solicitation only (no deauth);
  * Both = solicit and deauth in the same per-target window (PMKID-first, deauth as fallback).
+ *
+ * Aliased onto the resolver's `CaptureIntent` so the UI and the pure resolver
+ * (`utils::resolveEffectiveStrategy`) share one enum (ADR-0153, slice-0154). The UI side
+ * keeps the historical name so existing call sites and logs read unchanged.
  */
-enum class AutoHuntStrategy : uint8_t {
-    Deauth,
-    Pmkid,
-    Both
-};
+using AutoHuntStrategy = utils::CaptureIntent;
 
 /**
  * @brief Handshake capture screen
@@ -149,7 +150,7 @@ private:
     bool isClientless() const { return mode_ == HandshakeMode::Clientless; }
     // Auto Hunt strategy uses solicitation (so the PMKID_CAPTURED path applies, ADR-0139).
     bool autoUsesSolicit() const {
-        return autoStrategy_ == AutoHuntStrategy::Pmkid || autoStrategy_ == AutoHuntStrategy::Both;
+        return autoStrategy_ == AutoHuntStrategy::PMKID || autoStrategy_ == AutoHuntStrategy::Both;
     }
     // Selectable CONFIG rows: Auto Hunt has Strategy + START; Clientless has Target + START;
     // Manual has Target + 3 options + START.
@@ -197,6 +198,16 @@ private:
     // Track attempted networks
     void markNetworkAttempted(const uint8_t* bssid);
     bool wasNetworkAttempted(const uint8_t* bssid) const;
+
+    // Look up the target BSSID in the last `WiFiScanner` result (where the slice-0154 beacon-sniff
+    // pass fills PMF bits) and return `pmfRequired`. Returns false when the BSSID is not in that
+    // cache (hidden AP, scanner never ran, or scan was cleared): the slice-0154 "honest best-effort"
+    // fallback, so the resolver treats a missing bit as "attack as declared."
+    bool pmfRequiredForTarget(const uint8_t bssid[6]) const;
+
+    // UI label for the latched effective strategy (`Deauth`, `PMKID`, `Both`, `PMKID (PMF)`,
+    // `Skipped (PMF)`), per the slice-0154 DoD table.
+    const char* effectiveStrategyLabel() const;
     
     HandshakeCapture& capture_;
     PcapWriter pcapWriter_;
@@ -235,7 +246,16 @@ private:
     
     // Launch mode, fixed at construction (ADR-0094).
     const HandshakeMode mode_;
-    AutoHuntStrategy autoStrategy_ = AutoHuntStrategy::Deauth;  // Auto Hunt capture strategy (ADR-0139)
+    AutoHuntStrategy autoStrategy_ = AutoHuntStrategy::Deauth;  // Auto Hunt capture intent (ADR-0139)
+    bool autoDegradeOnPmf_ = true;  // Degrade Deauth intent to PMKID on PMF-required targets (ADR-0153).
+    // Effective strategy latched once per target at the LOCKING -> ATTACKING transition (ADR-0153).
+    // Reset to {Deauth, NONE} + pmfRequired=false at NEXT_TARGET so stale state can never leak
+    // into the next window. `latchedTargetPmfRequired_` is kept separately from the reason code
+    // because the DoD renders `PMKID (PMF)` whenever the target is PMF-required under a PMKID
+    // or Both intent, not only when PMF drove a degrade: `reason` encodes WHY the resolver
+    // changed the strategy, `pmfRequired` encodes WHAT the target is.
+    utils::ResolvedStrategy latchedEffective_ = {utils::EffectiveStrategy::Deauth, utils::PmfResolveReason::NONE};
+    bool latchedTargetPmfRequired_ = false;
     AutoHuntState autoState_;
     uint32_t autoStateStart_ = 0;
     uint32_t handshakesCaptured_ = 0;
@@ -272,7 +292,7 @@ private:
     static constexpr uint32_t REDRAW_INTERVAL_MS = 100;
     static constexpr int CONFIG_ITEMS = 5;
     static constexpr int CLIENTLESS_CONFIG_ITEMS = 2;  // Target + START (ADR-0138)
-    static constexpr int AUTOHUNT_CONFIG_ITEMS = 2;    // Strategy + START (ADR-0139)
+    static constexpr int AUTOHUNT_CONFIG_ITEMS = 3;    // Strategy + Degrade on PMF + START (ADR-0139/0153)
     
     // Auto Hunt timing constants (ms)
     static constexpr uint32_t AUTO_SCAN_TIME = 5000;

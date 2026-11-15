@@ -637,6 +637,16 @@ void ScannerScreen::drawNetworkEntry(Canvas& canvas, const NetworkInfo& net,
             canvas.setCursor(indicatorX, badgeY);
             canvas.setTextColor(theme::WARNING());
             canvas.print("S");
+            indicatorX += 8;
+        }
+        // PMF required - advisory P in theme-stable INFO (cyan).
+        // ACCENT would reskin per theme (Cyberpunk accent is neon pink);
+        // W/C/H/S already use semantic status colours for the same reason.
+        // (ADR-0153 / slice-0154.)
+        if (net.pmfRequired) {
+            canvas.setCursor(indicatorX, badgeY);
+            canvas.setTextColor(theme::INFO());
+            canvas.print("P");
         }
     }
 #else
