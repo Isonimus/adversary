@@ -213,3 +213,46 @@ here).
 ## As built
 
 <!-- Filled in at merge. -->
+
+Shipped as commits `b6b0d6b` → `50e51ed` on `feature/slice-0154-pmf-aware-attack-selection`.
+
+**Scan path.** `NetworkInfo` grew `pmfCapable`/`pmfRequired` (`b6b0d6b`). A post-scan
+promiscuous beacon-sniff pass fills those bits by hand-rolled RSN IE walk (`c3b85d1`),
+dwelling only on the distinct channels the scan returned; the observed cost in a
+~6-channel neighbourhood sat within the ~720-960 ms Design budget. The scanner-list row
+renders the P marker on `MFPR=1` rows (`974db2d`, lab-corrected to theme-stable
+`theme::INFO` in `50e51ed` after Cyberpunk's accent rendered the badge pink).
+
+**Resolver seam.** `AutoHuntStrategy` was aliased onto `utils::CaptureIntent` so UI and
+resolver share one enum (`99988d3`). The pure `resolveEffectiveStrategy` resolves per
+target at `LOCKING` and latches the result for that window (`d683cfe`); the deauth and
+PMKID-solicit arms read the latched value through `utils::armsForStrategy`, so the
+Skipped row provably transmits nothing. All nine truth-table cells and the four arming
+rows are covered by `test_pmf_resolver.cpp` (14 cases, part of the 1089-green native
+suite). Post-lab, `latchedTargetPmfRequired_` was split out from the resolver's reason
+code (`4eb444c`) so `PMKID (PMF)` renders whenever the target is PMF-required, not only
+when PMF *drove* the degrade; the Mode line was also folded into the State line as a
+`State: … | <mode>` suffix to free vertical space on the 135 px display.
+
+**Config form.** `Degrade on PMF: On|Off` ships as the second `ConfigRow` under
+`Strategy`, default On, as specified.
+
+**DoD run-through.**
+
+- Scenario 1 (PMF marker on `MFPR=1`, absent on `MFPC=1` and legacy WPA2): lab-confirmed
+  on-device against a live PMF AP, cyan P on the required row, no badge on neighbouring
+  WPA2 APs.
+- Scenarios 2 (non-PMF, intent unchanged) and 3 (`PMKID`/`Both` intent + PMF AP →
+  `PMKID`/`PMKID (PMF)`): tethered confirmation earlier against three non-PMF neighbours,
+  then untethered against the lab PMF AP; the State-line suffix reads `PMKID (PMF)` in
+  cyan under every theme tested.
+- Scenario 4 (`Deauth` intent + PMF + degrade=on → `PMKID (PMF)`): lab-confirmed; the
+  hunt log prints `intent=Deauth -> effective=PMKID (PMF required)`.
+- Scenario 5 (`Deauth` intent + PMF + degrade=off → Skipped): lab-confirmed; the target
+  advances without an attack window and `Networks Skipped` increments; a defensive native
+  test (`test_skipped_row_end_to_end`) now pins `Skipped → autoDeauth=false,
+  solicitPmkid=false` at the arming map as a regression guard.
+
+**Follow-ups filed.** The 802.11v BTM half of the original bundled LEDGER item remains
+open (now its own line). No persistence of PMF bits outside the live scan record (out of
+scope here).
