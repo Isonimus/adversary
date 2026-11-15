@@ -639,11 +639,13 @@ void ScannerScreen::drawNetworkEntry(Canvas& canvas, const NetworkInfo& net,
             canvas.print("S");
             indicatorX += 8;
         }
-        // PMF required - blue P (advisory; autohunt will not spend deauth
-        // on this target by default: ADR-0153 / slice-0154).
+        // PMF required - advisory P in theme-stable INFO (cyan).
+        // ACCENT would reskin per theme (Cyberpunk accent is neon pink);
+        // W/C/H/S already use semantic status colours for the same reason.
+        // (ADR-0153 / slice-0154.)
         if (net.pmfRequired) {
             canvas.setCursor(indicatorX, badgeY);
-            canvas.setTextColor(theme::ACCENT());
+            canvas.setTextColor(theme::INFO());
             canvas.print("P");
         }
     }
