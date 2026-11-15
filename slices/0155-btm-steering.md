@@ -152,3 +152,81 @@ used for code-complete-but-RF-unverified.
 ## As built
 
 <!-- Filled in at merge. -->
+
+Shipped as four commits on `feature/slice-0155-btm-steering`:
+
+- `817b0f3 docs(slice): 802.11v BTM steering (slice-0155)` — this document, LEDGER line
+  deleted (per the slice workflow for closed items), INDEX regenerated.
+- `f5c8896 feat(utils): pure WNM BTM Request frame builder + injection predicate
+  (slice-0155)` — header-only `src/utils/btm_frame.h` ships the 46-byte layout
+  (MAC header, Category=10/Action=7 WNM body, tag-52 Neighbor Report) and the pure
+  `shouldInjectBtm(BtmInjectInputs)` predicate; native test module `test_btm_frame`
+  pins every header byte, the request-mode bit mask, the little-endian disassoc
+  timer, the tag-52 body layout, and all six predicate cells.
+- `981d22b feat(utils): ESP32 TX helper for one-shot BTM Request injection
+  (slice-0155)` — thin `sendBtmRequest()` over `RawWiFi::transmit(STATION, …)`;
+  no-op on native so the host test runner stays radio-free.
+- `f10ea54 feat(autohunt): wire one-shot BTM steer into the attack window
+  (slice-0155)` — Auto Hunt config form gains a fourth row `BTM steer
+  (unverified): On|Off` (default off); per-target latch
+  `btmInjectedThisTarget_` cleared at NEXT_TARGET alongside the slice-0154
+  effective-strategy latch; every ATTACKING tick consults the pure predicate and
+  on fire builds the frame with a candidate BSSID derived by flipping the LAA bit
+  of the target BSSID, transmits on STA, latches, and logs the `BTM:injected`
+  marker.
+
+Per-DoD run-through:
+
+1. **PMF-required target + steer on + solicitation armed + half-window elapsed →
+   one BTM Request, hunt-log gains `BTM:injected`.** Met. The predicate in
+   `utils/btm_frame.h` returns true only in exactly this cell; the handshake_screen
+   ATTACKING tick (in `handshake_screen.cpp`) reads the same predicate and, on fire,
+   calls `sendBtmRequest(…)` with source/BSSID = target AP, destination = broadcast,
+   request mode = PreferredCandidateListIncluded | DisassociationImminent, Neighbor
+   Report candidate = LAA-flipped target BSSID. The hunt-log `LOG_I("AUTOHUNT",
+   "%s: BTM:injected ...")` fires alongside, and the latch flips before TX so a TX
+   failure cannot loop.
+2. **Non-PMF target + steer on → no BTM injection.** Met. Predicate test
+   `test_predicate_skips_non_pmf_targets` and the identical `latchedTargetPmfRequired_`
+   wiring on the live call site both gate to `pmfRequired=true`.
+3. **BTM steer off → no BTM injection on any target.** Met. Predicate test
+   `test_predicate_default_off_wins_over_everything`; the default initializer
+   `autoBtmSteer_ = false` holds, and `handleConfigEdit` on row 2 is the only
+   place that flips it.
+4. **UI label contains the literal "(unverified)".** Met. `drawConfig` row 2
+   renders `ui::ConfigRow::render(c, rowY, "BTM steer (unverified):", …)`; a
+   grep for the literal matches that one call site.
+5. **Byte-level builder test.** Met. `test_btm_frame.cpp` runs 7 builder tests
+   (length, reject-undersized, reject-null, MAC header, WNM body, Neighbor Report
+   IE, zero-timer sanity) plus 6 predicate cells; 13/13 pass on native.
+
+Verification evidence:
+
+- `pio test -e native -f test_btm_frame` — 13/13 pass.
+- `pio test -e native` — 1107/1107 pass (up 13 from the slice-0154 baseline of 1094).
+- `pio run -e cardputer` — clean, flash 76.6% (2.56 MB of 3.34 MB).
+- `pio run -e m5stick` — clean, flash 79.5% (2.50 MB of 3.15 MB).
+
+Follow-ups (tracked here, intentionally not slice-blocking):
+
+- **On-device honest verification of the field behaviour.** Flash Cardputer ADV,
+  run autohunt with BTM steer on against a known-PMF lab target, confirm from the
+  serial trace that exactly one BTM Request is emitted at the half-window mark and
+  never again for that target, and that a non-PMF target in the same hunt never
+  sees an injection. The `(unverified)` label stays until this runs.
+- **Does a spoofed BTM Request survive PMF?** The headline open question from
+  ADR-0153. Needs a PMF-required AP whose associated clients can be observed
+  (probe sequence number, reassoc Request). If honoured on any real stack, the
+  `(unverified)` suffix can drop and the label becomes `BTM steer`; if rejected
+  on every stack tested, the knob either becomes `Legacy BTM (non-PMF only)` or
+  the slice gets reverted.
+- **Multi-BSS decoy to back the candidate BSSID.** This slice fabricates an LAA
+  MAC with no decoy AP behind it. If the field pass shows clients are honouring
+  the BTM but failing to associate because the candidate is a phantom, standing
+  up a karma-style decoy AP backing the candidate BSSID becomes its own ledger
+  item (sibling to CSA injection).
+- **Native integration test around the call site.** The pure predicate is
+  tested, but the live call site in `handshake_screen.cpp` is not reachable from
+  the native suite today (the screen pulls in `WiFi.*` and Arduino). Extracting
+  the autohunt FSM tick into a testable pure helper is a broader slice; noting
+  the gap here, not closing it.
