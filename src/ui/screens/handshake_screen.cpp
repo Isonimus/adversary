@@ -800,6 +800,7 @@ void HandshakeScreen::updateAutoHunt() {
                 // best-effort (false when the BSSID is not in the scanner cache). Latched once
                 // per target so a per-target render and the hunt log see one stable value.
                 const bool pmfReq = pmfRequiredForTarget(targetBssid_);
+                latchedTargetPmfRequired_ = pmfReq;
                 latchedEffective_ = utils::resolveEffectiveStrategy(
                     autoStrategy_, pmfReq, autoDegradeOnPmf_);
 
@@ -814,11 +815,15 @@ void HandshakeScreen::updateAutoHunt() {
                     break;
                 }
 
-                // Log the resolution. Intent -> effective when they differ, else effective only.
+                // Log the resolution. Any PMF-required target prints the intent plus a
+                // `(PMF required)` suffix so a tethered run attributes the effective strategy
+                // honestly, whether PMF drove a degrade (reason=PMF_DEGRADED) or just matched
+                // the operator's PMKID intent (reason=NONE). Non-PMF targets print the terse
+                // common-case form.
                 const char* intentLabel =
                     autoStrategy_ == AutoHuntStrategy::Deauth ? "Deauth" :
                     autoStrategy_ == AutoHuntStrategy::PMKID  ? "PMKID"  : "Both";
-                if (latchedEffective_.reason == utils::PmfResolveReason::PMF_DEGRADED) {
+                if (pmfReq) {
                     LOG_I("AUTOHUNT", "%s: intent=%s -> effective=%s (PMF required)",
                           targetSsid_, intentLabel, effectiveStrategyLabel());
                 } else {
@@ -888,6 +893,7 @@ void HandshakeScreen::updateAutoHunt() {
             // Clear the latched effective-strategy so a stale PMF reason cannot render on
             // the next target's "Mode:" line before LOCKING re-resolves (slice-0154).
             latchedEffective_ = {utils::EffectiveStrategy::Deauth, utils::PmfResolveReason::NONE};
+            latchedTargetPmfRequired_ = false;
             
             // Clear scan results and rescan
             WiFi.scanDelete();
@@ -942,11 +948,13 @@ bool HandshakeScreen::pmfRequiredForTarget(const uint8_t bssid[6]) const {
 }
 
 const char* HandshakeScreen::effectiveStrategyLabel() const {
+    // PMKID on a PMF-required target renders `PMKID (PMF)` regardless of whether PMF
+    // degraded a Deauth/Both intent (reason=PMF_DEGRADED) or the intent was PMKID
+    // (reason=NONE): the suffix tells the operator the target is PMF-required, which
+    // is a property of WHAT the target is, not WHY the resolver chose this strategy.
     switch (latchedEffective_.strategy) {
         case utils::EffectiveStrategy::Deauth:  return "Deauth";
-        case utils::EffectiveStrategy::PMKID:
-            return latchedEffective_.reason == utils::PmfResolveReason::PMF_DEGRADED
-                       ? "PMKID (PMF)" : "PMKID";
+        case utils::EffectiveStrategy::PMKID:   return latchedTargetPmfRequired_ ? "PMKID (PMF)" : "PMKID";
         case utils::EffectiveStrategy::Both:    return "Both";
         case utils::EffectiveStrategy::Skipped: return "Skipped (PMF)";
     }
@@ -1342,8 +1350,25 @@ void HandshakeScreen::drawAutoHuntCapturing(Canvas& canvas) {
     canvas.print("State: ");
     canvas.setTextColor(theme::TEXT_PRIMARY());
     canvas.print(stateName);
+
+    // Effective-strategy suffix on the State line (slice-0154 DoD scenarios 2-4). Folded
+    // into this row rather than taking its own line so the Target/EAPOL/stats rows below
+    // stay above the footer on the 135 px-tall display. Shown only while a per-target
+    // window is active (LOCKING/ATTACKING/WAITING); INFO-coloured (theme-stable cyan,
+    // matching the scanner's P badge) when the target is PMF-required so the operator
+    // reads "this is the PMF path" at a glance.
+    const bool perTargetWindowActive =
+        autoState_ == AutoHuntState::ATTACKING ||
+        autoState_ == AutoHuntState::LOCKING   ||
+        autoState_ == AutoHuntState::WAITING;
+    if (perTargetWindowActive) {
+        canvas.setTextColor(theme::TEXT_SECONDARY());
+        canvas.print(" | ");
+        canvas.setTextColor(latchedTargetPmfRequired_ ? theme::INFO() : theme::TEXT_PRIMARY());
+        canvas.print(effectiveStrategyLabel());
+    }
     y += 12;
-    
+
     // Current target (if any)
     canvas.setTextColor(theme::TEXT_SECONDARY());
     canvas.setCursor(4, y);
@@ -1357,21 +1382,6 @@ void HandshakeScreen::drawAutoHuntCapturing(Canvas& canvas) {
         canvas.print("(scanning...)");
     }
     y += 12;
-
-    // Per-target effective-strategy line (slice-0154 DoD scenarios 2-4). The label latches
-    // at the LOCKING -> ATTACKING transition; a `(PMF)` suffix signals the PMF-driven
-    // degrade so the operator can see why a Deauth intent turned into PMKID on this target.
-    if (autoState_ == AutoHuntState::ATTACKING ||
-        autoState_ == AutoHuntState::LOCKING   ||
-        autoState_ == AutoHuntState::WAITING) {
-        canvas.setTextColor(theme::TEXT_SECONDARY());
-        canvas.setCursor(4, y);
-        canvas.print("Mode: ");
-        const bool pmfDegrade = latchedEffective_.reason == utils::PmfResolveReason::PMF_DEGRADED;
-        canvas.setTextColor(pmfDegrade ? theme::ACCENT() : theme::TEXT_PRIMARY());
-        canvas.print(effectiveStrategyLabel());
-        y += 12;
-    }
     
     // Progress bar for current state
     uint32_t stateTimeout = AUTO_SCAN_TIME;

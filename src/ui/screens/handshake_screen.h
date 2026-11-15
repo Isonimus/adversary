@@ -249,8 +249,13 @@ private:
     AutoHuntStrategy autoStrategy_ = AutoHuntStrategy::Deauth;  // Auto Hunt capture intent (ADR-0139)
     bool autoDegradeOnPmf_ = true;  // Degrade Deauth intent to PMKID on PMF-required targets (ADR-0153).
     // Effective strategy latched once per target at the LOCKING -> ATTACKING transition (ADR-0153).
-    // Reset to {Deauth, NONE} at NEXT_TARGET so a stale reason can never leak into the next window.
+    // Reset to {Deauth, NONE} + pmfRequired=false at NEXT_TARGET so stale state can never leak
+    // into the next window. `latchedTargetPmfRequired_` is kept separately from the reason code
+    // because the DoD renders `PMKID (PMF)` whenever the target is PMF-required under a PMKID
+    // or Both intent, not only when PMF drove a degrade: `reason` encodes WHY the resolver
+    // changed the strategy, `pmfRequired` encodes WHAT the target is.
     utils::ResolvedStrategy latchedEffective_ = {utils::EffectiveStrategy::Deauth, utils::PmfResolveReason::NONE};
+    bool latchedTargetPmfRequired_ = false;
     AutoHuntState autoState_;
     uint32_t autoStateStart_ = 0;
     uint32_t handshakesCaptured_ = 0;
