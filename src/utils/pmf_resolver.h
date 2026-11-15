@@ -88,5 +88,39 @@ inline ResolvedStrategy resolveEffectiveStrategy(CaptureIntent intent,
     return {EffectiveStrategy::Skipped, PmfResolveReason::PMF_DEAUTH_INEFFECTIVE};
 }
 
+/**
+ * @brief Two-bit arming pattern for the handshake-capture config derived from an
+ *        effective strategy: which of the deauth and PMKID-solicit arms fire this
+ *        window. Kept next to the resolver so one place owns the truth; AutoHunt
+ *        reads the latched strategy through this and sets the two config bits.
+ */
+struct CaptureArms {
+    bool autoDeauth;    ///< Inject deauthentication frames to shake clients loose.
+    bool solicitPmkid;  ///< Send EAPOL-start to solicit M1 from the AP (clientless path).
+};
+
+/**
+ * @brief Map the effective strategy onto the capture-config arms.
+ *
+ * Deauth    -> {true,  false}
+ * PMKID     -> {false, true }
+ * Both      -> {true,  true }
+ * Skipped   -> {false, false}  ///< Defensive: Skipped targets never transmit.
+ *
+ * Pure function. The `Skipped` row is the regression guard asserted by
+ * test_pmf_resolver: a PMF-required target under Deauth intent with the degrade
+ * toggle off resolves to Skipped, and Skipped must arm *neither* half so no deauth
+ * or solicit frame can leak onto that target's window.
+ */
+inline CaptureArms armsForStrategy(EffectiveStrategy s) {
+    switch (s) {
+        case EffectiveStrategy::Deauth:  return {true,  false};
+        case EffectiveStrategy::PMKID:   return {false, true };
+        case EffectiveStrategy::Both:    return {true,  true };
+        case EffectiveStrategy::Skipped: return {false, false};
+    }
+    return {false, false};
+}
+
 } // namespace utils
 } // namespace adversary

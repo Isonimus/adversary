@@ -836,13 +836,13 @@ void HandshakeScreen::updateAutoHunt() {
                 strncpy(config.targetSsid, targetSsid_, 32);
                 config.channel = targetChannel_;
                 // Effective strategy (ADR-0153): Deauth/Both inject deauth; PMKID/Both solicit M1.
-                // Reading the latched effective value (not the intent) is what makes the deauth
-                // and solicitation arms honour the per-target PMF gate without a second track.
-                config.autoDeauth = (latchedEffective_.strategy == utils::EffectiveStrategy::Deauth ||
-                                     latchedEffective_.strategy == utils::EffectiveStrategy::Both);
+                // One place owns the arming map (utils::armsForStrategy) so the Skipped row
+                // stays unit-testable as a regression guard and the two bool-exprs here cannot
+                // drift apart.
+                const auto arms = utils::armsForStrategy(latchedEffective_.strategy);
+                config.autoDeauth = arms.autoDeauth;
                 config.deauthCount = 5;
-                config.solicitPmkid = (latchedEffective_.strategy == utils::EffectiveStrategy::PMKID ||
-                                       latchedEffective_.strategy == utils::EffectiveStrategy::Both);
+                config.solicitPmkid = arms.solicitPmkid;
                 config.timeoutMs = AUTO_ATTACK_TIME;
                 config.captureAllClients = true;
 
