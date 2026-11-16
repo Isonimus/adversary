@@ -106,3 +106,22 @@ ADR-0018. Project-specific scripts under `scripts/` that are not Stele machinery
 Everything else in the original table is unchanged: `.claude/`, `LEDGER.md`, `EPIC.md`,
 `docs/` (beyond the four published design docs and the README screenshots), and `/adversary/`
 remain local.
+
+## Amendment — 2026-11-16: the `scripts/weaken_deauth_*` row is historical
+
+slice-0158 adopted the owned `Isonimus/esp32-arduino-adv-libs` v0.1.1 drop-in, which ships
+`libnet80211.a` with `ieee80211_raw_frame_sanity_check` weak at archive-build time (a
+lock-driven overlay inside the builder, not a post-download `objcopy` pass). The symbol is
+now weak as a property of the pinned archive bytes, verified by
+`scripts/lint-build-zip-integrity.mjs` against the SHA256 in
+`scripts/build-zip-checksums.json` and by a successful link of `deauth.cpp`'s strong
+override. The two retired scripts (`scripts/weaken_deauth_pre.py` and
+`scripts/weaken_deauth_symbol.sh`) and the `[env_embedded] extra_scripts =
+pre:scripts/weaken_deauth_pre.py` wiring were deleted in the same slice.
+
+Effect on the frozen table above (line 47) and the "Narrowed rule" prose (line 104): both
+cite `scripts/weaken_deauth_*` as legitimately public and build-critical. That claim was
+met at ADR-0012's time and stays as a historical claim (ADR-0019 immutability keeps the
+rows and the prose untouched); the scripts no longer exist in the tree. The rule itself —
+"project-specific scripts under `scripts/` that are not Stele machinery are legitimately
+public" — is unchanged.
