@@ -151,3 +151,96 @@ host's ~3.6 GiB-free budget regardless.
 ## As built
 
 <!-- Filled in at merge. -->
+
+Shipped as three commits on `feature/slice-0158-adopt-adv-libs-v0.1.1`:
+
+- `3229044 docs(slice): adopt esp32-arduino-adv-libs v0.1.1 and retire weaken_deauth link
+  hook (slice-0158)` — this document, INDEX regenerated.
+- `181ee5e build(platform-pkgs): adopt esp32-arduino-adv-libs v0.1.1, retire weaken_deauth
+  hook (slice-0158)` — the actual swap. `platformio.ini`: Bruce URL replaced by
+  `https://github.com/Isonimus/esp32-arduino-adv-libs/releases/download/v0.1.1/adv-esp32-arduino-libs-v5.5-20261115-e68e301.zip`
+  in both `[env:cardputer]` and `[env:m5stick]`; `[env_embedded]`'s `extra_scripts =
+  pre:scripts/weaken_deauth_pre.py` line removed. `scripts/build-zip-checksums.json`:
+  Bruce entry replaced by the v0.1.1 asset at
+  `sha256:844810ba7725142c3f7d5121bf954af6fdb80c8b33ca09c99be0aa8e0c3df64f`.
+  `scripts/weaken_deauth_pre.py` (51 lines) and `scripts/weaken_deauth_symbol.sh`
+  (94 lines) deleted. 4 files changed, 12 insertions, 155 deletions.
+- `9b390f2 docs(slice-0158): roll lock snapshot, amend ADR-0012, drop weaken_deauth
+  citation` — `DEPENDENCIES.lock.md` "Last verified" rolled to 2026-11-16 with the
+  current native count (1107/1107) and the Isonimus v0.1.1 provenance line replacing
+  "bmorcelli patched libs"; `adr/0012-public-release-squash-and-curation.md` gained an
+  `## Amendment — 2026-11-16` block flagging the `scripts/weaken_deauth_*` table row
+  and the "Narrowed rule" prose as historical claims (ADR-0019 keeps the row + prose
+  untouched); `CLAUDE.md`'s parallel-build warning dropped the "pre-hook fails to
+  resolve objcopy" citation (the rule stays — the shared-package-installer race is real
+  with or without the hook; only one cited symptom changed). The LEDGER `[feature]`
+  line (previously line 47, under "Build reproducibility / dependencies") was deleted
+  in the same slice; LEDGER is gitignored locally.
+
+Per-DoD run-through:
+
+1. **Both device builds succeed with the new pin and no `weaken_deauth` log line.** Met.
+   `pio run -e cardputer` finished SUCCESS in 6m43s (flash 76.0%, 2538743 bytes — down
+   from slice-0156's 76.6% baseline; the owned build's component-slim fix shaved a
+   touch). `pio run -e m5stick` finished SUCCESS in 6m39s (flash 79.4%, 2497507 bytes,
+   also marginally smaller than the 79.5% baseline). No "[weaken_deauth]" line
+   appeared in either build log. The link succeeded with `deauth.cpp`'s strong
+   `ieee80211_raw_frame_sanity_check` override against the archive, which is the
+   archive-level weak-symbol proof: a strong symbol in the archive would have collided
+   with "multiple definition" at link time.
+2. **`grep -rn weaken_deauth` finds only historical mentions.** Met. Current build/config
+   files are clean: `platformio.ini`, `CLAUDE.md`, and `scripts/` carry no reference to
+   the retired hook. The surviving hits are all frozen historical prose:
+   `adr/0012-public-release-squash-and-curation.md` (the original table row + "Narrowed
+   rule" sentence + this slice's `## Amendment` block), `adr/INDEX.md` (the title of
+   this slice), and `slices/0014-release-firmware-artifacts.md` +
+   `slices/0027-weaken-objcopy-from-toolchain-env.md` (historical slice docs, ADR-0019
+   keeps them). This is the desired state: the retired scripts no longer exist, and
+   every surviving mention is honestly historical.
+3. **`build-zip-integrity` gate passes.** Met.
+   `node scripts/lint-build-zip-integrity.mjs` reports `2 pinned ZIP(s) match their
+   recorded SHA256.` for the v0.1.1 asset at `844810ba7725142c3f7d5121bf954af6fdb80c8b33ca09c99be0aa8e0c3df64f`
+   plus the pioarduino platform zip at `16ba6095...` (unchanged). No stale Bruce entry
+   remains.
+4. **Lock snapshot is current.** Met. `DEPENDENCIES.lock.md` "Last verified" is
+   `2026-11-16: native 1107/1107, cardputer + m5stick builds SUCCESS` and the
+   platform-packages block cites the Isonimus v0.1.1 drop-in by name with the
+   weak-symbol posture. The resolved libs version string stays
+   `5.5.0+sha.8410210c9a` (same upstream ESP-IDF commit; the owned build rebuilds the
+   same tree with the two lock-driven overlay patches), so no other row in the
+   resolved tree moved.
+5. **Lab smoke test passes.** Met. Cardputer ADV flashed 2026-11-16 at 2539152 bytes
+   over `/dev/ttyACM0` (46 s, hash verified). From the bench-reported trace: a Deauth
+   run against SSID `GESTIONET_movil` (BSSID `28:77:77:FB:37:3F`, ch 11) emitted
+   `DEAUTH: WSL bypass ENABLED - deauth frames allowed` and `DEAUTH: Started on
+   channel 11, BSSID: 28:77:77:FB:37:3F`, and the on-screen deauth + disassoc counters
+   advanced. The "WSL bypass ENABLED" line is only emitted by the deauth module's own
+   strong-override path, so its presence is end-to-end evidence that the override
+   linked against the archive-shipped weak symbol and survived into the shipped
+   firmware — the one thing a successful build alone can't distinguish from "the
+   override was silently dropped as redundant." The module's standard hedge ("ESP32-S3
+   may block deauth frames in SDK") also prints unconditionally on every start; it is
+   not evidence of a runtime block. One stray `[E][STA.cpp:530] disconnect(): STA
+   disconnect failed! 0x3001: ESP_ERR_WIFI_NOT_INIT` is framework-emitted noise from
+   `start → stop → deauth-restart` sequencing and predates this slice (same upstream
+   ESP-IDF commit before and after the swap).
+
+Verification evidence:
+
+- `pio test -e native` — 1107/1107 pass (01:50.68); no src/* change, behaviour is
+  unchanged.
+- `pio run -e cardputer` — SUCCESS, flash 76.0% (2538743 B of 3342336 B).
+- `pio run -e m5stick` — SUCCESS, flash 79.4% (2497507 B of 3145728 B).
+- `node scripts/lint-build-zip-integrity.mjs` — 2 pinned ZIPs match SHA256.
+- `node scripts/lint-docs.mjs` — 157 documents, 0 errors / 0 warnings.
+- On-device: Cardputer ADV deauth run emits the strong-override log line + counter
+  advance (see DoD scenario 5).
+
+Follow-ups surfaced (not new to this slice):
+
+- The `cardputer_adv` env target is still unmade; the ADV's I2C keyboard makes the
+  pin-matrix conflict dormant on real hardware, so the current `m5stack-stamps3` env
+  keeps working, but a proper ADV env is a tracked follow-up (LEDGER item, unchanged).
+- The `[E][STA.cpp:530]` framework log is cosmetic; a `wifi_is_started()` guard
+  around the `WiFi.disconnect()` call in the start-of-attack path would silence it,
+  but that is unrelated to this slice and belongs in its own follow-up.
