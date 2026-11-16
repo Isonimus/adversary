@@ -256,6 +256,15 @@ private:
     // changed the strategy, `pmfRequired` encodes WHAT the target is.
     utils::ResolvedStrategy latchedEffective_ = {utils::EffectiveStrategy::Deauth, utils::PmfResolveReason::NONE};
     bool latchedTargetPmfRequired_ = false;
+    // BTM steer (slice-0155): one-shot spoofed 802.11v BSS Transition Management Request at
+    // half-window on PMF-required targets where solicitation is armed. `autoBtmSteer_` is
+    // the operator-set declared intent (default off; label carries "(unverified)" since the
+    // frame is a robust management action that PMF should protect in theory, and no device
+    // run has shown otherwise yet). `btmInjectedThisTarget_` is the per-target latch that
+    // enforces "one shot per target"; cleared at NEXT_TARGET alongside the effective-strategy
+    // latch so stale state cannot leak between targets.
+    bool autoBtmSteer_ = false;
+    bool btmInjectedThisTarget_ = false;
     AutoHuntState autoState_;
     uint32_t autoStateStart_ = 0;
     uint32_t handshakesCaptured_ = 0;
@@ -292,7 +301,7 @@ private:
     static constexpr uint32_t REDRAW_INTERVAL_MS = 100;
     static constexpr int CONFIG_ITEMS = 5;
     static constexpr int CLIENTLESS_CONFIG_ITEMS = 2;  // Target + START (ADR-0138)
-    static constexpr int AUTOHUNT_CONFIG_ITEMS = 3;    // Strategy + Degrade on PMF + START (ADR-0139/0153)
+    static constexpr int AUTOHUNT_CONFIG_ITEMS = 4;    // Strategy + Degrade on PMF + BTM steer + START (ADR-0139/0153, slice-0155)
     
     // Auto Hunt timing constants (ms)
     static constexpr uint32_t AUTO_SCAN_TIME = 5000;
