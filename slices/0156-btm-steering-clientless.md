@@ -97,3 +97,53 @@ slice-0155, tracked there.
 ## As built
 
 <!-- Filled in at merge. -->
+
+Shipped as two commits on `feature/slice-0156-btm-steering-clientless`:
+
+- `8d70fcc docs(slice): BTM steering parity for Clientless PMKID mode (slice-0156)` —
+  this document, INDEX regenerated. No LEDGER line to delete (the Clientless parity
+  item was carved from the slice-0155 handoff discussion, not from a ledger entry).
+- `ea82b7d feat(clientless): one-shot BTM steer in the Clientless capture window
+  (slice-0156)` — Clientless config form gains a third row `BTM steer (unverified):
+  On|Off` between Target and START; `startCapture()` resets the per-capture latch
+  and anchors the 10 s delay timer; the screen's `update()` tick consults the pure
+  slice-0155 predicate with `pmfRequired` and `armsSolicitation` pinned true and on
+  fire transmits a frame whose candidate BSSID is the target BSSID with the LAA bit
+  flipped, latches, and logs the `BTM:injected` marker.
+
+Per-DoD run-through:
+
+1. **Clientless + steer on + 10 s elapsed with no PMKID → one BTM Request + log
+   marker.** Met. The slice-0155 predicate returns true once per capture when
+   `elapsed >= CLIENTLESS_BTM_DELAY_MS` with the latch down; `sendBtmRequest(…)`
+   runs on STA; the `LOG_I("HS", "%s: BTM:injected (unverified, candidate=... ch=%u)
+   tx=%s", …)` goes out in the same tick.
+2. **Steer off → no injection.** Met. The default initializer `clientlessBtmSteer_
+   = false` holds; the predicate returns false when `steerEnabled` is false; the
+   only flip site is `handleConfigEdit` on Clientless row 1.
+3. **At most one injection across a full capture run.** Met. `btmInjectedClientless_`
+   is latched to true before the TX call so a TX failure cannot loop, and it is
+   cleared only on the next `startCapture()`.
+4. **Row label contains "(unverified)".** Met. `drawConfig`'s Clientless branch
+   renders `ui::ConfigRow::render(c, rowY, "BTM steer (unverified):", …)`; one
+   call site, matches the slice-0155 wording verbatim.
+
+Verification evidence:
+
+- `pio test -e native` — 1107/1107 pass (same count as the slice-0155 baseline;
+  the Clientless cell falls inside the five-input truth table already covered by
+  `test_btm_frame`).
+- `pio run -e cardputer` — clean, flash 76.6% (2.56 MB of 3.34 MB).
+- `pio run -e m5stick` — clean, flash 79.5% (2.50 MB of 3.15 MB).
+
+Follow-ups inherited from slice-0155 (not new, listed for completeness):
+
+- On-device evidence of whether a spoofed BTM Request actually survives PMF on any
+  real stack. The `(unverified)` label stays until this runs. Clientless is
+  arguably the better verification venue than Auto Hunt, since the lack of a
+  deauth path makes any observed client roam attributable to BTM.
+- Multi-BSS decoy to back the candidate BSSID (today it is a fabricated LAA MAC
+  with nothing behind it).
+- Native integration test around the live call site (both Auto Hunt and Clientless
+  call sites pull in `WiFi.*` and Arduino, so the predicate is tested but the
+  full fire path is not).
