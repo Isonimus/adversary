@@ -285,17 +285,27 @@ bool HandshakeCapture::start(const HandshakeCaptureConfig& config) {
 
 void HandshakeCapture::stop() {
     if (state_ == HandshakeState::IDLE) return;
-    
+
 #ifdef ESP32
     wifi_utils::disablePromiscuous();
     s_instance_ = nullptr;
-    
-    // Stop soft AP and release memory
+
+    // Tear down the soft-AP interface the deauth module raises during capture
+    // (unconditional: softAPdisconnect is a no-op when AP mode was not up).
     WiFi.softAPdisconnect(true);
-    // CRITICAL: Turn WiFi OFF to free ~30KB driver memory for Menu icons
-    WiFi.mode(WIFI_OFF);
-    delay(50);
-    
+
+    // Radio lifecycle is the CALLER's business, not this module's. Two reasons:
+    //   1. Auto Hunt's NEXT_TARGET / WAITING ticks call stop() and then start the
+    //      next scan on the same adapter immediately; a WIFI_OFF between them is
+    //      pure thrash (~50 ms per target) and opens an Arduino-ESP32 netstack
+    //      re-registration race window that surfaces as
+    //      `E wifi_init_default: netstack cb reg failed with 12308`
+    //      (ESP_ERR_WIFI_TX_DISALLOW). Field-observed 2026-11-16.
+    //   2. HandshakeScreen::stopCapture() already runs `WiFi.mode(WIFI_OFF) +
+    //      delay(50)` on the user-exit path, so nothing is lost there.
+    // If a future caller genuinely needs the ~30 KB back, it calls WiFi.mode
+    // itself.
+
     LOG_I("HS", "Stopped");
 #endif
 
