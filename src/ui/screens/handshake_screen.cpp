@@ -22,6 +22,8 @@
 #include "utils/handshake_save.h"
 #include "utils/btm_frame.h"
 #include "utils/btm_tx.h"
+#include "utils/qos_null_frame.h"
+#include "utils/qos_null_tx.h"
 #include "modules/storage/handshake_metadata.h"
 #include "modules/wifi/wifi_scanner.h"
 
@@ -207,6 +209,39 @@ void HandshakeScreen::update() {
         } else {
             capture_.update();
 #ifdef ESP32
+            // Manual-mode QoS-Null stimulation (slice-0160, ADR-0159). Same pure predicate
+            // as Auto Hunt; the only difference is the anchor is manualCaptureStartMs_
+            // (set at startCapture()) and the delay scales to a quarter of the operator's
+            // Timeout. Fire the burst once per capture; the latch is cleared when the next
+            // startCapture() runs.
+            if (!isClientless() && hasTarget_ && manualCaptureStartMs_ != 0) {
+                const uint32_t mElapsed = millis() - manualCaptureStartMs_;
+                const uint32_t mDelay = (timeoutSecs_ * 1000U) / 4U;
+                uint8_t clientMac[6];
+                const bool clientMacKnown =
+                    capture_.getFirstDiscoveredClient(clientMac);
+                if (manualQosNullStim_ && !qosNullFiredThisTarget_ &&
+                    mElapsed >= mDelay) {
+                    qosNullFiredThisTarget_ = true;
+                    if (utils::shouldFireQosNullBurst(
+                            manualQosNullStim_, false, true, clientMacKnown)) {
+                        const bool ok = utils::qos_null_tx::send_burst(
+                            clientMac, targetBssid_,
+                            utils::qos_null_tx::kDefaultBurstCount,
+                            utils::qos_null_tx::kDefaultInterFrameUs);
+                        LOG_I("HS",
+                              "%s: QoSNull:injected (client=%02X:%02X:%02X:%02X:%02X:%02X ch=%u) tx=%s",
+                              targetSsid_,
+                              clientMac[0], clientMac[1], clientMac[2],
+                              clientMac[3], clientMac[4], clientMac[5],
+                              targetChannel_,
+                              ok ? "ok" : "fail");
+                    } else {
+                        LOG_I("HS", "%s: QoSNull:skip_no_client", targetSsid_);
+                    }
+                }
+            }
+
             // Clientless BTM steer (slice-0156): one-shot spoofed BTM Request at a fixed
             // delay after capture start. Reuses the slice-0155 pure predicate with
             // pmfRequired/armsSolicitation pinned true (see slice-0156 ## Design) so the
@@ -507,6 +542,9 @@ void HandshakeScreen::handleConfigEdit(int delta) {
             // in drawConfig because a spoofed BTM Request is a robust management action
             // that PMF should protect in theory, and no device evidence says otherwise yet.
             autoBtmSteer_ = !autoBtmSteer_;
+        } else if (configList_.selectedIndex() == 3) {
+            // Row 3: QoS-Null stimulation (slice-0160). Default off.
+            autoQosNullStim_ = !autoQosNullStim_;
         }
         return;
     }
@@ -520,17 +558,20 @@ void HandshakeScreen::handleConfigEdit(int delta) {
         return;
     }
 
-    // Only Manual value rows (1-3) are editable; Target (0) and START (4) have nothing to step.
+    // Only Manual value rows (1-4) are editable; Target (0) and START (5) have nothing to step.
     // delta>0 advances (ENTER / '/' / '>'), delta<0 steps back (',' / '<').
     switch (configList_.selectedIndex()) {
         case 1:  // Auto Deauth: a toggle flips either direction
             autoDeauth_ = !autoDeauth_;
             break;
-        case 2:  // Deauth Count: ring 1..20
+        case 2:  // QoS-Null stimulation: a toggle (slice-0160)
+            manualQosNullStim_ = !manualQosNullStim_;
+            break;
+        case 3:  // Deauth Count: ring 1..20
             if (delta > 0) deauthCount_ = (deauthCount_ % 20) + 1;
             else           deauthCount_ = (deauthCount_ <= 1) ? 20 : (deauthCount_ - 1);
             break;
-        case 3:  // Timeout: ring 30 -> 60 -> 120 -> 180 -> 30
+        case 4:  // Timeout: ring 30 -> 60 -> 120 -> 180 -> 30
             if (delta > 0)
                 timeoutSecs_ = (timeoutSecs_ == 30)  ? 60  :
                                (timeoutSecs_ == 60)  ? 120 :
@@ -613,6 +654,15 @@ void HandshakeScreen::startCapture() {
         config.autoDeauth = autoDeauth_;
         config.deauthCount = deauthCount_;
         config.timeoutMs = timeoutSecs_ * 1000;
+        // Reset the Manual QoS-Null latch and anchor the sub-window timer so
+        // the burst fires once at ~quarter of the operator's Timeout, mirroring
+        // Auto Hunt (slice-0160).
+        qosNullFiredThisTarget_ = false;
+#ifdef ESP32
+        manualCaptureStartMs_ = millis();
+#else
+        manualCaptureStartMs_ = 1;  // non-zero sentinel for the update() guard
+#endif
     }
 
     if (capture_.start(config)) {
@@ -642,7 +692,10 @@ void HandshakeScreen::stopCapture() {
     delay(50);
     
     capturing_ = false;
-    
+    // Clear the Manual QoS-Null anchor so a re-start of the same screen instance
+    // does not inherit a stale elapsed value (slice-0160).
+    manualCaptureStartMs_ = 0;
+
 #ifdef ESP32
     LOG_I("HS", "Capture stopped (WiFi OFF)");
 #endif
@@ -928,6 +981,45 @@ void HandshakeScreen::updateAutoHunt() {
             // Update capture - success is handled by onHandshakeCaptured callback
             capture_.update();
 
+            // One-shot QoS-Null stimulation burst (slice-0160, ADR-0159). Fires once per
+            // target, after the deauth sub-window elapses and before the half-window BTM
+            // mark, iff the operator enabled the knob and the sniffer has observed any
+            // associated STA on the target BSSID (we need a client MAC to spoof). Every
+            // predicate cell is native-tested in test_qos_null_frame.
+            {
+                uint8_t clientMac[6];
+                const bool clientMacKnown =
+                    capture_.getFirstDiscoveredClient(clientMac);
+                const bool fire = utils::shouldFireQosNullBurst(
+                    /*qosNullEnabled=*/              autoQosNullStim_,
+                    /*qosNullAlreadyFiredThisTarget=*/ qosNullFiredThisTarget_,
+                    /*deauthSubWindowElapsed=*/      elapsed >= AUTO_QOSNULL_DELAY_MS,
+                    /*clientMacKnown=*/              clientMacKnown);
+                if (autoQosNullStim_ && !qosNullFiredThisTarget_ &&
+                    elapsed >= AUTO_QOSNULL_DELAY_MS) {
+                    // Latch regardless of client-known so the sub-window can only fire
+                    // (or honestly log skip) once per target — BTM's half-window predicate
+                    // must not be perturbed by repeat attempts, per DoD scenario 6.
+                    qosNullFiredThisTarget_ = true;
+                    if (fire) {
+                        const bool ok = utils::qos_null_tx::send_burst(
+                            clientMac, targetBssid_,
+                            utils::qos_null_tx::kDefaultBurstCount,
+                            utils::qos_null_tx::kDefaultInterFrameUs);
+                        LOG_I("AUTOHUNT",
+                              "%s: QoSNull:injected (client=%02X:%02X:%02X:%02X:%02X:%02X ch=%u) tx=%s",
+                              targetSsid_,
+                              clientMac[0], clientMac[1], clientMac[2],
+                              clientMac[3], clientMac[4], clientMac[5],
+                              targetChannel_,
+                              ok ? "ok" : "fail");
+                    } else {
+                        // Enabled + elapsed + not-fired, but no client MAC was known: honest skip.
+                        LOG_I("AUTOHUNT", "%s: QoSNull:skip_no_client", targetSsid_);
+                    }
+                }
+            }
+
             // One-shot BTM steer (slice-0155). The pure predicate gates to the exact DoD
             // cell: steer toggle on, target is PMF-required, effective strategy arms
             // solicitation (BTM is meaningless without a PMKID path to hand off to), the
@@ -1007,6 +1099,8 @@ void HandshakeScreen::updateAutoHunt() {
             // Clear the per-target BTM one-shot latch so the next PMF-required target gets
             // its own injection chance (slice-0155).
             btmInjectedThisTarget_ = false;
+            // Clear the per-target QoS-Null one-shot latch (slice-0160).
+            qosNullFiredThisTarget_ = false;
             
             // Clear scan results and rescan
             WiFi.scanDelete();
@@ -1331,11 +1425,18 @@ void HandshakeScreen::drawConfig(Canvas& canvas) {
                     ui::ConfigRow::render(c, rowY, "Degrade on PMF:", autoDegradeOnPmf_ ? "On" : "Off");
                     return;
                 }
-                // Row 2: BTM steer toggle (slice-0155). Default off. ADR-0157 dropped the
-                // "(unverified)" suffix: the toggle itself is verified (frame transmits,
-                // knob behaves), the open question of whether a spoofed BTM Request
-                // actually survives PMF on any real stack lives in the LEDGER instead.
-                ui::ConfigRow::render(c, rowY, "BTM steer:", autoBtmSteer_ ? "On" : "Off");
+                if (idx == 2) {
+                    // Row 2: BTM steer toggle (slice-0155). Default off. ADR-0157 dropped the
+                    // "(unverified)" suffix: the toggle itself is verified (frame transmits,
+                    // knob behaves), the open question of whether a spoofed BTM Request
+                    // actually survives PMF on any real stack lives in the LEDGER instead.
+                    ui::ConfigRow::render(c, rowY, "BTM steer:", autoBtmSteer_ ? "On" : "Off");
+                    return;
+                }
+                // Row 3: QoS-Null stimulation toggle (slice-0160, ADR-0159). Default off.
+                // Capture-time stimulation only; never a standalone attack (no menu entry
+                // outside this flow).
+                ui::ConfigRow::render(c, rowY, "QoS-Null:", autoQosNullStim_ ? "On" : "Off");
             },
             !footerHints_.hasFocus());
         return;
@@ -1375,8 +1476,9 @@ void HandshakeScreen::drawConfig(Canvas& canvas) {
     const int16_t listTop = HEADER_HEIGHT + 6;
     const int16_t availableHeight = canvas.height() - listTop - FOOTER_HEIGHT - 4;
 
+    // Row 2 is the slice-0160 QoS-Null stimulation toggle; Count and Timeout shift to 3 and 4.
     const char* labels[] = {
-        "Target:", "Auto Deauth:", "Deauth Count:", "Timeout:"
+        "Target:", "Auto Deauth:", "QoS-Null:", "Deauth Count:", "Timeout:"
     };
 
     // The shared component owns scroll, the proportional thumb, the selection band and keeping the
@@ -1393,8 +1495,9 @@ void HandshakeScreen::drawConfig(Canvas& canvas) {
             switch (idx) {
                 case 0: formatTargetValue(valueStr, sizeof(valueStr)); break;
                 case 1: snprintf(valueStr, sizeof(valueStr), "%s", autoDeauth_ ? "ON" : "OFF"); break;
-                case 2: snprintf(valueStr, sizeof(valueStr), "%d", deauthCount_); break;
-                case 3: snprintf(valueStr, sizeof(valueStr), "%lus", (unsigned long)timeoutSecs_); break;
+                case 2: snprintf(valueStr, sizeof(valueStr), "%s", manualQosNullStim_ ? "On" : "Off"); break;
+                case 3: snprintf(valueStr, sizeof(valueStr), "%d", deauthCount_); break;
+                case 4: snprintf(valueStr, sizeof(valueStr), "%lus", (unsigned long)timeoutSecs_); break;
             }
             ui::ConfigRow::render(c, rowY, labels[idx], valueStr);
         },

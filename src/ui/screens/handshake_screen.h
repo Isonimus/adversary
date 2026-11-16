@@ -265,6 +265,19 @@ private:
     // latch so stale state cannot leak between targets.
     bool autoBtmSteer_ = false;
     bool btmInjectedThisTarget_ = false;
+    // QoS-Null stimulation (slice-0160, ADR-0159): a sustained 20-frame
+    // client->AP QoS Null-Data burst with alternating PWR_MGT, fired once
+    // per target between the deauth sub-window and the half-window BTM mark.
+    // `autoQosNullStim_` / `manualQosNullStim_` are the operator-set toggles
+    // (default off); `qosNullFiredThisTarget_` is the per-target one-shot
+    // latch, cleared alongside `btmInjectedThisTarget_` at NEXT_TARGET.
+    bool autoQosNullStim_ = false;
+    bool manualQosNullStim_ = false;
+    bool qosNullFiredThisTarget_ = false;
+    // Manual-mode capture anchor for the QoS-Null fire timer. Set at
+    // startCapture() for the Manual path; Auto Hunt uses the existing
+    // ATTACKING-state elapsed timer.
+    uint32_t manualCaptureStartMs_ = 0;
     // Clientless BTM steer (slice-0156): same one-shot frame, different timing anchor.
     // Clientless has no attack window (the solicit loop is bounded by SOLICIT_MAX_ATTEMPTS
     // inside HandshakeCapture), so BTM fires at a fixed delay after capture start instead
@@ -308,16 +321,20 @@ private:
     static constexpr int16_t HEADER_HEIGHT = 20;
     static constexpr int16_t FOOTER_HEIGHT = 16;
     static constexpr uint32_t REDRAW_INTERVAL_MS = 100;
-    static constexpr int CONFIG_ITEMS = 5;
+    static constexpr int CONFIG_ITEMS = 6;             // Target + Auto Deauth + QoS-Null + Count + Timeout + START (slice-0160)
     static constexpr int CLIENTLESS_CONFIG_ITEMS = 3;  // Target + BTM steer + START (ADR-0138, slice-0156)
-    static constexpr int AUTOHUNT_CONFIG_ITEMS = 4;    // Strategy + Degrade on PMF + BTM steer + START (ADR-0139/0153, slice-0155)
-    
+    static constexpr int AUTOHUNT_CONFIG_ITEMS = 5;    // Strategy + Degrade on PMF + BTM steer + QoS-Null + START (slice-0155/0160)
+
     // Auto Hunt timing constants (ms)
     static constexpr uint32_t AUTO_SCAN_TIME = 5000;
     static constexpr uint32_t AUTO_LOCK_TIME = 2000;
     static constexpr uint32_t AUTO_ATTACK_TIME = 30000;
     static constexpr uint32_t AUTO_WAIT_TIME = 2000;
     static constexpr uint32_t AUTO_IDLE_TIME = 10000;
+    // QoS-Null sub-window fire point (slice-0160): a quarter of the attack
+    // window so deauth has a clean shot first, and the burst completes well
+    // before the half-window BTM mark. Manual uses a scaled equivalent.
+    static constexpr uint32_t AUTO_QOSNULL_DELAY_MS = AUTO_ATTACK_TIME / 4;
     
     ui::FooterHints footerHints_;
     ui::ConfirmDialog confirmDialog_;  // shared delete-handshake confirm overlay (ADR-0085)

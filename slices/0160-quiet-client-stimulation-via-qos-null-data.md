@@ -197,3 +197,45 @@ technique, never a standalone attack, and a menu entry would frame it as one.
 ## As built
 
 <!-- Filled in at merge. -->
+
+Shipped as scoped. The pure builder and the fire predicate live in
+`src/utils/qos_null_frame.h`, the device burst TX in `src/utils/qos_null_tx.{h,cpp}`,
+and the Auto Hunt + Manual-mode wiring in `src/ui/screens/handshake_screen.cpp`
+(with a per-target latch and a public `getFirstDiscoveredClient()` accessor on
+`HandshakeCapture`).
+
+Tests: new `test_qos_null_frame` module adds 22 cases (16 pin every FC/addressing/
+SeqCtl/QoS byte of the 26-byte frame; 6 cover the 16-cell predicate truth table),
+`pio test -e native` green 1129/1129. Device builds green serial: Cardputer flash
+76.0% / RAM 25.3%; M5StickC Plus2 flash 79.4% / RAM 20.9%. `lint-docs.mjs` green,
+159 docs.
+
+Field smoke test on the deployment ADV (Cardputer, 2026-11-16, Auto Hunt mode,
+Strategy=Both, QoS-Null=On):
+
+- `AUTOHUNT: MOVISTAR_17E0: QoSNull:injected (client=02:AD:5A:11:ED:01 ch=11) tx=ok`
+- `AUTOHUNT: MOVISTAR_EC50: QoSNull:injected (client=22:B3:A3:E3:2F:95 ch=6)  tx=ok`
+
+Both targets confirm: exactly one burst per capture window (per-target latch
+holds), the TA is the sniffer-discovered STA MAC verbatim (LAA and private-MAC
+bits present, as expected for randomized client MACs), channel is the latched
+target channel, and `esp_wifi_80211_tx` accepts the frame on the unpatched data
+path (no new `adv-libs` symbol needed, as ADR-0159 predicted). The `skip_no_client`
+branch did not fire in these runs because the sniffer observed an associated STA
+before the 7500 ms sub-window mark.
+
+Whether the burst elicited a 4-way is implementation-dependent per ADR-0159;
+neither MOVISTAR target yielded one within its 30 s window (consistent with
+Mitrastar/Askey gateway firmware treating a sustained PWR_MGT-alternating burst
+as spoofing rather than a genuine association event). More targets from different
+vendor firmware are needed to answer the mechanism-(3) open question; that is
+LEDGER follow-up work, not a slice regression.
+
+Non-regressions observed in the same session: an
+`E (…) wifi_init_default: netstack cb reg failed with 12308` line prints once
+per NEXT_TARGET transition (0x3014 = `ESP_ERR_WIFI_TX_DISALLOW` during the
+Arduino-ESP32 netstack re-registration between `stopCapture()` and the next
+`WiFi.scanNetworks(true)`). It is cosmetic, predates this slice (the stop → scan
+gap has been the pattern since autohunt was built), and the subsequent scan and
+attack sub-states succeed on the next target. Logged as a separate LEDGER `[bug]`
+with the owning file; fixing it is out of slice-0160's scope.

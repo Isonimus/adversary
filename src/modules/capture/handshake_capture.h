@@ -364,6 +364,22 @@ public:
     const CapturedPMKID& getPMKID() const { return pmkid_; }
     
     /**
+     * @brief First discovered client MAC for the current capture, if any.
+     *
+     * The sniffer records up to MAX_DISCOVERED_CLIENTS STA MACs seen on the
+     * target BSSID. Used by the QoS-Null stimulation path (slice-0160) as the
+     * TA to spoof: if no client has been seen yet, the burst is skipped.
+     *
+     * @param out  6-byte buffer written on success.
+     * @return true if at least one client has been discovered since start().
+     */
+    bool getFirstDiscoveredClient(uint8_t out[6]) const {
+        if (discoveredClientCount_ == 0) return false;
+        memcpy(out, discoveredClients_[0], 6);
+        return true;
+    }
+
+    /**
      * @brief Parse EAPOL key info from packet
      */
     static EAPOLKeyInfo parseKeyInfo(uint16_t keyInfo);
