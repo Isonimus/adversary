@@ -147,3 +147,23 @@ Follow-ups inherited from slice-0155 (not new, listed for completeness):
 - Native integration test around the live call site (both Auto Hunt and Clientless
   call sites pull in `WiFi.*` and Arduino, so the predicate is tested but the
   full fire path is not).
+
+## Amendment — 2026-11-16: ADR-0157 drops the `(unverified)` suffix
+
+After lab-verifying both Auto Hunt (slice-0155) and Clientless (this slice) BTM steer on
+Cardputer ADV — knob behaves, frame transmits, log trace lands — ADR-0157 partially
+supersedes ADR-0153's label clause. The `(unverified)` UI suffix is dropped from both
+config rows and from the `BTM:injected` log line in the same commit as this amendment.
+
+Effect on the frozen prose above: DoD scenario #4 and the per-DoD run-through for #4 both
+assert the literal `(unverified)` string. Those lines are historical claims met at this
+slice's merge (ADR-0019 immutability); the current UI no longer satisfies them because
+ADR-0157 amends the requirement for all future UI and log sites.
+
+The open question that originally motivated the suffix — does a spoofed BTM Request
+actually survive PMF on any real client stack? — is unchanged, and moves to a new LEDGER
+`[deferred]` entry naming the client-stack matrix (iOS, Android, modern Linux supplicant)
+and the two possible next moves (confirmed-on-any-stack → follow-up ADR records the
+matrix; rejected-everywhere → rename the knob to `Legacy BTM (non-PMF only)` or revert
+both slices).
+

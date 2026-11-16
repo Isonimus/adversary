@@ -242,7 +242,7 @@ void HandshakeScreen::update() {
 
                     btmInjectedClientless_ = true;
                     const bool ok = utils::sendBtmRequest(p);
-                    LOG_I("HS", "%s: BTM:injected (unverified, candidate=%02X:%02X:%02X:%02X:%02X:%02X ch=%u) tx=%s",
+                    LOG_I("HS", "%s: BTM:injected (candidate=%02X:%02X:%02X:%02X:%02X:%02X ch=%u) tx=%s",
                           targetSsid_,
                           candidate[0], candidate[1], candidate[2], candidate[3], candidate[4], candidate[5],
                           targetChannel_,
@@ -964,7 +964,7 @@ void HandshakeScreen::updateAutoHunt() {
 
                 btmInjectedThisTarget_ = true;  // latch BEFORE TX so a TX failure does not loop
                 const bool ok = utils::sendBtmRequest(p);
-                LOG_I("AUTOHUNT", "%s: BTM:injected (unverified, candidate=%02X:%02X:%02X:%02X:%02X:%02X ch=%u) tx=%s",
+                LOG_I("AUTOHUNT", "%s: BTM:injected (candidate=%02X:%02X:%02X:%02X:%02X:%02X ch=%u) tx=%s",
                       targetSsid_,
                       candidate[0], candidate[1], candidate[2], candidate[3], candidate[4], candidate[5],
                       targetChannel_,
@@ -1331,11 +1331,11 @@ void HandshakeScreen::drawConfig(Canvas& canvas) {
                     ui::ConfigRow::render(c, rowY, "Degrade on PMF:", autoDegradeOnPmf_ ? "On" : "Off");
                     return;
                 }
-                // Row 2: BTM steer toggle (slice-0155). Default off. The "(unverified)" suffix
-                // is required by the DoD so the knob never claims a capability the device has
-                // not demonstrated: spoofed 802.11v BTM Request is a robust management action
-                // that PMF should protect in theory.
-                ui::ConfigRow::render(c, rowY, "BTM steer (unverified):", autoBtmSteer_ ? "On" : "Off");
+                // Row 2: BTM steer toggle (slice-0155). Default off. ADR-0157 dropped the
+                // "(unverified)" suffix: the toggle itself is verified (frame transmits,
+                // knob behaves), the open question of whether a spoofed BTM Request
+                // actually survives PMF on any real stack lives in the LEDGER instead.
+                ui::ConfigRow::render(c, rowY, "BTM steer:", autoBtmSteer_ ? "On" : "Off");
             },
             !footerHints_.hasFocus());
         return;
@@ -1360,11 +1360,9 @@ void HandshakeScreen::drawConfig(Canvas& canvas) {
                     ui::ConfigRow::render(c, rowY, "Target:", valueStr);
                     return;
                 }
-                // Row 1: BTM steer toggle (slice-0156). Same "(unverified)" honesty gate as the
-                // Auto Hunt row shipped by slice-0155: a spoofed 802.11v BTM Request is a
-                // robust management action that PMF should protect in theory, and no device run
-                // has shown otherwise yet.
-                ui::ConfigRow::render(c, rowY, "BTM steer (unverified):", clientlessBtmSteer_ ? "On" : "Off");
+                // Row 1: BTM steer toggle (slice-0156). ADR-0157 dropped the "(unverified)"
+                // suffix; the open question of PMF acceptance lives in the LEDGER.
+                ui::ConfigRow::render(c, rowY, "BTM steer:", clientlessBtmSteer_ ? "On" : "Off");
             },
             !footerHints_.hasFocus());
         return;
