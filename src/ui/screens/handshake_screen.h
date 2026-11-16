@@ -265,6 +265,15 @@ private:
     // latch so stale state cannot leak between targets.
     bool autoBtmSteer_ = false;
     bool btmInjectedThisTarget_ = false;
+    // Clientless BTM steer (slice-0156): same one-shot frame, different timing anchor.
+    // Clientless has no attack window (the solicit loop is bounded by SOLICIT_MAX_ATTEMPTS
+    // inside HandshakeCapture), so BTM fires at a fixed delay after capture start instead
+    // of at half-window. Same (unverified) honesty gate. `clientlessCaptureStartMs_` is the
+    // anchor; `btmInjectedClientless_` is the one-shot latch cleared at startCapture().
+    bool clientlessBtmSteer_ = false;
+    bool btmInjectedClientless_ = false;
+    uint32_t clientlessCaptureStartMs_ = 0;
+    static constexpr uint32_t CLIENTLESS_BTM_DELAY_MS = 10000;  // ~first-third of the ~30 s solicit budget
     AutoHuntState autoState_;
     uint32_t autoStateStart_ = 0;
     uint32_t handshakesCaptured_ = 0;
@@ -300,7 +309,7 @@ private:
     static constexpr int16_t FOOTER_HEIGHT = 16;
     static constexpr uint32_t REDRAW_INTERVAL_MS = 100;
     static constexpr int CONFIG_ITEMS = 5;
-    static constexpr int CLIENTLESS_CONFIG_ITEMS = 2;  // Target + START (ADR-0138)
+    static constexpr int CLIENTLESS_CONFIG_ITEMS = 3;  // Target + BTM steer + START (ADR-0138, slice-0156)
     static constexpr int AUTOHUNT_CONFIG_ITEMS = 4;    // Strategy + Degrade on PMF + BTM steer + START (ADR-0139/0153, slice-0155)
     
     // Auto Hunt timing constants (ms)
