@@ -25,12 +25,16 @@ listed here, that is drift — investigate before trusting the build.
   below predates the latest release tag, so a release can't be cut on an unverified
   snapshot (slice-0080). Keeping this stamp current on every release keeps the gate green.
 
-Last verified: 2026-11-12: native 1059/1059, cardputer + m5stick builds SUCCESS.
-Re-resolved all three envs: the trees below are unchanged since the previous stamp (no
-version drift), only the date and native count moved (1037 to 1059 over the 0.9.0 cycle,
-which added the HID report-descriptor packers (ADR-0150), the BLE spam audit and
-pacing suite (ADR-0151), the hc22000 max-avail EAPOL-trim regression and the
-ADR-0145 four-way completeness tightening).
+Last verified: 2026-11-16: native 1107/1107, cardputer + m5stick builds SUCCESS.
+Re-resolved all three envs after slice-0158's framework-arduinoespressif32-libs pin swap
+from the third-party Bruce precompiled blob (bmorcelli/esp32-arduino-lib-builder v5.5
+2025-12-05) to the owned Isonimus/esp32-arduino-adv-libs v0.1.1 drop-in. The resolved
+libs version string stays `5.5.0+sha.8410210c9a` (same upstream ESP-IDF commit; the
+owned build rebuilds the same tree with the two lock-driven overlay patches), so the
+trees below are unchanged apart from the provenance line in the platform-packages
+block. Native count moved 1059 to 1107 over the 0.9.0 to 0.10.0 cycle (BTM steering
+builder + predicate tests for slice-0155, no new tests for slice-0156, no src/* change
+for this slice).
 
 Note on the shared package cache: `pio pkg list -e native` can report
 `framework-arduinoespressif32 @ 3.3.7` because resolving the host `native` platform pings
@@ -113,7 +117,7 @@ Pinned by exact release-ZIP URL in `platformio.ini`; resolved versions:
 ```
 platform  espressif32                       @ 55.3.34
           framework-arduinoespressif32      @ 3.3.4
-          framework-arduinoespressif32-libs @ 5.5.0+sha.8410210c9a   (bmorcelli patched libs)
+          framework-arduinoespressif32-libs @ 5.5.0+sha.8410210c9a   (Isonimus/esp32-arduino-adv-libs v0.1.1 drop-in; libnet80211.a ships ieee80211_raw_frame_sanity_check WEAK)
 tools     tool-esptoolpy                    @ 5.1.0
           tool-dfuutil-arduino              @ 1.11.0
           tool-mkfatfs                      @ 2.0.1
