@@ -7,6 +7,19 @@ releases, this can be replaced by a git-tag-generated changelog.
 ---
 
 
+## 2026-11-18 (v0.10.0-alpha)
+
+Codename: **PMF-AWARE HUNT**. The hunt now reads 802.11w and chooses its weapon per target: deauth where it still works, 802.11v BTM steering where it does not, and a QoS-Null nudge to pull quiet clients into view before the strike.
+
+- **Attacks are picked per target, not per hunt.** The Auto Hunt engine now reads each target's RSN capabilities and decides at strike time whether to deauth or to steer via 802.11v BTM, so a protected network (PMF Required or Capable) is no longer wasted on deauth frames the AP ignores. Mixed sessions mix. The RSN decoder is pure and host-tested byte-exact. (slice-0154; ADR-0153)
+- **802.11v BTM steering (with-client).** When a client is in sight on a PMF-Required AP, the engine builds a BSS Transition Management request frame that nominates a bogus neighbor, which well-behaved clients honor by roaming off the AP. The builder is pure and byte-exact host-tested, and the transmit path fires under the same airtime budget as the deauth path. (slice-0155; ADR-0153)
+- **BTM steering reaches clientless APs too.** When no client has yet been observed, a short BTM solicitation sequence nudges the AP into announcing associated stations; a confirmed client then takes the steering frame on the next pass. The sequence is predicate-gated, not polled, and shares the Auto Hunt airtime budget. (slice-0156; ADR-0153)
+- **QoS-Null Data nudges quiet clients into view.** Targets whose stations are associated but idle (no probes, no data) were effectively invisible to the previous hunt. A new quarter-window QoS-Null burst (26-byte frames, alternating power-management bit at 10 ms spacing, 20 frames) stimulates a station to acknowledge, which surfaces it to the sniffer before the strike runs. The frame builder is pure and host-tested byte-exact; firing is gated by a sharp predicate, not a timer. (slice-0160; ADR-0159)
+- **BTM UI labels report what happened.** The on-device tags now read "BTM" and "BTM-CL" (with-client and clientless), without the earlier "(unverified)" suffix: the mechanism is proven and the suffix was adding noise the operator could not act on. (ADR-0157)
+
+Internal: adopted the owned `Isonimus/esp32-arduino-adv-libs v0.1.1` precompiled framework-libs drop-in in place of the third-party `bmorcelli` blob, so the two 802.11-overlay patches (raw-frame sanity check WEAK, deauth-reason-code weakening) are now built and signed under our own release pipeline, with the integrity gate checking the ZIP SHA256 (slice-0158). Native suite 1059 to 1129: +35 for slice-0154's RSN / PMF decoding and resolver, +13 for slice-0155's BTM frame builder and inject predicate, +22 for slice-0160's QoS-Null frame builder and predicate (slice-0156 and -0158 added no src/* and no new tests). A late capture-stop fix (commit e5d33e2) strips a WiFi off/on thrash from `HandshakeCapture::stop()` that was pinning the stack on `ESP_ERR_WIFI_TX_DISALLOW` on Auto Hunt target rotation.
+
+
 ## 2026-11-12 (v0.9.0-alpha)
 
 HID device types + BLE spam polish, plus field-driven hardening of capture and crash paths.
