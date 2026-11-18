@@ -109,17 +109,26 @@ jobs:
   # comments, not by loosening the gate. See slices/0011.
   cppcheck:
     name: cppcheck
-    runs-on: ubuntu-latest
+    # Pin the runner image: `ubuntu-latest` floats, and a silent cppcheck
+    # version bump in a newer image can rename check ids (comparePointers ->
+    # subtractPointers) or tighten severities (unknownMacro to error), which
+    # reds the gate on code that has not changed. Bump deliberately.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
 
       - name: Install cppcheck
         run: sudo apt-get update && sudo apt-get install -y cppcheck
 
+      # -DPROGMEM= tells cppcheck the Arduino PROGMEM attribute macro expands to
+      # nothing (which is what it already does on ESP32). Without it, cppcheck 2.14+
+      # bails on parsing any file that uses PROGMEM with an `unknownMacro` error
+      # and stops scanning the rest, blinding the gate to genuine bugs there.
       - name: Run cppcheck
         run: >
           cppcheck --std=c++17 --language=c++ --error-exitcode=1
           --inline-suppr --suppress=missingIncludeSystem
+          -DPROGMEM=
           -I src src/
 
   # Source lint for a doubled-backslash escape ("...\\n") that emits two characters

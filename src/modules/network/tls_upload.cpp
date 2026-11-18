@@ -37,7 +37,8 @@ void applyCaBundle(WiFiClientSecure& client) {
     // contiguous embedded blob; their difference is the bundle's byte length.
     // cppcheck sees two distinct array objects and flags the subtraction, but
     // the idiom is well-defined by construction for _binary_*_start/_end symbols.
-    // cppcheck-suppress comparePointers
+    // (cppcheck renamed this check id from comparePointers to subtractPointers.)
+    // cppcheck-suppress subtractPointers
     const size_t bundleLen = (size_t)(x509_crt_bundle_end - x509_crt_bundle_start);
     client.setCACertBundle(x509_crt_bundle_start, bundleLen);
 }
