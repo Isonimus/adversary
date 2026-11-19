@@ -108,7 +108,24 @@ jobs:
           cp "dist/adversary-cardputer-${version}-factory.bin" \
              "dist/adversary-cardputer-factory.bin"
 
-          ( cd dist && sha256sum adversary-cardputer-*.bin adversary-cardputer-*-firmware.elf > SHA256SUMS.txt )
+          # Dashboard assets ZIP. The dashboard files live on the SD at
+          # /adversary/dashboard/ and are NOT shipped inside the firmware image
+          # (the proper remedy — embedding via board_build.embed_files with an
+          # SD overlay — is tracked in LEDGER.md under Distribution / Docs).
+          # Without this asset, a stock M5Burner / web-flasher install leaves
+          # /adversary/dashboard/ empty and Server mode renders blank until the
+          # operator unzips this onto the SD root. Layout is
+          # "adversary/dashboard/<files>" so unzipping at the SD root lands the
+          # files at /<SD>/adversary/dashboard/, matching the firmware's serve
+          # path and scripts/deploy_dashboard.sh. See README "Server / Dashboard
+          # Mode".
+          mkdir -p dist/zipstage/adversary/dashboard
+          cp -a dashboard_dev/. dist/zipstage/adversary/dashboard/
+          find dist/zipstage -name ".gitkeep" -delete
+          ( cd dist/zipstage && zip -r "../dashboard-${version}.zip" adversary )
+          rm -rf dist/zipstage
+
+          ( cd dist && sha256sum adversary-cardputer-*.bin adversary-cardputer-*-firmware.elf dashboard-*.zip > SHA256SUMS.txt )
           ls -la dist
 
       - name: Create GitHub Release
@@ -124,6 +141,7 @@ jobs:
             "dist/adversary-cardputer-${version}-factory.bin" \
             "dist/adversary-cardputer-factory.bin" \
             "dist/adversary-cardputer-${version}-firmware.elf" \
+            "dist/dashboard-${version}.zip" \
             dist/SHA256SUMS.txt
 
       # The web flasher serves the factory image same-origin, so a new release

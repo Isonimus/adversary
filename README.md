@@ -141,6 +141,8 @@ Requires the CC1101/NRF24 expansion cap; the **Radio** entry is greyed out when 
 ### Server / Dashboard Mode
 - Serves a web dashboard from the SD card for browser-based review of captures and status. The device's access point is WPA2-protected with an auto-generated per-device key (shown on the Server screen, overridable in Settings), and the dashboard itself adds path-traversal protection and HTTP auth enabled by default.
 
+> **One-time dashboard setup.** The dashboard web assets are served off the SD card at `/adversary/dashboard/` and are **not** included in the firmware image: a fresh M5Burner or web-flasher install leaves that folder empty and the dashboard renders as a blank page until the files are on the card. To fix it, grab `dashboard-vX.Y.Z-alpha.zip` from the matching [GitHub Release](https://github.com/Isonimus/adversary/releases) and extract it onto the SD root so the layout ends up at `/<SD>/adversary/dashboard/index.html`. Re-insert the card and the dashboard will load. Contributors building from source have [scripts/deploy_dashboard.sh](scripts/deploy_dashboard.sh) instead (see [Deploying the dashboard](#deploying-the-dashboard)).
+
 <p align="center">
   <a href="docs/screenshots/dashboard-1.png"><img src="docs/screenshots/dashboard-1.png" alt="Web dashboard — system configuration" width="240"></a>
   &nbsp;&nbsp;
