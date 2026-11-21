@@ -60,6 +60,10 @@ HandshakeScreen::HandshakeScreen(HandshakeMode mode)
 }
 
 HandshakeScreen::~HandshakeScreen() {
+    // Rolling status line (ADR-0164): drop the sink first so a late emit from the
+    // capture task cannot invoke a lambda bound to a destroyed `this`.
+    capture_.clearStatusSink();
+
     // Unsubscribe from EventBus
     if (handshakeHandlerId_ != 0) {
         EventBus::getInstance().unsubscribe(handshakeHandlerId_);
@@ -142,12 +146,24 @@ void HandshakeScreen::init() {
 void HandshakeScreen::show() {
     visible_ = true;
     needsRedraw_ = true;
-    
+
     // Always reset to CONFIG on show to clear stale capture screens
     screenState_ = HandshakeScreenState::CONFIG;
     handshakeSaved_ = false;
     confirmDialog_.hide();
     configList_.setItemCount(0);  // reset config selection + scroll to the top (slice-0110)
+
+    // Rolling status line (ADR-0164, slice-0165). The sink is autohunt-only: only
+    // drawAutoHuntCapturing() renders the status half, and Manual/Clientless have
+    // no "Xs remaining" countdown to anchor it to. Clear and (re)set so a prior
+    // mode's bound sink can never fire into a stale buffer.
+    rollingStatus_.reset();
+    capture_.clearStatusSink();
+    if (isAutoHunt()) {
+        capture_.setStatusSink([this](const char* msg, uint8_t priority) {
+            onStatusEmit(msg, priority);
+        });
+    }
     
     // If GPS not detected, start non-blocking background detection
     // This avoids the 3-second blocking delay that causes UI lag
@@ -163,6 +179,12 @@ void HandshakeScreen::show() {
 
 void HandshakeScreen::hide() {
     visible_ = false;
+
+    // Rolling status line (ADR-0164): drop the sink before stopping capture, so a
+    // late emit from the capture task cannot land in a stale this-captured lambda
+    // after the screen is destroyed (DoD scenario 4).
+    capture_.clearStatusSink();
+    rollingStatus_.reset();
 
     if (capturing_) {
         stopCapture();
@@ -237,6 +259,9 @@ void HandshakeScreen::update() {
                               clientMac[3], clientMac[4], clientMac[5],
                               targetChannel_,
                               ok ? "ok" : "fail");
+                        // Rolling-status emit (ADR-0164 #2/#3). Manual runs outside the
+                        // autohunt render path, so the sink is a no-op; kept for parity.
+                        onStatusEmit("QoS-Null to 1 client", ui::STATUS_PRIO_LOW);
                     } else {
                         LOG_I("HS", "%s: QoSNull:skip_no_client", targetSsid_);
                     }
@@ -283,6 +308,9 @@ void HandshakeScreen::update() {
                           candidate[0], candidate[1], candidate[2], candidate[3], candidate[4], candidate[5],
                           targetChannel_,
                           ok ? "ok" : "fail");
+                    // Rolling-status emit (ADR-0164 #7). Clientless mode does not render
+                    // the status line; kept for parity.
+                    onStatusEmit("BTM steer sent", ui::STATUS_PRIO_MED);
                 }
             }
 #endif
@@ -681,6 +709,18 @@ void HandshakeScreen::startCapture() {
     }
 }
 
+void HandshakeScreen::onStatusEmit(const char* msg, uint8_t priority) {
+    // ADR-0164 overlap policy: delegated to the pure RollingStatus::emit. The
+    // sink runs on the capture task on device; only the string buffer + expiry
+    // millis are touched. Render() reads them on the UI task at its own cadence.
+#ifdef ESP32
+    const uint32_t now = millis();
+#else
+    const uint32_t now = 0;  // native only reaches this path via test shims
+#endif
+    rollingStatus_.emit(msg, priority, now);
+}
+
 void HandshakeScreen::stopCapture() {
     capture_.stop();
     
@@ -1030,6 +1070,9 @@ void HandshakeScreen::updateAutoHunt() {
                               clientMac[3], clientMac[4], clientMac[5],
                               targetChannel_,
                               ok ? "ok" : "fail");
+                        // Rolling-status emit (ADR-0164 #2/#3). One burst per target,
+                        // one visible client known at fire time.
+                        onStatusEmit("QoS-Null to 1 client", ui::STATUS_PRIO_LOW);
                     } else {
                         // Enabled + elapsed + not-fired, but no client MAC was known: honest skip.
                         LOG_I("AUTOHUNT", "%s: QoSNull:skip_no_client", targetSsid_);
@@ -1078,6 +1121,24 @@ void HandshakeScreen::updateAutoHunt() {
                       candidate[0], candidate[1], candidate[2], candidate[3], candidate[4], candidate[5],
                       targetChannel_,
                       ok ? "ok" : "fail");
+                // Rolling-status emit (ADR-0164 #7): "BTM steer sent", prio 3.
+                onStatusEmit("BTM steer sent", ui::STATUS_PRIO_MED);
+            }
+
+            // Idle fallback (ADR-0164, priority 1): once an attack window has seen
+            // M1 or M2 but M3 has not arrived yet and no other event is dwelling,
+            // nudge the operator with "Waiting for EAPOL M3...". Re-emitted at most
+            // every 5 s so it does not drown out higher-priority bursts.
+            {
+                const auto& hs = capture_.getHandshake();
+                const bool sawM1orM2 = hs.hasMsg1 || hs.hasMsg2;
+                const bool sawM3 = hs.hasMsg3;
+                const uint32_t now = millis();
+                if (sawM1orM2 && !sawM3 && !rollingStatus_.visible(now) &&
+                    (lastIdleFallbackMs_ == 0 || now - lastIdleFallbackMs_ >= 5000)) {
+                    lastIdleFallbackMs_ = now;
+                    onStatusEmit("Waiting for EAPOL M3...", ui::STATUS_PRIO_IDLE);
+                }
             }
 
             // Only handle timeout here - success triggers callback
@@ -1141,7 +1202,10 @@ void HandshakeScreen::updateAutoHunt() {
             btmInjectedThisTarget_ = false;
             // Clear the per-target QoS-Null one-shot latch (slice-0160).
             qosNullFiredThisTarget_ = false;
-            
+            // Clear the per-target idle-fallback anchor so the next target gets a
+            // fresh chance at the prio-1 "Waiting for EAPOL M3..." hint (slice-0165).
+            lastIdleFallbackMs_ = 0;
+
             // Clear scan results and rescan
             WiFi.scanDelete();
             WiFi.scanNetworks(true);  // Async scan
@@ -1746,6 +1810,15 @@ void HandshakeScreen::drawAutoHuntCapturing(Canvas& canvas) {
     canvas.setCursor(4, y);
     canvas.setTextColor(theme::TEXT_SECONDARY());
     canvas.printf("%lus remaining", remaining);
+    // Rolling status line (ADR-0164, slice-0165): render inline after the
+    // countdown, separated by a UTF-8 middle dot. Clipping at the canvas edge is
+    // correct degradation — the countdown is load-bearing, the status half
+    // shortens first. Expired strings render nothing; the buffer is overwritten
+    // on the next sink emit rather than zeroed here.
+    if (rollingStatus_.visible(millis())) {
+        canvas.print(" \xC2\xB7 ");
+        canvas.print(rollingStatus_.text());
+    }
 #else
     (void)stateTimeout;
 #endif

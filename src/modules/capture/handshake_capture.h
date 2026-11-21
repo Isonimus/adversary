@@ -390,6 +390,19 @@ public:
     uint8_t getDiscoveredClientCount() const { return discoveredClientCount_; }
 
     /**
+     * @brief Rolling-status sink: engine moments pushed to the autohunt screen.
+     *
+     * ADR-0164, slice-0165. Screen sets it at `onEnter()` and clears it at
+     * `onExit()`; a cleared sink is a no-op. Signature kept trivial (const char*,
+     * uint8_t) so emit callsites stay one-liners. See the 7 emit callsites below
+     * (addDiscoveredClient, sendDeauth, updateSolicitation, recordPmkid, the
+     * EAPOL M2/M3/M4 processors, and the handshake-complete transition).
+     */
+    using StatusSink = std::function<void(const char* msg, uint8_t priority)>;
+    void setStatusSink(StatusSink sink) { statusSink_ = std::move(sink); }
+    void clearStatusSink() { statusSink_ = nullptr; }
+
+    /**
      * @brief Parse EAPOL key info from packet
      */
     static EAPOLKeyInfo parseKeyInfo(uint16_t keyInfo);
@@ -427,6 +440,11 @@ private:
                          const uint8_t* frameData, uint16_t frameLen);
     void updateCaptureState();  ///< Check what we have and update state
     void sendDeauth();  // Sends both deauth + disassoc frames
+
+    // ADR-0164 one-liner: null-safe sink emit. No logging; serial parity is per callsite.
+    void emitStatus(const char* msg, uint8_t priority) {
+        if (statusSink_) statusSink_(msg, priority);
+    }
     void checkTimeout();
     bool extractClientMac(const uint8_t* frame, uint8_t* clientMac);
     // Populate pmkid_ from an extracted PMKID. clientMac is the station the AP
@@ -479,6 +497,11 @@ private:
     uint8_t discoveredClientCount_ = 0;
     void addDiscoveredClient(const uint8_t* clientMac);
     
+    // Rolling-status sink (ADR-0164). Empty by default; the autohunt screen sets it
+    // at show()/startCapture() and clears it at hide()/stopCapture(). Instance size
+    // grows by ~32 B (empty std::function on xtensa), negligible vs the SRAM budget.
+    StatusSink statusSink_;
+
     static constexpr uint16_t EAPOL_KEY_INFO_OFFSET = 5;   ///< Offset to key info in EAPOL-Key
     static constexpr uint16_t EAPOL_NONCE_OFFSET = 17;     ///< Offset to nonce
     static constexpr uint16_t EAPOL_MIC_OFFSET = 81;       ///< Offset to MIC

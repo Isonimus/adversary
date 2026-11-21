@@ -7,6 +7,9 @@
 #include "../../utils/wifi_utils.h"
 #include "../../utils/pmkid_utils.h"  // Pure, unit-tested PMKID extraction
 #include "../attack/deauth.h"  // For unified deauth utilities
+#include "ui/components/rolling_status.h"  // ADR-0164 priority constants (slice-0165)
+
+#include <cstdio>
 
 #ifdef ESP32
 #include <Arduino.h>
@@ -344,6 +347,8 @@ void HandshakeCapture::update() {
             // Got all 4 messages during grace period!
             stats_.handshakeTime = now;
             LOG_I("HS", "COMPLETE! Full 4-way handshake captured (all 4 messages)!");
+            // Rolling-status emit (ADR-0164 #11): "Handshake captured", prio 4.
+            emitStatus("Handshake captured", ui::STATUS_PRIO_HIGH);
             waitingForComplete_ = false;
             setState(HandshakeState::COMPLETE);
             
@@ -363,6 +368,9 @@ void HandshakeCapture::update() {
             LOG_D("HS", "Have: M1=%d M2=%d M3=%d M4=%d",
                   handshake_.hasMsg1, handshake_.hasMsg2,
                   handshake_.hasMsg3, handshake_.hasMsg4);
+            // Rolling-status emit (ADR-0164 #11): "Handshake captured", prio 4.
+            // A CRACKABLE grace-exit is a successful capture for the operator too.
+            emitStatus("Handshake captured", ui::STATUS_PRIO_HIGH);
             waitingForComplete_ = false;
             setState(HandshakeState::CRACKABLE);
             
@@ -640,10 +648,14 @@ void HandshakeCapture::processMessage2(const uint8_t* eapolData, uint16_t eapolL
     // Record station + replay counter so M2 can be paired with M1/M3 (ADR-0145).
     memcpy(handshake_.msg2Client, clientMac, 6);
     handshake_.msg2Replay = readReplayCounter(eapolData);
-    
+
+    // Rolling-status emit (ADR-0164 #8): "EAPOL M2 seen", prio 3. Serial parity:
+    // the LOG_D("EAPOL %s from...") trace in processEAPOL covers each message.
+    emitStatus("EAPOL M2 seen", ui::STATUS_PRIO_MED);
+
     // Update state (order-independent)
     updateCaptureState();
-    
+
     // Publish EAPOL captured event for notification
     EventData eapolEvt(EventType::EAPOL_CAPTURED);
     memcpy(eapolEvt.payload.handshake.bssid, config_.targetBssid, 6);
@@ -674,10 +686,13 @@ void HandshakeCapture::processMessage3(const uint8_t* eapolData, uint16_t eapolL
     // Record station + replay counter so M3 can pair with M2 when M1 was missed (ADR-0145).
     memcpy(handshake_.msg3Client, clientMac, 6);
     handshake_.msg3Replay = readReplayCounter(eapolData);
-    
+
+    // Rolling-status emit (ADR-0164 #9): "EAPOL M3 seen", prio 3.
+    emitStatus("EAPOL M3 seen", ui::STATUS_PRIO_MED);
+
     // Update state (order-independent)
     updateCaptureState();
-    
+
     // Publish EAPOL captured event for notification
     EventData eapolEvt(EventType::EAPOL_CAPTURED);
     memcpy(eapolEvt.payload.handshake.bssid, config_.targetBssid, 6);
@@ -696,7 +711,10 @@ void HandshakeCapture::processMessage4(const uint8_t* eapolData, uint16_t eapolL
     memcpy(handshake_.msg4Data, frameData, copyLen);
     handshake_.msg4Len = copyLen;
     handshake_.hasMsg4 = true;
-    
+
+    // Rolling-status emit (ADR-0164 #10): "EAPOL M4 seen", prio 3.
+    emitStatus("EAPOL M4 seen", ui::STATUS_PRIO_MED);
+
     // Update state (order-independent)
     updateCaptureState();
     
@@ -725,6 +743,8 @@ void HandshakeCapture::updateCaptureState() {
         stats_.handshakeTime = millis();
         LOG_I("HS", "COMPLETE! Full 4-way handshake captured (all 4 messages)!");
 #endif
+        // Rolling-status emit (ADR-0164 #11): "Handshake captured", prio 4.
+        emitStatus("Handshake captured", ui::STATUS_PRIO_HIGH);
         waitingForComplete_ = false;  // Cancel grace period
         setState(HandshakeState::COMPLETE);
         
@@ -810,7 +830,8 @@ void HandshakeCapture::sendDeauth() {
 #ifdef ESP32
     // Use unified deauth utility for targeted clients + broadcast fallback
     // alsoDisassoc=true sends both deauth and disassoc frames for maximum effectiveness
-    
+    const uint32_t beforeSent = stats_.deauthsSent;
+
     // Send targeted deauth+disassoc to each discovered client
     for (uint8_t i = 0; i < discoveredClientCount_; i++) {
         if (DeauthAttack::sendSingleDeauth(config_.targetBssid, discoveredClients_[i],
@@ -821,7 +842,7 @@ void HandshakeCapture::sendDeauth() {
                   discoveredClients_[i][3], discoveredClients_[i][4], discoveredClients_[i][5]);
         }
     }
-    
+
     // Always send broadcast deauth+disassoc as fallback
     if (DeauthAttack::sendSingleDeauth(config_.targetBssid, Deauth80211::BROADCAST_MAC,
                                        DeauthReason::CLASS3_FRAME_FROM_NONASSOC, true)) {
@@ -832,6 +853,15 @@ void HandshakeCapture::sendDeauth() {
         }
     } else {
         LOG_W("HS", "Deauth TX failed");
+    }
+
+    // Rolling-status emit (ADR-0164 #4): "Deauth burst (N frames)", prio 2.
+    // Serial parity: covered by the per-client LOG_D and the broadcast LOG_D above.
+    const uint32_t sentThisBurst = stats_.deauthsSent - beforeSent;
+    if (sentThisBurst > 0) {
+        char buf[32];
+        std::snprintf(buf, sizeof(buf), "Deauth burst (%u frames)", (unsigned)sentThisBurst);
+        emitStatus(buf, ui::STATUS_PRIO_LOW);
     }
 #endif
 }
@@ -853,6 +883,13 @@ void HandshakeCapture::addDiscoveredClient(const uint8_t* clientMac) {
               clientMac[0], clientMac[1], clientMac[2],
               clientMac[3], clientMac[4], clientMac[5]);
 #endif
+        // Rolling-status emit (ADR-0164 #1): "Client AA:BB:CC:DD:EE:FF", prio 2.
+        // Serial parity: covered by the LOG_D above.
+        char buf[32];
+        std::snprintf(buf, sizeof(buf), "Client %02X:%02X:%02X:%02X:%02X:%02X",
+                      clientMac[0], clientMac[1], clientMac[2],
+                      clientMac[3], clientMac[4], clientMac[5]);
+        emitStatus(buf, ui::STATUS_PRIO_LOW);
     }
 }
 
@@ -913,6 +950,9 @@ void HandshakeCapture::recordPmkid(const uint8_t* pmkid, const uint8_t* clientMa
           pmkid_.ssid, clientMac[0], clientMac[1], clientMac[2],
           clientMac[3], clientMac[4], clientMac[5]);
 #endif
+    // Rolling-status emit (ADR-0164 #6): "PMKID captured", prio 4.
+    // Serial parity: covered by the LOG_I above.
+    emitStatus("PMKID captured", ui::STATUS_PRIO_HIGH);
 
     // Publish PMKID captured event
     EventData pmkidEvt(EventType::PMKID_CAPTURED);
@@ -961,6 +1001,9 @@ void HandshakeCapture::updateSolicitation(uint32_t now) {
     } else {
         LOG_I("HS", "Solicit PMKID attempt %u/%u sent",
               (unsigned)solicitAttempts_, (unsigned)SOLICIT_MAX_ATTEMPTS);
+        // Rolling-status emit (ADR-0164 #5): "PMKID solicit sent", prio 3.
+        // Serial parity: covered by the LOG_I above.
+        emitStatus("PMKID solicit sent", ui::STATUS_PRIO_MED);
     }
 }
 #endif

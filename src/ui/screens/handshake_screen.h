@@ -16,6 +16,7 @@
 #include "ui/components/list_scroll_model.h"
 #include "ui/components/scrollable_list.h"
 #include "ui/components/confirm_dialog.h"
+#include "ui/components/rolling_status.h"
 #include "utils/handshake_utils.h"
 #include "utils/mac_utils.h"
 #include "utils/pmf_resolver.h"
@@ -346,6 +347,15 @@ private:
     
     ui::FooterHints footerHints_;
     ui::ConfirmDialog confirmDialog_;  // shared delete-handshake confirm overlay (ADR-0085)
+
+    // Autohunt rolling status line (ADR-0164, slice-0165). Buffer holds the most
+    // recent engine or screen moment, rendered inline after "Xs remaining". The
+    // sink runs on the capture task, so onStatusEmit only touches this struct
+    // (no draw, no SD, no mutex). Render() reads it from the UI task at its own
+    // cadence; a torn read at worst skips a frame.
+    ui::RollingStatus rollingStatus_{};
+    uint32_t lastIdleFallbackMs_ = 0;  // for the prio-1 "Waiting for EAPOL M3..." fallback
+    void onStatusEmit(const char* msg, uint8_t priority);
 };
 
 } // namespace adversary
