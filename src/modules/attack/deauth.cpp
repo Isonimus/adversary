@@ -135,9 +135,17 @@ bool DeauthAttack::start(const DeauthConfig& config) {
     
 #ifdef ESP32
     stats_.startTime = millis();
-    
-    // Disconnect from any network first
-    WiFi.disconnect(true);
+
+    // Disconnect from any network first, but only if the driver is initialized.
+    // Calling WiFi.disconnect() when the WiFi driver was never started (fresh boot
+    // or a prior stopAllModules() that already turned the radio off) emits the
+    // framework-side `[E][STA.cpp:530] disconnect(): STA disconnect failed!
+    // 0x3001: ESP_ERR_WIFI_NOT_INIT` noise on serial. The mode query returns
+    // ESP_ERR_WIFI_NOT_INIT in that state, so a successful getMode == driver is up.
+    wifi_mode_t currentMode;
+    if (esp_wifi_get_mode(&currentMode) == ESP_OK && currentMode != WIFI_MODE_NULL) {
+        WiFi.disconnect(true);
+    }
     WiFi.mode(WIFI_OFF);
     delay(100);
     
