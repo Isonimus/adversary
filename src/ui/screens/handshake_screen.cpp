@@ -596,8 +596,10 @@ void HandshakeScreen::startCapture() {
         networksScanned_ = 0;
         networksSkipped_ = 0;
         currentTargetIndex_ = -1;
-        attemptedCount_ = 0;  // Clear attempted networks for new session
-        attemptedHead_ = 0;   // reset ring write index
+        // Reset per-target memory for a fresh hunt: a new session should not inherit
+        // backoffs or observed-client hints from the prior one (ADR-0161).
+        targetMemory_.fill(utils::TargetMemory{});
+        targetMemoryCount_ = 0;
         hasTarget_ = false;
 
         // Reset the session handshake list too — a new hunt is a new session.
@@ -816,57 +818,68 @@ bool HandshakeScreen::selectNextTarget() {
     if (numNetworks <= 0) {
         return false;
     }
-    
+
     networksScanned_ = numNetworks;
     networksSkipped_ = 0;  // Reset per scan iteration
-    
-    // Find best valid target
+
+    const uint32_t now = millis();
+    const bool intentIsDeauthOnly = (autoStrategy_ == utils::CaptureIntent::Deauth);
+
+    // Find best valid target under the ADR-0161 scoring policy. Backoff is a hard gate
+    // (skipped candidates never compete on score); the per-weight math lives in the pure
+    // utils::scoreTarget so the native tests pin the constants.
     int bestIndex = -1;
-    int bestScore = -1;
-    
+    int16_t bestScore = INT16_MIN;
+
     for (int i = 0; i < numNetworks; i++) {
-        // Skip if already captured
         String ssid = WiFi.SSID(i);
         uint8_t* bssid = WiFi.BSSID(i);
-        
+
         if (CaptureRegistry::getInstance().hasHandshake(ssid.c_str())) {
             networksSkipped_++;
             continue;
         }
-        
-        // Skip if whitelisted
         if (SettingsManager::getInstance().isWhitelisted(bssid, ssid.c_str())) {
             networksSkipped_++;
             continue;
         }
-        
-        // Skip open networks (no handshake to capture)
         wifi_auth_mode_t authMode = WiFi.encryptionType(i);
         if (authMode == WIFI_AUTH_OPEN) {
             networksSkipped_++;
             continue;
         }
-        
-        // Skip networks we've already attempted in this session
-        if (wasNetworkAttempted(bssid)) {
+        if (isTargetInBackoff(bssid, now)) {
             networksSkipped_++;
             continue;
         }
-        
-        // Calculate priority score (signal + encryption preference)
-        int score = WiFi.RSSI(i) + 100;  // Normalize RSSI to positive
-        if (authMode == WIFI_AUTH_WPA2_PSK) score += 10;  // Prefer WPA2
-        
+
+        const utils::TargetMemory* slot = findSlot(bssid);
+        utils::TargetScoreInputs inputs{
+            /*rssi=*/static_cast<int8_t>(WiFi.RSSI(i)),
+            /*isWpa2Psk=*/authMode == WIFI_AUTH_WPA2_PSK,
+            /*pmfRequired=*/pmfRequiredForTarget(bssid),
+            /*intentIsDeauthOnly=*/intentIsDeauthOnly,
+            /*observedClientsHint=*/slot ? slot->observedClients : static_cast<uint8_t>(0),
+            /*priorFailures=*/slot ? slot->attempts : static_cast<uint8_t>(0),
+        };
+        const int16_t score = utils::scoreTarget(inputs);
+
+        LOG_D("AUTOHUNT", "candidate %s RSSI:%ld clients:%u fails:%u score:%d",
+              ssid.c_str(), (long)WiFi.RSSI(i),
+              (unsigned)inputs.observedClientsHint,
+              (unsigned)inputs.priorFailures,
+              (int)score);
+
         if (score > bestScore) {
             bestScore = score;
             bestIndex = i;
         }
     }
-    
+
     if (bestIndex < 0) {
         return false;  // No valid target found
     }
-    
+
     // Set target
     currentTargetIndex_ = bestIndex;
     memcpy(targetBssid_, WiFi.BSSID(bestIndex), 6);
@@ -874,13 +887,16 @@ bool HandshakeScreen::selectNextTarget() {
     targetSsid_[32] = '\0';
     targetChannel_ = WiFi.channel(bestIndex);
     hasTarget_ = true;
-    
-    // Mark this network as attempted so we don't retry it this session
-    markNetworkAttempted(targetBssid_);
-    
-    LOG_I("AUTOHUNT", "Selected target: %s (ch%d, RSSI:%ld)",
-          targetSsid_, targetChannel_, (long)WiFi.RSSI(bestIndex));
-    
+
+    // Preemptively count this round as a miss and schedule the next-eligible threshold.
+    // A later capture (handled in NEXT_TARGET) clears attempts and the cooldown. Doing
+    // it here keeps the target out of re-selection until the window closes, the same
+    // behaviour the pre-ADR-0161 attempted-ring-buffer tombstone provided.
+    recordAttemptMissForTarget(targetBssid_, now);
+
+    LOG_I("AUTOHUNT", "Selected target: %s (ch%d, RSSI:%ld, score:%d)",
+          targetSsid_, targetChannel_, (long)WiFi.RSSI(bestIndex), (int)bestScore);
+
     return true;
 #else
     return false;
@@ -1088,6 +1104,23 @@ void HandshakeScreen::updateAutoHunt() {
             if (!handshakeSaved_ && capture_.isComplete()) {
                 saveHandshake();
             }
+
+            // Latch the LOCKING-time observed-client count into this target's memory slot
+            // BEFORE capture_.stop() tears the station-scanner cache down (ADR-0161). A
+            // zero count stays zero: the scorer treats zero as "unknown", not "none".
+            if (hasTarget_) {
+                latchObservedClientsForTarget(
+                    targetBssid_,
+                    StationScanner::getInstance().getStationCountForAP(targetBssid_));
+                // A capture this round clears the backoff so a deliberate re-attempt
+                // (e.g. the operator deleted the handshake) re-enters at full score.
+                // The hasHandshake() filter in selectNextTarget still protects against
+                // automatic re-selection while the capture is on disk.
+                if (handshakeSaved_) {
+                    recordCaptureForTarget(targetBssid_, millis());
+                }
+            }
+
             capture_.stop();
 
             // Reset saved flag for next target
@@ -1120,28 +1153,92 @@ void HandshakeScreen::updateAutoHunt() {
 #endif
 }
 
-void HandshakeScreen::markNetworkAttempted(const uint8_t* bssid) {
-    // Ring buffer: when full, overwrite the OLDEST entry instead of silently
-    // dropping (the old behavior, which made attempted-tracking go deaf after 16
-    // APs → same targets re-selected forever, skip count stuck). Skip if already
-    // tracked so re-marks don't waste a slot.
-    if (wasNetworkAttempted(bssid)) return;
-    memcpy(attemptedBssids_[attemptedHead_], bssid, 6);
-    attemptedHead_ = (attemptedHead_ + 1) % MAX_ATTEMPTED_NETWORKS;
-    if (attemptedCount_ < MAX_ATTEMPTED_NETWORKS) attemptedCount_++;
+utils::TargetMemory* HandshakeScreen::findSlot(const uint8_t* bssid) {
+    for (uint8_t i = 0; i < targetMemoryCount_; i++) {
+        if (utils::bssidEquals(targetMemory_[i].bssid, bssid)) {
+            return &targetMemory_[i];
+        }
+    }
+    return nullptr;
+}
+
+const utils::TargetMemory* HandshakeScreen::findSlot(const uint8_t* bssid) const {
+    for (uint8_t i = 0; i < targetMemoryCount_; i++) {
+        if (utils::bssidEquals(targetMemory_[i].bssid, bssid)) {
+            return &targetMemory_[i];
+        }
+    }
+    return nullptr;
+}
+
+utils::TargetMemory& HandshakeScreen::allocateSlot(const uint8_t* bssid, uint32_t now) {
+    // Fill a free slot first.
+    if (targetMemoryCount_ < MAX_TARGET_MEMORY_SLOTS) {
+        utils::TargetMemory& slot = targetMemory_[targetMemoryCount_++];
+        memcpy(slot.bssid, bssid, 6);
+        return slot;
+    }
+
+    // Prefer evicting a slot whose backoff has already expired (oldest first). If every
+    // slot still holds an active backoff, fall back to the oldest overall so the table
+    // cannot wedge after 128 live backoffs.
+    uint8_t expiredIdx = 0xFF;
+    uint32_t expiredOldest = 0;
+    uint8_t anyIdx = 0;
+    uint32_t anyOldest = targetMemory_[0].lastAttemptMs;
+
+    for (uint8_t i = 0; i < targetMemoryCount_; i++) {
+        const auto& s = targetMemory_[i];
+        if (!utils::isInBackoff(s, now)) {
+            const uint32_t age = now - s.lastAttemptMs;
+            if (expiredIdx == 0xFF || age > expiredOldest) {
+                expiredIdx = i;
+                expiredOldest = age;
+            }
+        }
+        const uint32_t ageAny = now - s.lastAttemptMs;
+        if (ageAny > anyOldest) {
+            anyOldest = ageAny;
+            anyIdx = i;
+        }
+    }
+
+    uint8_t victim = expiredIdx != 0xFF ? expiredIdx : anyIdx;
+    utils::TargetMemory& slot = targetMemory_[victim];
+    slot = utils::TargetMemory{};
+    memcpy(slot.bssid, bssid, 6);
+    return slot;
+}
+
+void HandshakeScreen::recordAttemptMissForTarget(const uint8_t* bssid, uint32_t now) {
+    utils::TargetMemory* slot = findSlot(bssid);
+    if (slot == nullptr) {
+        slot = &allocateSlot(bssid, now);
+    }
+    utils::recordAttemptMiss(*slot, now);
 #ifdef ESP32
-    LOG_D("AUTOHUNT", "Marked network as attempted (%d/%d tracked)",
-          attemptedCount_, MAX_ATTEMPTED_NETWORKS);
+    LOG_D("AUTOHUNT", "miss attempts=%u nextEligibleMs=%lu (%u/%u slots)",
+          (unsigned)slot->attempts, (unsigned long)slot->nextEligibleMs,
+          (unsigned)targetMemoryCount_, (unsigned)MAX_TARGET_MEMORY_SLOTS);
 #endif
 }
 
-bool HandshakeScreen::wasNetworkAttempted(const uint8_t* bssid) const {
-    for (uint8_t i = 0; i < attemptedCount_; i++) {
-        if (memcmp(attemptedBssids_[i], bssid, 6) == 0) {
-            return true;
-        }
-    }
-    return false;
+void HandshakeScreen::recordCaptureForTarget(const uint8_t* bssid, uint32_t now) {
+    utils::TargetMemory* slot = findSlot(bssid);
+    if (slot == nullptr) return;
+    utils::recordCaptureSuccess(*slot, now);
+}
+
+void HandshakeScreen::latchObservedClientsForTarget(const uint8_t* bssid, size_t count) {
+    utils::TargetMemory* slot = findSlot(bssid);
+    if (slot == nullptr) return;
+    utils::recordObservedClients(*slot, count);
+}
+
+bool HandshakeScreen::isTargetInBackoff(const uint8_t* bssid, uint32_t now) const {
+    const utils::TargetMemory* slot = findSlot(bssid);
+    if (slot == nullptr) return false;
+    return utils::isInBackoff(*slot, now);
 }
 
 bool HandshakeScreen::pmfRequiredForTarget(const uint8_t bssid[6]) const {

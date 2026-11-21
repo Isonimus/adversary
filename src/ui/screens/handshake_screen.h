@@ -19,7 +19,9 @@
 #include "utils/handshake_utils.h"
 #include "utils/mac_utils.h"
 #include "utils/pmf_resolver.h"
+#include "utils/autohunt_scoring.h"
 #include "screen_interface.h"
+#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -195,9 +197,17 @@ private:
     void startDeletionConfirm();
     void executeDeletion();
     
-    // Track attempted networks
-    void markNetworkAttempted(const uint8_t* bssid);
-    bool wasNetworkAttempted(const uint8_t* bssid) const;
+    // Per-target memory (ADR-0161): score-weighted candidates, with an exponential backoff
+    // gate replacing the old "attempted = never retry" ring buffer. Slots are looked up by
+    // BSSID; eviction prefers the oldest expired-backoff slot, falling back to the oldest
+    // slot overall when every slot still holds an active backoff.
+    utils::TargetMemory* findSlot(const uint8_t* bssid);
+    const utils::TargetMemory* findSlot(const uint8_t* bssid) const;
+    utils::TargetMemory& allocateSlot(const uint8_t* bssid, uint32_t now);
+    void recordAttemptMissForTarget(const uint8_t* bssid, uint32_t now);
+    void recordCaptureForTarget(const uint8_t* bssid, uint32_t now);
+    void latchObservedClientsForTarget(const uint8_t* bssid, size_t count);
+    bool isTargetInBackoff(const uint8_t* bssid, uint32_t now) const;
 
     // Look up the target BSSID in the last `WiFiScanner` result (where the slice-0154 beacon-sniff
     // pass fills PMF bits) and return `pmfRequired`. Returns false when the BSSID is not in that
@@ -295,16 +305,14 @@ private:
     uint32_t networksSkipped_ = 0;
     int currentTargetIndex_ = -1;
     
-    // Track attempted networks — ring buffer so a long/dense hunt keeps cycling.
-    // The old cap of 16 silently dropped further attempts, so in any area with
-    // >16 candidate APs, attempted targets were never recorded, got re-selected
-    // repeatedly, and never counted as skipped. 128 entries × 6 B = 768 B; when
-    // full, the oldest entry is evicted (becomes eligible again) instead of the
-    // list going deaf.
-    static constexpr uint8_t MAX_ATTEMPTED_NETWORKS = 128;
-    uint8_t attemptedBssids_[MAX_ATTEMPTED_NETWORKS][6];
-    uint8_t attemptedCount_ = 0;   // number of valid entries (saturates at MAX)
-    uint8_t attemptedHead_ = 0;    // ring write index
+    // Per-target memory table (ADR-0161). Replaces the pre-0161 attempted-BSSID ring
+    // buffer: each slot carries attempts, observed-client hint, last-attempt timestamp
+    // and next-eligible threshold, so the engine can retry a target after its
+    // exponential-backoff window and the scorer can prefer BSSIDs where a client has
+    // been observed. 128 slots x 16 B = 2 KB on the screen instance (vs 768 B before).
+    static constexpr uint8_t MAX_TARGET_MEMORY_SLOTS = 128;
+    std::array<utils::TargetMemory, MAX_TARGET_MEMORY_SLOTS> targetMemory_{};
+    uint8_t targetMemoryCount_ = 0;  // number of occupied slots (saturates at MAX)
 
     // Handshake list view state. Lightweight per-entry struct (SessionHandshakeEntry,
     // ~45 B) instead of the full CapturedHandshake (~1.4 KB) — the list only needs
