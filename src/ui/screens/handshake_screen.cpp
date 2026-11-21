@@ -26,6 +26,7 @@
 #include "utils/qos_null_tx.h"
 #include "modules/storage/handshake_metadata.h"
 #include "modules/wifi/wifi_scanner.h"
+#include <algorithm>
 
 #ifdef ESP32
 #include <Arduino.h>
@@ -1105,13 +1106,19 @@ void HandshakeScreen::updateAutoHunt() {
                 saveHandshake();
             }
 
-            // Latch the LOCKING-time observed-client count into this target's memory slot
-            // BEFORE capture_.stop() tears the station-scanner cache down (ADR-0161). A
-            // zero count stays zero: the scorer treats zero as "unknown", not "none".
+            // Latch the observed-client count into this target's memory slot BEFORE
+            // capture_.stop() tears either source down (ADR-0161). Take the max of two
+            // sources (slice-0163): StationScanner's 5s LOCKING probe, and the capture
+            // engine's promiscuous listener which also sees clients surfaced during the
+            // ~30s attack window (e.g. woken by a QoS-Null stimulation, slice-0160).
+            // A zero from both stays zero: the scorer treats zero as "unknown", not "none".
             if (hasTarget_) {
+                const size_t stationScannerCount =
+                    StationScanner::getInstance().getStationCountForAP(targetBssid_);
+                const size_t captureListenerCount = capture_.getDiscoveredClientCount();
                 latchObservedClientsForTarget(
                     targetBssid_,
-                    StationScanner::getInstance().getStationCountForAP(targetBssid_));
+                    std::max(stationScannerCount, captureListenerCount));
                 // A capture this round clears the backoff so a deliberate re-attempt
                 // (e.g. the operator deleted the handshake) re-enters at full score.
                 // The hasHandshake() filter in selectNextTarget still protects against

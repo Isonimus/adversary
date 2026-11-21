@@ -380,6 +380,16 @@ public:
     }
 
     /**
+     * @brief Number of distinct clients seen on the target BSSID this capture.
+     *
+     * Populated by the promiscuous listener across the whole attack window, so it
+     * surfaces clients the LOCKING-time `StationScanner` 5s probe misses
+     * (slice-0163: scoring hint for ADR-0161's +15 observed-clients boost).
+     * Bounded by `MAX_DISCOVERED_CLIENTS` (8).
+     */
+    uint8_t getDiscoveredClientCount() const { return discoveredClientCount_; }
+
+    /**
      * @brief Parse EAPOL key info from packet
      */
     static EAPOLKeyInfo parseKeyInfo(uint16_t keyInfo);
