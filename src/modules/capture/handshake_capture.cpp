@@ -859,7 +859,7 @@ void HandshakeCapture::sendDeauth() {
     // Serial parity: covered by the per-client LOG_D and the broadcast LOG_D above.
     const uint32_t sentThisBurst = stats_.deauthsSent - beforeSent;
     if (sentThisBurst > 0) {
-        char buf[32];
+        char buf[48];
         std::snprintf(buf, sizeof(buf), "Deauth burst (%u frames)", (unsigned)sentThisBurst);
         emitStatus(buf, ui::STATUS_PRIO_LOW);
     }
