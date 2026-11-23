@@ -280,10 +280,12 @@ void redetectModules() {
               sd.remount() ? "OK" : "FAILED");
     }
     LOG_I("MODULES", "Cap: %s",
-          ui::g_expansionCap == ExpansionCap::MultiRadio ? "Multi-Radio" : "None");
+          ui::g_expansionCap == ExpansionCap::MultiRadio ? "Multi-Radio" :
+          ui::g_expansionCap == ExpansionCap::Cc1101Nfc  ? "Cap CC1101 & NFC" : "None");
 
-    // --- GPS (cap-aware: never drive the cap-GPS UART pins when the cap owns them) ---
-    const bool probeCapGps = ui::g_expansionCap != ExpansionCap::MultiRadio;
+    // --- GPS (cap-aware: never drive the cap-GPS UART pins when a cap owns them —
+    // both cap variants reuse G15/G13 for their CC1101, same as the cap-GPS pins) ---
+    const bool probeCapGps = ui::g_expansionCap == ExpansionCap::None;
     ui::g_gpsDetected = GPSManager::getInstance().tryRedetect(probeCapGps);
 
     // --- RFID (skip only on the real Grove-port G1/G2 conflict with a Grove GPS) ---

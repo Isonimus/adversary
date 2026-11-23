@@ -79,6 +79,15 @@ constexpr int8_t CC1101NFC_RFSW0 = 13;  // RF band switch (0/1=315MHz, 1/0=433MH
 constexpr int8_t NFC_CS  = 6;   // ST25R3916 chip-select — reserved, unused
 constexpr int8_t NFC_IRQ = 4;   // ST25R3916 IRQ — reserved, unused
 
+// POWER_EN (per the published schematic): enables this cap's onboard DC-DC
+// buck regulator, which supplies 3.3V to BOTH the CC1101 and the NFC chip.
+// Same physical pin as the legacy cap's NRF24_CE (G3): probeNRF24(), which
+// always runs at boot regardless of which cap is attached, drives it LOW and
+// never restores it. On this cap that permanently cuts power to both radios
+// for the rest of the session -- detectExpansionCap() restores it before
+// probing this cap and again once it resolves as attached.
+constexpr int8_t CC1101NFC_POWER_EN = 3;
+
 // Runtime-resolved CC1101 pins: hal::detectExpansionCap() points these at
 // whichever cap's pin layout actually probed present (legacy multi-radio cap
 // or Cap CC1101 & NFC), so cc1101.cpp and ook_rmt.cpp drive one CC1101 driver

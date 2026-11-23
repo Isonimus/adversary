@@ -152,9 +152,9 @@ std::vector<CarouselItem> buildCarouselItems() {
     // Radio entry — always present, greyed out when the multi-radio cap is not
     // detected, matching the RFID entry's optional-hardware convention (slice-0002).
     carouselItems.push_back({"RADIO", adversary::assets::ICON_RADIO, ACTION_RADIO,
-                             false, "Multi-radio cap not found",
-                             []{ return adversary::hal::resolvedExpansionCap() ==
-                                        adversary::hal::ExpansionCap::MultiRadio; }});
+                             false, "No radio cap found",
+                             []{ return adversary::hal::resolvedExpansionCap() !=
+                                        adversary::hal::ExpansionCap::None; }});
 
     // Modules entry — live peripheral inventory + hot-swap Re-scan (slice-0018).
     carouselItems.push_back({"MODULES", adversary::assets::ICON_MODULES, ACTION_MODULES,

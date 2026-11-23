@@ -44,6 +44,28 @@ inline Cc1101FreqRegs cc1101FreqRegs(double carrierMHz) {
             static_cast<uint8_t>(freq & 0xFF)};
 }
 
+/**
+ * @brief M5 "Cap CC1101 & NFC" antenna-switch state for a carrier frequency.
+ *
+ * This cap (unlike the legacy multi-radio cap) has a 2-signal RF switch in
+ * front of the CC1101: RF_SW0 is a plain host GPIO, RF_SW1 is driven through
+ * the CC1101's own GDO2 pin (confirmed in M5's Cap CC1101 & NFC docs). Pure
+ * function of the carrier against the CC1101's three valid sub-1GHz bands
+ * (300-348 / 387-464 / 779-928 MHz, datasheet SWRS061); the thresholds are the
+ * midpoints between adjacent bands, so any preset or manually tuned frequency
+ * the UI allows resolves to the band it actually falls in.
+ */
+struct Cc1101NfcSwitchState {
+    bool sw0;  // host GPIO (pins::CC1101NFC_RFSW0)
+    bool sw1;  // CC1101 GDO2 HW-to-0/HW-to-1 (see cc1101ConfigureOok/Fsk)
+};
+
+inline Cc1101NfcSwitchState cc1101NfcSwitchState(double carrierMHz) {
+    if (carrierMHz < 367.5) return {false, true};   // 315 MHz band
+    if (carrierMHz < 621.5) return {true, false};   // 433 MHz band
+    return {true, true};                            // 868/915 MHz band
+}
+
 /// The OOK band presets the UI offers. Named, never bare literals at call sites.
 constexpr double CC1101_FREQ_315_MHZ = 315.0;
 constexpr double CC1101_FREQ_43392_MHZ = 433.92;

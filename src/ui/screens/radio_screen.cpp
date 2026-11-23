@@ -183,7 +183,7 @@ void RadioScreen::show() {
     captureStage_ = 0;
     confirmDialog_.hide();
 
-    available_ = (hal::resolvedExpansionCap() == hal::ExpansionCap::MultiRadio) &&
+    available_ = (hal::resolvedExpansionCap() != hal::ExpansionCap::None) &&
                  (SDManager::getInstance().spiBus() != nullptr);
 
     lastHintState_ = state_;
@@ -742,19 +742,25 @@ bool RadioScreen::handleInput(char key) {
 
     int unusedScroll = 0;
     switch (state_) {
-        case MenuState::RADIO_SELECT:
-            if (listNav(key, radioSelection_, 2, unusedScroll, 2)) return true;
+        case MenuState::RADIO_SELECT: {
+            // The Cap CC1101 & NFC has no NRF24 -- only the legacy multi-radio
+            // cap's "NRF24 2.4 GHz" entry is reachable.
+            const bool hasNrf24 =
+                hal::resolvedExpansionCap() == hal::ExpansionCap::MultiRadio;
+            const int itemCount = hasNrf24 ? 2 : 1;
+            if (listNav(key, radioSelection_, itemCount, unusedScroll, itemCount)) return true;
             if (key == '\n' || key == '\r') {
                 if (radioSelection_ == 0) {
                     mainList_.setItemCount(0);  // start at the top of the console menu
                     state_ = MenuState::MAIN;  // CC1101 Sub-GHz console
-                } else {
+                } else if (hasNrf24) {
                     startNrfScan();  // NRF24 2.4 GHz analyzer
                 }
             } else if (key == '`') {
                 shouldExit_ = true;
             }
             return true;
+        }
 
         case MenuState::MAIN:
             if (modelNav(key, mainList_, MAIN_ITEM_COUNT)) {
@@ -936,18 +942,24 @@ void RadioScreen::drawUnavailable(Canvas& canvas) {
     canvas.print("Radio cap unavailable");
     y += LINE_HEIGHT + 2;
 
+    const hal::ExpansionCap cap = hal::resolvedExpansionCap();
     canvas.setTextColor(theme::TEXT_SECONDARY());
     canvas.setCursor(x, y);
-    if (hal::resolvedExpansionCap() != hal::ExpansionCap::MultiRadio) {
-        canvas.print("No multi-radio cap resolved");
+    if (cap == hal::ExpansionCap::None) {
+        canvas.print("No radio cap resolved");
     } else {
         canvas.print("SD bus not owned (launcher)");
     }
     y += LINE_HEIGHT;
     canvas.setTextColor(theme::TEXT_DISABLED());
     canvas.setCursor(x, y);
-    canvas.printf("CC1101 VER 0x%02X  NRF24 %s", hal::lastCapProbe().cc1101Version,
-                  hal::lastCapProbe().nrf24Present ? "OK" : "--");
+    if (cap == hal::ExpansionCap::Cc1101Nfc) {
+        canvas.printf("CC1101 VER 0x%02X  (NFC present, no driver)",
+                      hal::lastCapProbe().cc1101NfcVersion);
+    } else {
+        canvas.printf("CC1101 VER 0x%02X  NRF24 %s", hal::lastCapProbe().cc1101Version,
+                      hal::lastCapProbe().nrf24Present ? "OK" : "--");
+    }
 }
 
 void RadioScreen::drawRadioSelect(Canvas& canvas) {
@@ -956,11 +968,13 @@ void RadioScreen::drawRadioSelect(Canvas& canvas) {
     canvas.setTextSize(1);
     canvas.setTextColor(theme::ACCENT());
     canvas.setCursor(x, y);
-    canvas.print("Multi-Radio cap");
+    const bool hasNrf24 = hal::resolvedExpansionCap() == hal::ExpansionCap::MultiRadio;
+    canvas.print(hasNrf24 ? "Multi-Radio cap" : "CC1101 + NFC cap");
     y += LINE_HEIGHT + 2;
 
     const char* items[2] = {"CC1101 Sub-GHz", "NRF24 2.4 GHz"};
-    for (int i = 0; i < 2; ++i) {
+    const int itemCount = hasNrf24 ? 2 : 1;
+    for (int i = 0; i < itemCount; ++i) {
         if (i == radioSelection_) {
             canvas.fillRect(0, y - 2, canvas.width(), LINE_HEIGHT, theme::BG_SELECTED());
             canvas.setTextColor(theme::TEXT_PRIMARY());

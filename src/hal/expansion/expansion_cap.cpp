@@ -243,6 +243,13 @@ ExpansionCap detectExpansionCap(CapOverride ov) {
         // Only probe the second pin layout when the legacy cap's own probe
         // came back empty, so a seated legacy cap is never double-counted.
         if (!cc1101 && !nrf24) {
+            // probeNRF24() above drove this same physical pin (G3) LOW as the
+            // legacy cap's NRF24 CE; on this cap it is POWER_EN, the DC-DC
+            // regulator enable for both the CC1101 and the NFC chip. Restore
+            // it and give the rail a moment to settle before trusting a read.
+            pinMode(pins::CC1101NFC_POWER_EN, OUTPUT);
+            digitalWrite(pins::CC1101NFC_POWER_EN, HIGH);
+            delay(5);
             cc1101Nfc = probeCC1101NfcVariant();
         }
     }
@@ -259,6 +266,11 @@ ExpansionCap detectExpansionCap(CapOverride ov) {
     } else if (s_cap == ExpansionCap::Cc1101Nfc) {
         pins::activeCc1101Cs = pins::CC1101NFC_CS;
         pins::activeCc1101Gdo0 = pins::CC1101NFC_GDO0;
+        // Re-assert POWER_EN: nothing else in the firmware ever touches G3
+        // again once this cap is resolved, so this single assertion must hold
+        // for the whole session (the pin is left driven, not released).
+        pinMode(pins::CC1101NFC_POWER_EN, OUTPUT);
+        digitalWrite(pins::CC1101NFC_POWER_EN, HIGH);
         idleCc1101(pins::activeCc1101Cs);
     }
 #endif
