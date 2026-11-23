@@ -46,7 +46,7 @@ Adversary is for **educational and research purposes only.** Unauthorized access
 ## Features
 
 The main menu is a carousel: **Wireless**, **BLE**, **Infrared**, **RFID**, **HID**,
-and **Radio** (Sub-GHz / 2.4 GHz, shown when the multi-radio cap is attached), plus
+and **Radio** (Sub-GHz / 2.4 GHz, shown when a supported radio cap is attached), plus
 **Modules** (live peripheral inventory + hot-swap re-scan), **Server** (dashboard),
 **Settings**, and **About**.
 
@@ -112,8 +112,8 @@ and **Radio** (Sub-GHz / 2.4 GHz, shown when the multi-radio cap is attached), p
 > card. The firmware creates that folder on first run and lists each file with an "SD" badge
 > alongside the built-in scripts. One script per `.txt` file, standard DuckyScript syntax.
 
-### Radio — Sub-GHz & 2.4 GHz (multi-radio cap)
-Requires the CC1101/NRF24 expansion cap; the **Radio** entry is greyed out when no cap is detected.
+### Radio — Sub-GHz & 2.4 GHz (expansion cap)
+Requires a supported top-header radio cap (the CC1101+NRF24 multi-radio cap, or the M5Stack Cap CC1101 & NFC for Sub-GHz only); the **Radio** entry is greyed out when no cap is detected.
 - **Sub-GHz Band Sweep** - CC1101 RSSI read across the 315 / 433.92 / 868.35 / 915 MHz presets while you hold a remote's button, with a peak-held bar per band and the strongest highlighted — tells you *which band* an unknown remote transmits on before you try to capture it. Reads energy, not modulation (independent of OOK vs FSK).
 - **Sub-GHz OOK Capture & Replay** - CC1101-based raw OOK capture and replay across 315 / 433.92 / 868.35 / 915 MHz (e.g. simple remotes and sensors), with a pulse-train preview of the captured signal.
 - **Sub-GHz FSK Capture & Replay** - CC1101 FSK demodulated capture (2-FSK / GFSK / MSK) for constant-amplitude remotes the OOK envelope-slicer can't see, chosen from a table of common modem presets (deviation / data rate / RX bandwidth), stored so a captured signal replays under its own configuration. Constant-amplitude modulation carries no envelope, so unknown deviation/data-rate is a preset search, not a read — and rolling-code targets won't actuate on replay (this is not an SDR).
@@ -223,8 +223,9 @@ Most features run on a bare Cardputer. These need extra hardware:
 
 | Feature | Requires | Attaches via |
 |---------|----------|--------------|
-| Radio — Sub-GHz OOK capture/replay, 2.4 GHz analyzer | CC1101 + NRF24 multi-radio expansion cap | Top expansion header |
-| IR Record & Replay | multi-radio cap (IR receiver) — the built-in Cardputer IR emitter is transmit-only | Top expansion header |
+| Radio — Sub-GHz (OOK/FSK capture/replay, band sweep, jamming) | **either** the CC1101 + NRF24 multi-radio cap **or** the M5Stack Cap CC1101 & NFC (Sub-GHz only; the NFC chip itself has no driver yet) | Top expansion header |
+| Radio — 2.4 GHz spectrum analyzer | CC1101 + NRF24 multi-radio cap (uses the NRF24) | Top expansion header |
+| IR Record & Replay | CC1101 + NRF24 multi-radio cap (IR receiver) — the built-in Cardputer IR emitter is transmit-only | Top expansion header |
 | Wardriving GPS coordinates | M5Stack GNSS/LoRa cap (onboard GPS), or a Grove-port GPS module (AT6668/ATGM336H-class NMEA) | Expansion header, or Grove port (UART) |
 | RFID Audit | MFRC522 NFC/RFID reader (13.56 MHz, I2C) | Grove port (I2C) |
 | BadUSB / Mouse Jiggler | none — native USB-OTG | Cardputer only (no external module) |
