@@ -63,6 +63,32 @@ void test_forcemultiradio_with_present_probes(void) {
                      ExpansionCap::MultiRadio);
 }
 
+// --- Cap CC1101 & NFC: only resolved when the legacy radios are both absent ---
+
+void test_auto_cc1101nfc_only_is_cc1101nfc(void) {
+    TEST_ASSERT_TRUE(resolveExpansionCap(false, false, CapOverride::Auto, true) ==
+                     ExpansionCap::Cc1101Nfc);
+}
+
+void test_auto_legacy_cc1101_wins_over_cc1101nfc(void) {
+    // Should never both read true in practice (disjoint pin sets probed in
+    // sequence), but the legacy cap must take precedence if it ever did.
+    TEST_ASSERT_TRUE(resolveExpansionCap(true, false, CapOverride::Auto, true) ==
+                     ExpansionCap::MultiRadio);
+}
+
+void test_forcecc1101nfc_wins_over_failed_probe(void) {
+    TEST_ASSERT_TRUE(resolveExpansionCap(false, false,
+                                         CapOverride::ForceCc1101Nfc) ==
+                     ExpansionCap::Cc1101Nfc);
+}
+
+void test_forcecc1101nfc_wins_over_legacy_probe(void) {
+    TEST_ASSERT_TRUE(resolveExpansionCap(true, true,
+                                         CapOverride::ForceCc1101Nfc) ==
+                     ExpansionCap::Cc1101Nfc);
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_auto_no_radio_is_none);
@@ -72,5 +98,9 @@ int main(int, char**) {
     RUN_TEST(test_forcenone_ignores_present_probes);
     RUN_TEST(test_forcemultiradio_wins_over_failed_probe);
     RUN_TEST(test_forcemultiradio_with_present_probes);
+    RUN_TEST(test_auto_cc1101nfc_only_is_cc1101nfc);
+    RUN_TEST(test_auto_legacy_cc1101_wins_over_cc1101nfc);
+    RUN_TEST(test_forcecc1101nfc_wins_over_failed_probe);
+    RUN_TEST(test_forcecc1101nfc_wins_over_legacy_probe);
     return UNITY_END();
 }

@@ -23,6 +23,7 @@ const char* overrideName(hal::CapOverride ov) {
         case hal::CapOverride::Auto:            return "Auto";
         case hal::CapOverride::ForceNone:       return "Force None";
         case hal::CapOverride::ForceMultiRadio: return "Force Cap";
+        case hal::CapOverride::ForceCc1101Nfc:  return "Force CC1101+NFC";
     }
     return "?";
 }
@@ -116,6 +117,8 @@ void ModulesScreen::cycleOverride() {
         case CapOverride::ForceNone:
             settings.wireless.capOverride = CapOverride::ForceMultiRadio; break;
         case CapOverride::ForceMultiRadio:
+            settings.wireless.capOverride = CapOverride::ForceCc1101Nfc; break;
+        case CapOverride::ForceCc1101Nfc:
             settings.wireless.capOverride = CapOverride::Auto; break;
     }
     SettingsManager::getInstance().save();
@@ -181,11 +184,12 @@ void ModulesScreen::drawContent(Canvas& canvas) {
 #ifdef ESP32
     int16_t y = BODY_TOP;
 
-    const bool capPresent =
-        hal::resolvedExpansionCap() == hal::ExpansionCap::MultiRadio;
+    const hal::ExpansionCap cap = hal::resolvedExpansionCap();
+    const bool capPresent = cap != hal::ExpansionCap::None;
     char capDetail[24];
     snprintf(capDetail, sizeof capDetail, "CC1101 v0x%02X",
-             hal::lastCapProbe().cc1101Version);
+             cap == hal::ExpansionCap::Cc1101Nfc ? hal::lastCapProbe().cc1101NfcVersion
+                                                  : hal::lastCapProbe().cc1101Version);
     drawRow(canvas, y, "Sub-GHz Cap", capPresent,
             capPresent ? capDetail : "SPI header");
     y += theme::LIST_ITEM_HEIGHT;

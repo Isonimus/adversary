@@ -56,7 +56,7 @@ void WardrivingScreen::show() {
     auto& gps = GPSManager::getInstance();
     if (!gps.isDetected()) {
         gps.startBackgroundDetection(
-            hal::resolvedExpansionCap() != hal::ExpansionCap::MultiRadio);
+            hal::resolvedExpansionCap() == hal::ExpansionCap::None);
     }
     
     footerHints_.setHints({}); // Will be set dynamically in render

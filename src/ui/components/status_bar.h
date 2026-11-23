@@ -238,7 +238,7 @@ private:
     template<typename Display>
     static int16_t renderCapStatus(Display& display, int16_t rightEdge) {
 #ifdef ESP32
-        if (hal::resolvedExpansionCap() != hal::ExpansionCap::MultiRadio) return rightEdge;
+        if (hal::resolvedExpansionCap() == hal::ExpansionCap::None) return rightEdge;
 
         const char* badge = "RF";
         int16_t badgeWidth = strlen(badge) * theme::FONT_CELL_WIDTH;

@@ -13,6 +13,8 @@
 
 using adversary::hal::Cc1101FreqRegs;
 using adversary::hal::cc1101FreqRegs;
+using adversary::hal::Cc1101NfcSwitchState;
+using adversary::hal::cc1101NfcSwitchState;
 
 void setUp(void) {}
 void tearDown(void) {}
@@ -37,6 +39,27 @@ void test_freq_915(void) { assertRegs(915.0, 0x23, 0x31, 0x3B); }
 // (FREQ0 0x40 rounded vs 0x3F truncated), so dropping the +0.5 fails here.
 void test_freq_rounds_to_nearest(void) { assertRegs(433.9002, 0x10, 0xB0, 0x40); }
 
+// --- Cap CC1101 & NFC antenna-switch state (RF_SW0/RF_SW1 per TI's 3 valid
+// sub-1GHz bands: 300-348 / 387-464 / 779-928 MHz) ---------------------------
+
+static void assertSwitch(double mhz, bool sw0, bool sw1) {
+    Cc1101NfcSwitchState s = cc1101NfcSwitchState(mhz);
+    TEST_ASSERT_EQUAL(sw0, s.sw0);
+    TEST_ASSERT_EQUAL(sw1, s.sw1);
+}
+
+void test_switch_315_band(void) { assertSwitch(315.0, false, true); }
+void test_switch_433_band(void) { assertSwitch(433.92, true, false); }
+void test_switch_868_band(void) { assertSwitch(868.35, true, true); }
+void test_switch_915_band(void) { assertSwitch(915.0, true, true); }
+
+// Boundary: just below/above the 315<->433 midpoint (367.5) and the
+// 433<->868 midpoint (621.5).
+void test_switch_below_315_433_boundary(void) { assertSwitch(367.4, false, true); }
+void test_switch_above_315_433_boundary(void) { assertSwitch(367.6, true, false); }
+void test_switch_below_433_868_boundary(void) { assertSwitch(621.4, true, false); }
+void test_switch_above_433_868_boundary(void) { assertSwitch(621.6, true, true); }
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_freq_43392);
@@ -44,5 +67,13 @@ int main(int, char**) {
     RUN_TEST(test_freq_86835);
     RUN_TEST(test_freq_915);
     RUN_TEST(test_freq_rounds_to_nearest);
+    RUN_TEST(test_switch_315_band);
+    RUN_TEST(test_switch_433_band);
+    RUN_TEST(test_switch_868_band);
+    RUN_TEST(test_switch_915_band);
+    RUN_TEST(test_switch_below_315_433_boundary);
+    RUN_TEST(test_switch_above_315_433_boundary);
+    RUN_TEST(test_switch_below_433_868_boundary);
+    RUN_TEST(test_switch_above_433_868_boundary);
     return UNITY_END();
 }

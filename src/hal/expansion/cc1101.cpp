@@ -19,6 +19,7 @@
 #include "cc1101.h"
 
 #include "cap_bus.h"
+#include "expansion_cap.h"
 #include "../../config/pins.h"
 #include "../storage/sd_manager.h"
 
@@ -37,6 +38,12 @@ namespace {
 
 // --- CC1101 register addresses (datasheet single-access addresses) -----------
 constexpr uint8_t REG_IOCFG2   = 0x00;
+// GDOx_CFG=0x2F = "HW to 0"; with GDOx_INV (bit 6) set, the same pin reads "HW
+// to 1" (TI SWRS061 Table 41 -- verified against the datasheet, not memory).
+// The Cap CC1101 & NFC's RF_SW1 line is wired to this chip's GDO2 pin, so this
+// is how its antenna switch is driven; the legacy cap never reads this value.
+constexpr uint8_t GDOX_CFG_HW_TO_0 = 0x2F;
+constexpr uint8_t GDOX_INV_BIT     = 0x40;
 constexpr uint8_t REG_IOCFG0   = 0x02;
 constexpr uint8_t REG_FIFOTHR  = 0x03;
 constexpr uint8_t REG_PKTLEN   = 0x06;
@@ -116,43 +123,111 @@ constexpr uint32_t STATE_TIMEOUT_US = 5000;
 // Drive the CC1101 chip-select as an output, de-asserted. Kept driven for the
 // whole radio session; cc1101Idle() restores it to the SD-safe INPUT_PULLUP.
 void selectChipSelectOutput() {
-    pinMode(pins::CC1101_CS, OUTPUT);
-    digitalWrite(pins::CC1101_CS, HIGH);
+    pinMode(pins::activeCc1101Cs, OUTPUT);
+    digitalWrite(pins::activeCc1101Cs, HIGH);
 }
 
 void writeReg(SPIClass* bus, uint8_t addr, uint8_t value) {
     bus->beginTransaction(capSpiSettings());
-    digitalWrite(pins::CC1101_CS, LOW);
+    digitalWrite(pins::activeCc1101Cs, LOW);
     bus->transfer(addr);
     bus->transfer(value);
-    digitalWrite(pins::CC1101_CS, HIGH);
+    digitalWrite(pins::activeCc1101Cs, HIGH);
     bus->endTransaction();
+}
+
+// Drive the Cap CC1101 & NFC's 2-signal RF switch for the chosen carrier. A
+// no-op on the legacy multi-radio cap, which has no such switch. Must run
+// AFTER the IOCFG2=0x0D write above: it deliberately overrides that register
+// (GDO2 is consumed by this cap's antenna switch, not exposed as a data pin --
+// only GDO0/IOCFG0 is, and that write is untouched).
+void driveCc1101NfcAntennaSwitch(SPIClass* bus, double carrierMHz) {
+    if (resolvedExpansionCap() != ExpansionCap::Cc1101Nfc) return;
+    const Cc1101NfcSwitchState sw = cc1101NfcSwitchState(carrierMHz);
+    pinMode(pins::CC1101NFC_RFSW0, OUTPUT);
+    digitalWrite(pins::CC1101NFC_RFSW0, sw.sw0 ? HIGH : LOW);
+    writeReg(bus, REG_IOCFG2, GDOX_CFG_HW_TO_0 | (sw.sw1 ? GDOX_INV_BIT : 0));
+    LOG_I("CC1101", "NFC cap antenna switch: %.2f MHz -> SW0=%d SW1=%d",
+          carrierMHz, sw.sw0, sw.sw1);
 }
 
 uint8_t readStatusReg(SPIClass* bus, uint8_t addr) {
     bus->beginTransaction(capSpiSettings());
-    digitalWrite(pins::CC1101_CS, LOW);
+    digitalWrite(pins::activeCc1101Cs, LOW);
     bus->transfer(READ_BURST | addr);
     uint8_t value = bus->transfer(0x00);
-    digitalWrite(pins::CC1101_CS, HIGH);
+    digitalWrite(pins::activeCc1101Cs, HIGH);
     bus->endTransaction();
     return value;
 }
 
+// Datasheet-timed SO/MISO-low wait (SS19.1.1/19.1.2): CHIP_RDYn observed on SO
+// while CSn is held low, proving the crystal has stabilised. Best-effort: a
+// chip that is already stable (SO already low) returns immediately, and a
+// genuinely absent chip still lets the caller proceed to waitChipReady(),
+// which is the real pass/fail gate either way.
+bool waitMisoLow(uint32_t timeoutUs) {
+    uint32_t start = micros();
+    while (digitalRead(pins::SD_MISO) != LOW) {
+        if (micros() - start > timeoutUs) return false;
+    }
+    return true;
+}
+
+// Full manual power-up/reset per SS19.1.2, Figure 27. strobe(SRES) below is a
+// blind "pulse CS, send SRES" -- the datasheet's own text says that is valid
+// only "if the user wants to reset the CC1101" from an already-running state;
+// first contact after a less certain power-up needs the explicit SO-low
+// handshake (wait low, send SRES, wait low again) instead. Cap CC1101 & NFC
+// only -- the legacy cap's existing blind strobe is untouched.
+constexpr uint32_t XOSC_WAIT_TIMEOUT_US = 5000;  // generous vs typical crystal startup
+
+void cc1101NfcManualReset(SPIClass* bus) {
+    const int8_t cs = pins::activeCc1101Cs;
+    // No pinMode() on SD_MISO: the shared SPIClass bus already owns and
+    // configures that pin (SDManager owns it). Reconfiguring it here was
+    // found to destabilise the SD card's own use of the same physical pin,
+    // observed on real hardware as repeated "sdWait failed" / "f_mount
+    // failed" errors starting right when this code began running. A plain
+    // digitalRead() samples the pad level directly regardless of which
+    // peripheral the GPIO matrix also routes it to, so no mode change is
+    // needed to read it.
+
+    // Wake-up pulse: CS low then high, held at least 40us from the initial low
+    // (a plain GPIO wiggle -- the datasheet shows no SPI clocking here).
+    uint32_t pulseStart = micros();
+    digitalWrite(cs, LOW);
+    digitalWrite(cs, HIGH);
+    while (micros() - pulseStart < 40) { /* busy-wait the required 40us */ }
+
+    // CS low again, then wait for SO to go low (oscillator stable) before
+    // issuing SRES, per Figure 27.
+    digitalWrite(cs, LOW);
+    waitMisoLow(XOSC_WAIT_TIMEOUT_US);
+
+    bus->beginTransaction(capSpiSettings());
+    bus->transfer(STROBE_SRES);
+    bus->endTransaction();
+
+    // Wait for SO low again: reset complete, chip in IDLE.
+    waitMisoLow(XOSC_WAIT_TIMEOUT_US);
+    digitalWrite(cs, HIGH);
+}
+
 void strobe(SPIClass* bus, uint8_t command) {
     bus->beginTransaction(capSpiSettings());
-    digitalWrite(pins::CC1101_CS, LOW);
+    digitalWrite(pins::activeCc1101Cs, LOW);
     bus->transfer(command);
-    digitalWrite(pins::CC1101_CS, HIGH);
+    digitalWrite(pins::activeCc1101Cs, HIGH);
     bus->endTransaction();
 }
 
 void writePaTable(SPIClass* bus, const uint8_t (&table)[8]) {
     bus->beginTransaction(capSpiSettings());
-    digitalWrite(pins::CC1101_CS, LOW);
+    digitalWrite(pins::activeCc1101Cs, LOW);
     bus->transfer(WRITE_BURST | REG_PATABLE);
     for (uint8_t byte : table) bus->transfer(byte);
-    digitalWrite(pins::CC1101_CS, HIGH);
+    digitalWrite(pins::activeCc1101Cs, HIGH);
     bus->endTransaction();
 }
 
@@ -166,6 +241,12 @@ bool waitChipReady(SPIClass* bus) {
         if (version == CC1101_VERSION_EXPECTED) return true;
     } while (micros() - start < CHIP_READY_TIMEOUT_US);
     LOG_E("CC1101", "chip-ready timeout, VERSION=0x%02X (expected 0x%02X)",
+          version, CC1101_VERSION_EXPECTED);
+    // LOG_E on-device only reaches the SD error-log file; if that file fails
+    // to open (e.g. the card is in a bad state), the message above is silently
+    // dropped. LOG_W always reaches Serial regardless, so this failure is never
+    // invisible again.
+    LOG_W("CC1101", "chip-ready timeout, VERSION=0x%02X (expected 0x%02X)",
           version, CC1101_VERSION_EXPECTED);
     return false;
 }
@@ -187,6 +268,7 @@ bool enterState(uint8_t strobeCommand, uint8_t targetState) {
         if (marc == targetState) return true;
     } while (micros() - start < STATE_TIMEOUT_US);
     LOG_E("CC1101", "MARCSTATE never reached 0x%02X", targetState);
+    LOG_W("CC1101", "MARCSTATE never reached 0x%02X", targetState);  // see waitChipReady note on LOG_E/SD masking
     return false;
 }
 
@@ -202,7 +284,11 @@ bool cc1101ConfigureOok(double carrierMHz) {
     deselectSdCard();
     selectChipSelectOutput();
 
-    strobe(bus, STROBE_SRES);
+    if (resolvedExpansionCap() == ExpansionCap::Cc1101Nfc) {
+        cc1101NfcManualReset(bus);
+    } else {
+        strobe(bus, STROBE_SRES);
+    }
     if (!waitChipReady(bus)) return false;
 
     const Cc1101FreqRegs freq = cc1101FreqRegs(carrierMHz);
@@ -238,6 +324,7 @@ bool cc1101ConfigureOok(double carrierMHz) {
     writeReg(bus, REG_PKTCTRL0, 0x32);  // async serial, infinite length
     writeReg(bus, REG_IOCFG2, 0x0D);
     writeReg(bus, REG_IOCFG0, 0x0D);    // GDO0 = async serial data (RX out / TX in)
+    driveCc1101NfcAntennaSwitch(bus, carrierMHz);
     writeReg(bus, REG_ADDR, 0x00);
     writeReg(bus, REG_PKTLEN, 0x00);
 
@@ -263,7 +350,11 @@ bool cc1101ConfigureFsk(double carrierMHz, uint8_t modFormat, double deviationHz
     deselectSdCard();
     selectChipSelectOutput();
 
-    strobe(bus, STROBE_SRES);
+    if (resolvedExpansionCap() == ExpansionCap::Cc1101Nfc) {
+        cc1101NfcManualReset(bus);
+    } else {
+        strobe(bus, STROBE_SRES);
+    }
     if (!waitChipReady(bus)) return false;
 
     const Cc1101FreqRegs freq = cc1101FreqRegs(carrierMHz);
@@ -307,6 +398,7 @@ bool cc1101ConfigureFsk(double carrierMHz, uint8_t modFormat, double deviationHz
     writeReg(bus, REG_PKTCTRL0, 0x32);  // async serial, infinite length
     writeReg(bus, REG_IOCFG2, 0x0D);
     writeReg(bus, REG_IOCFG0, 0x0D);    // GDO0 = async serial data (RX out / TX in)
+    driveCc1101NfcAntennaSwitch(bus, carrierMHz);
     writeReg(bus, REG_ADDR, 0x00);
     writeReg(bus, REG_PKTLEN, 0x00);
 
@@ -339,7 +431,7 @@ void cc1101Idle() {
     strobe(bus, STROBE_SPWD);
 
     // Restore the SD-safe de-asserted chip-select (matches the mount-time state).
-    releaseChipSelect(pins::CC1101_CS);
+    releaseChipSelect(pins::activeCc1101Cs);
 }
 
 #else  // !TARGET_CARDPUTER

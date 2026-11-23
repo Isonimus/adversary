@@ -25,6 +25,7 @@ namespace hal {
 enum class ExpansionCap : uint8_t {
     None,
     MultiRadio,  // CC1101 + NRF24L01 + IR cap
+    Cc1101Nfc,   // Cap CC1101 & NFC: CC1101 only (NFC/ST25R3916 has no driver yet)
 };
 
 /**
@@ -37,6 +38,7 @@ enum class CapOverride : uint8_t {
     Auto,             // trust the SPI probes
     ForceNone,        // no cap regardless of probe
     ForceMultiRadio,  // multi-radio cap regardless of probe
+    ForceCc1101Nfc,   // Cap CC1101 & NFC regardless of probe
 };
 
 /**
@@ -48,17 +50,21 @@ enum class CapOverride : uint8_t {
  * multi-radio cap is present iff either of its radios answered its probe.
  */
 inline ExpansionCap resolveExpansionCap(bool cc1101Present, bool nrf24Present,
-                                        CapOverride ov) {
+                                        CapOverride ov,
+                                        bool cc1101NfcPresent = false) {
     switch (ov) {
         case CapOverride::ForceNone:
             return ExpansionCap::None;
         case CapOverride::ForceMultiRadio:
             return ExpansionCap::MultiRadio;
+        case CapOverride::ForceCc1101Nfc:
+            return ExpansionCap::Cc1101Nfc;
         case CapOverride::Auto:
             break;  // fall through to the probe-driven decision
     }
-    return (cc1101Present || nrf24Present) ? ExpansionCap::MultiRadio
-                                           : ExpansionCap::None;
+    if (cc1101Present || nrf24Present) return ExpansionCap::MultiRadio;
+    if (cc1101NfcPresent) return ExpansionCap::Cc1101Nfc;
+    return ExpansionCap::None;
 }
 
 /**
@@ -68,6 +74,8 @@ struct CapProbeResult {
     bool cc1101Present = false;
     uint8_t cc1101Version = 0;  // raw CC1101 VERSION byte (0x00/0xFF = absent bus)
     bool nrf24Present = false;
+    bool cc1101NfcPresent = false;
+    uint8_t cc1101NfcVersion = 0;  // VERSION byte read on the Cap CC1101 & NFC pin layout
 };
 
 // --- Hardware probes (firmware-only; defined in expansion_cap.cpp) ------------
@@ -89,6 +97,15 @@ bool probeCC1101();
  *         register is restored afterwards. Must run AFTER the SD mount.
  */
 bool probeNRF24();
+
+/**
+ * @brief Probe the CC1101 on the Cap CC1101 & NFC pin layout (CS=G5, shares the
+ *        SD-borrowed SPI bus like the legacy multi-radio cap's probe).
+ * @return true iff VERSION reads a plausible silicon revision. Only run when
+ *         the legacy multi-radio cap's own probe came back absent, so a seated
+ *         legacy cap is never mistaken for this one. Must run AFTER SD mount.
+ */
+bool probeCC1101NfcVariant();
 
 /**
  * @brief Run the probes (unless overridden) and resolve the attached cap.
