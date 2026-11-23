@@ -25,15 +25,16 @@ listed here, that is drift — investigate before trusting the build.
   below predates the latest release tag, so a release can't be cut on an unverified
   snapshot (slice-0080). Keeping this stamp current on every release keeps the gate green.
 
-Last verified: 2026-11-18: native 1129/1129, cardputer + m5stick builds SUCCESS.
-Re-resolved all three envs for the v0.10.0-alpha release cut. The owned
+Last verified: 2026-11-21: native 1162/1162, cardputer + m5stick builds SUCCESS.
+Re-resolved all three envs for the v0.11.0-alpha release cut. The owned
 Isonimus/esp32-arduino-adv-libs v0.1.1 drop-in URL is unchanged, and the pinned
 ZIP SHA256 in `scripts/build-zip-checksums.json` still matches; its package manifest
-now reports the version string as `5.5.1+sha.8410210c9a0` (same upstream ESP-IDF
-commit, same `ieee80211_raw_frame_sanity_check` WEAK overlay). Library trees in all
-three envs are otherwise identical to the prior snapshot. Native count moved 1107 to
-1129 over the 0.9.0 to 0.10.0 cycle: +22 tests for slice-0160's QoS-Null frame
-builder and predicate.
+reports the version string as `5.5.1+sha.8410210c9a0` (same upstream ESP-IDF commit,
+same `ieee80211_raw_frame_sanity_check` WEAK overlay). Library trees in all three
+envs are identical to the prior v0.10.0 snapshot. Native count moved 1129 to 1162
+over the 0.10.0 to 0.11.0 cycle: +15 for slice-0162's autohunt scoring and backoff
+helpers, +9 for slice-0165's rolling-status policy, the remainder across slice-0163's
+observed-client surfacing and the deauth-guard regression.
 
 Note on the shared package cache: `pio pkg list -e native` can report
 `framework-arduinoespressif32 @ 3.3.7` because resolving the host `native` platform pings

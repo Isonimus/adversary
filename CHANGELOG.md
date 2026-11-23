@@ -7,6 +7,18 @@ releases, this can be replaced by a git-tag-generated changelog.
 ---
 
 
+## 2026-11-21 (v0.11.0-alpha)
+
+Codename: **TARGETED HUNT**. v0.10.0 taught the hunt to pick *which attack* per target (PMF-aware). This release teaches it to pick *which targets*: a live per-target score orders selection, an exponential backoff retires AP's that keep not yielding, and a rolling status line finally says what the engine is doing.
+
+- **Auto Hunt scores targets and backs off dead ones.** Target order is driven by a composite score (RSSI, observed-client count, prior-success weighting), and a run of empty strikes against the same AP earns an exponential cooldown so the radio stops hammering an unproductive target. The selection logic is pure and host-tested byte-exact. (slice-0162; ADR-0161)
+- **Observed-client count reaches the scorer.** `handshake_capture` now surfaces the number of distinct clients it has seen on the current target, so the scoring predicate can prefer an AP with real stations in sight over one that is only beacons. (slice-0163)
+- **The engine narrates itself.** A rolling status line on the handshake screen surfaces target rotations, quiet-client nudges, strike starts and captures while they happen, with a priority-with-dwell overlap policy so a higher-priority event preempts a lower-priority one but a transient flicker cannot. The policy helper is pure and host-tested. (slice-0165; ADR-0164)
+- **Quieter serial on the deauth start path.** Calling `WiFi.disconnect()` before the WiFi driver has been initialised routed through STA.cpp:530 and printed `[E][STA.cpp:530] disconnect(): STA disconnect failed! 0x3001: ESP_ERR_WIFI_NOT_INIT` on every deauth start after a fresh boot or a prior stop. The call is now guarded by `esp_wifi_get_mode()`, matching the pattern in `main.cpp:145`.
+
+Internal: `release.yml` now ships `dashboard-<version>.zip` as a release artifact alongside the dio factory image, so an operator on a stock M5Burner install can drop the dashboard onto the SD without cloning the repo (interim fix; the firmware-embed form is tracked for v0.12.0). CI's cppcheck gate learned PROGMEM, got pinned to a specific runner image, and had a stale suppression renamed. Native suite 1129 to 1162: +15 for slice-0162's scoring and backoff helpers, +9 for slice-0165's rolling-status policy, the remainder for the observed-client surfacing and the deauth-guard regression.
+
+
 ## 2026-11-18 (v0.10.0-alpha)
 
 Codename: **PMF-AWARE HUNT**. The hunt now reads 802.11w and chooses its weapon per target: deauth where it still works, 802.11v BTM steering where it does not, and a QoS-Null nudge to pull quiet clients into view before the strike.
