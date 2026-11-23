@@ -25,8 +25,9 @@ listed here, that is drift — investigate before trusting the build.
   below predates the latest release tag, so a release can't be cut on an unverified
   snapshot (slice-0080). Keeping this stamp current on every release keeps the gate green.
 
-Last verified: 2026-11-21: native 1162/1162, cardputer + m5stick builds SUCCESS.
-Re-resolved all three envs for the v0.11.0-alpha release cut. The owned
+Last verified: 2026-11-23: native 1162/1162, cardputer + m5stick builds SUCCESS.
+Re-resolved all three envs for the v0.11.0-alpha release cut (date re-stamped
+when the gate caught the push landing two days after the local verification). The owned
 Isonimus/esp32-arduino-adv-libs v0.1.1 drop-in URL is unchanged, and the pinned
 ZIP SHA256 in `scripts/build-zip-checksums.json` still matches; its package manifest
 reports the version string as `5.5.1+sha.8410210c9a0` (same upstream ESP-IDF commit,
