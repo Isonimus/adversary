@@ -23,6 +23,7 @@ const char* overrideName(hal::CapOverride ov) {
         case hal::CapOverride::Auto:            return "Auto";
         case hal::CapOverride::ForceNone:       return "Force None";
         case hal::CapOverride::ForceMultiRadio: return "Force Cap";
+        case hal::CapOverride::ForceCc1101Nfc:  return "Force CC1101+NFC";
     }
     return "?";
 }
@@ -116,6 +117,8 @@ void ModulesScreen::cycleOverride() {
         case CapOverride::ForceNone:
             settings.wireless.capOverride = CapOverride::ForceMultiRadio; break;
         case CapOverride::ForceMultiRadio:
+            settings.wireless.capOverride = CapOverride::ForceCc1101Nfc; break;
+        case CapOverride::ForceCc1101Nfc:
             settings.wireless.capOverride = CapOverride::Auto; break;
     }
     SettingsManager::getInstance().save();

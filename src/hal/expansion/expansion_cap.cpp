@@ -243,13 +243,16 @@ ExpansionCap detectExpansionCap(CapOverride ov) {
         // Only probe the second pin layout when the legacy cap's own probe
         // came back empty, so a seated legacy cap is never double-counted.
         if (!cc1101 && !nrf24) {
+#if defined(TARGET_CARDPUTER)
             // probeNRF24() above drove this same physical pin (G3) LOW as the
             // legacy cap's NRF24 CE; on this cap it is POWER_EN, the DC-DC
             // regulator enable for both the CC1101 and the NFC chip. Restore
             // it and give the rail a moment to settle before trusting a read.
+            // CC1101NFC_* pins are Cardputer-only (pins.h), hence the guard.
             pinMode(pins::CC1101NFC_POWER_EN, OUTPUT);
             digitalWrite(pins::CC1101NFC_POWER_EN, HIGH);
             delay(5);
+#endif
             cc1101Nfc = probeCC1101NfcVariant();
         }
     }
