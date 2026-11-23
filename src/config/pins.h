@@ -66,6 +66,27 @@ constexpr int8_t NRF24_CE    = 3;   // NRF24L01 chip-enable
 constexpr int8_t CAP_IR_TX   = 6;   // Cap IR transmitter (3 emitters, one line) — distinct from built-in IR_TX (44)
 constexpr int8_t CAP_IR_RX   = 5;   // Cap IR receiver
 
+// Cap CC1101 & NFC (M5Stack "Cap CC1101 & NFC", compatible with Cardputer-ADV)
+// — a different board than the multi-radio cap above, but mounted on the same
+// top-side header, so these pins deliberately overlap LORA_NSS / CC1101_CS /
+// CC1101_GDO0 too (only one cap is ever seated — see the note above). Only the
+// CC1101 half is driven here: the NFC chip (ST25R3916) has no on-device driver
+// in this repo yet, so NFC_CS/NFC_IRQ are reserved for future use and never
+// touched today.
+constexpr int8_t CC1101NFC_CS    = 5;   // CC1101 chip-select (NSS) on this cap
+constexpr int8_t CC1101NFC_GDO0  = 15;  // CC1101 GDO0 on this cap
+constexpr int8_t CC1101NFC_RFSW0 = 13;  // RF band switch (0/1=315MHz, 1/0=433MHz, 1/1=868-915MHz; switch1 is driven via CC1101 GDO2 over SPI, not a host GPIO)
+constexpr int8_t NFC_CS  = 6;   // ST25R3916 chip-select — reserved, unused
+constexpr int8_t NFC_IRQ = 4;   // ST25R3916 IRQ — reserved, unused
+
+// Runtime-resolved CC1101 pins: hal::detectExpansionCap() points these at
+// whichever cap's pin layout actually probed present (legacy multi-radio cap
+// or Cap CC1101 & NFC), so cc1101.cpp and ook_rmt.cpp drive one CC1101 driver
+// against either board without knowing which is attached. Default to the
+// legacy multi-radio cap's pins until detection has run once.
+extern int8_t activeCc1101Cs;
+extern int8_t activeCc1101Gdo0;
+
 // ===========================================
 // M5StickC Plus2 Pin Definitions
 // ===========================================

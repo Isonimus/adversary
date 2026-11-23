@@ -84,7 +84,7 @@ void symbolsToSignal(const rmt_symbol_word_t* symbols, size_t count, OokSignal& 
 
 bool ookRmtCapture(uint32_t windowMs, OokSignal& out) {
     rmt_rx_channel_config_t rxConfig = {};
-    rxConfig.gpio_num = static_cast<gpio_num_t>(pins::CC1101_GDO0);
+    rxConfig.gpio_num = static_cast<gpio_num_t>(pins::activeCc1101Gdo0);
     rxConfig.clk_src = RMT_CLK_SRC_DEFAULT;
     rxConfig.resolution_hz = RMT_RESOLUTION_HZ;
     rxConfig.mem_block_symbols = RMT_MEM_BLOCK_SYMBOLS;
@@ -158,7 +158,7 @@ bool ookRmtReplay(const OokSignal& sig) {
     }
 
     rmt_tx_channel_config_t txConfig = {};
-    txConfig.gpio_num = static_cast<gpio_num_t>(pins::CC1101_GDO0);
+    txConfig.gpio_num = static_cast<gpio_num_t>(pins::activeCc1101Gdo0);
     txConfig.clk_src = RMT_CLK_SRC_DEFAULT;
     txConfig.resolution_hz = RMT_RESOLUTION_HZ;
     txConfig.mem_block_symbols = RMT_MEM_BLOCK_SYMBOLS;
@@ -202,7 +202,7 @@ bool ookRmtReplay(const OokSignal& sig) {
 }
 
 bool ookJamBurst(JamMode mode, uint32_t chunkMs) {
-    const int pin = pins::CC1101_GDO0;
+    const int pin = pins::activeCc1101Gdo0;
     pinMode(pin, OUTPUT);
 
     bool ok = true;

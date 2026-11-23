@@ -27,6 +27,15 @@
 #endif
 
 namespace adversary {
+namespace pins {
+#if defined(TARGET_CARDPUTER)
+// Defaults to the legacy multi-radio cap's pins until detectExpansionCap() has
+// run once and (if a Cap CC1101 & NFC answered instead) repoints these.
+int8_t activeCc1101Cs = CC1101_CS;
+int8_t activeCc1101Gdo0 = CC1101_GDO0;
+#endif
+} // namespace pins
+
 namespace hal {
 
 namespace {
@@ -137,6 +146,34 @@ bool probeNRF24() {
 #endif
 }
 
+bool probeCC1101NfcVariant() {
+#if defined(TARGET_CARDPUTER)
+    SPIClass* bus = SDManager::getInstance().spiBus();
+    if (!bus) return false;
+
+    deselectSdCard();
+    pinMode(pins::CC1101NFC_CS, OUTPUT);
+    digitalWrite(pins::CC1101NFC_CS, HIGH);
+
+    bus->beginTransaction(capSpiSettings());
+    digitalWrite(pins::CC1101NFC_CS, LOW);
+    bus->transfer(CC1101_READ_BURST | CC1101_REG_VERSION);
+    uint8_t version = bus->transfer(0x00);
+    digitalWrite(pins::CC1101NFC_CS, HIGH);
+    bus->endTransaction();
+
+    releaseChipSelect(pins::CC1101NFC_CS);
+
+    s_lastProbe.cc1101NfcVersion = version;
+    bool present = (version != 0x00 && version != 0xFF);
+    LOG_I("CAP", "CC1101(Cap CC1101 & NFC) VERSION=0x%02X -> %s", version,
+          present ? "present" : "absent");
+    return present;
+#else
+    return false;
+#endif
+}
+
 #if defined(TARGET_CARDPUTER)
 namespace {
 
@@ -144,12 +181,33 @@ namespace {
 // stops lighting from a floating CE) before the operator asks for RF. Only
 // called once the multi-radio cap is the resolved cap, so driving NRF24_CE
 // (G3) low never holds a LoRa cap's RST line.
+// Idle + power-down strobes for whichever CC1101 is active (shared by both
+// cap variants; the only difference between them is the chip-select pin).
+void idleCc1101(int8_t cs) {
+    SPIClass* bus = SDManager::getInstance().spiBus();
+    if (!bus) return;
+
+    deselectSdCard();
+    pinMode(cs, OUTPUT);
+    digitalWrite(cs, HIGH);
+    bus->beginTransaction(capSpiSettings());
+    digitalWrite(cs, LOW);
+    bus->transfer(CC1101_STROBE_SIDLE);
+    digitalWrite(cs, HIGH);
+    digitalWrite(cs, LOW);
+    bus->transfer(CC1101_STROBE_SPWD);
+    digitalWrite(cs, HIGH);
+    bus->endTransaction();
+    releaseChipSelect(cs);
+}
+
 void capRadiosToIdle() {
     SPIClass* bus = SDManager::getInstance().spiBus();
     if (!bus) return;
 
     deselectSdCard();
-    // NRF24: hold CE low and power the radio down.
+    // NRF24: hold CE low and power the radio down. Only the legacy
+    // multi-radio cap has one; the Cap CC1101 & NFC does not.
     pinMode(pins::NRF24_CE, OUTPUT);
     digitalWrite(pins::NRF24_CE, LOW);
     pinMode(pins::NRF24_CS, OUTPUT);
@@ -163,18 +221,7 @@ void capRadiosToIdle() {
     releaseChipSelect(pins::NRF24_CS);
     // NRF24_CE stays driven LOW as the idle hold — not on the SPI bus.
 
-    // CC1101: idle then power-down strobes.
-    pinMode(pins::CC1101_CS, OUTPUT);
-    digitalWrite(pins::CC1101_CS, HIGH);
-    bus->beginTransaction(capSpiSettings());
-    digitalWrite(pins::CC1101_CS, LOW);
-    bus->transfer(CC1101_STROBE_SIDLE);
-    digitalWrite(pins::CC1101_CS, HIGH);
-    digitalWrite(pins::CC1101_CS, LOW);
-    bus->transfer(CC1101_STROBE_SPWD);
-    digitalWrite(pins::CC1101_CS, HIGH);
-    bus->endTransaction();
-    releaseChipSelect(pins::CC1101_CS);
+    idleCc1101(pins::CC1101_CS);
 }
 
 }  // namespace
@@ -183,6 +230,7 @@ void capRadiosToIdle() {
 ExpansionCap detectExpansionCap(CapOverride ov) {
     bool cc1101 = false;
     bool nrf24 = false;
+    bool cc1101Nfc = false;
     if (ov == CapOverride::Auto) {
 #if defined(TARGET_CARDPUTER)
         if (!SDManager::getInstance().spiBus()) {
@@ -192,14 +240,26 @@ ExpansionCap detectExpansionCap(CapOverride ov) {
 #endif
         cc1101 = probeCC1101();
         nrf24 = probeNRF24();
+        // Only probe the second pin layout when the legacy cap's own probe
+        // came back empty, so a seated legacy cap is never double-counted.
+        if (!cc1101 && !nrf24) {
+            cc1101Nfc = probeCC1101NfcVariant();
+        }
     }
     s_lastProbe.cc1101Present = cc1101;
     s_lastProbe.nrf24Present = nrf24;
-    s_cap = resolveExpansionCap(cc1101, nrf24, ov);
+    s_lastProbe.cc1101NfcPresent = cc1101Nfc;
+    s_cap = resolveExpansionCap(cc1101, nrf24, ov, cc1101Nfc);
 
 #if defined(TARGET_CARDPUTER)
     if (s_cap == ExpansionCap::MultiRadio) {
+        pins::activeCc1101Cs = pins::CC1101_CS;
+        pins::activeCc1101Gdo0 = pins::CC1101_GDO0;
         capRadiosToIdle();
+    } else if (s_cap == ExpansionCap::Cc1101Nfc) {
+        pins::activeCc1101Cs = pins::CC1101NFC_CS;
+        pins::activeCc1101Gdo0 = pins::CC1101NFC_GDO0;
+        idleCc1101(pins::activeCc1101Cs);
     }
 #endif
     return s_cap;

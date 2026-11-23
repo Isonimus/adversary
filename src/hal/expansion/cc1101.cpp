@@ -116,43 +116,43 @@ constexpr uint32_t STATE_TIMEOUT_US = 5000;
 // Drive the CC1101 chip-select as an output, de-asserted. Kept driven for the
 // whole radio session; cc1101Idle() restores it to the SD-safe INPUT_PULLUP.
 void selectChipSelectOutput() {
-    pinMode(pins::CC1101_CS, OUTPUT);
-    digitalWrite(pins::CC1101_CS, HIGH);
+    pinMode(pins::activeCc1101Cs, OUTPUT);
+    digitalWrite(pins::activeCc1101Cs, HIGH);
 }
 
 void writeReg(SPIClass* bus, uint8_t addr, uint8_t value) {
     bus->beginTransaction(capSpiSettings());
-    digitalWrite(pins::CC1101_CS, LOW);
+    digitalWrite(pins::activeCc1101Cs, LOW);
     bus->transfer(addr);
     bus->transfer(value);
-    digitalWrite(pins::CC1101_CS, HIGH);
+    digitalWrite(pins::activeCc1101Cs, HIGH);
     bus->endTransaction();
 }
 
 uint8_t readStatusReg(SPIClass* bus, uint8_t addr) {
     bus->beginTransaction(capSpiSettings());
-    digitalWrite(pins::CC1101_CS, LOW);
+    digitalWrite(pins::activeCc1101Cs, LOW);
     bus->transfer(READ_BURST | addr);
     uint8_t value = bus->transfer(0x00);
-    digitalWrite(pins::CC1101_CS, HIGH);
+    digitalWrite(pins::activeCc1101Cs, HIGH);
     bus->endTransaction();
     return value;
 }
 
 void strobe(SPIClass* bus, uint8_t command) {
     bus->beginTransaction(capSpiSettings());
-    digitalWrite(pins::CC1101_CS, LOW);
+    digitalWrite(pins::activeCc1101Cs, LOW);
     bus->transfer(command);
-    digitalWrite(pins::CC1101_CS, HIGH);
+    digitalWrite(pins::activeCc1101Cs, HIGH);
     bus->endTransaction();
 }
 
 void writePaTable(SPIClass* bus, const uint8_t (&table)[8]) {
     bus->beginTransaction(capSpiSettings());
-    digitalWrite(pins::CC1101_CS, LOW);
+    digitalWrite(pins::activeCc1101Cs, LOW);
     bus->transfer(WRITE_BURST | REG_PATABLE);
     for (uint8_t byte : table) bus->transfer(byte);
-    digitalWrite(pins::CC1101_CS, HIGH);
+    digitalWrite(pins::activeCc1101Cs, HIGH);
     bus->endTransaction();
 }
 
@@ -339,7 +339,7 @@ void cc1101Idle() {
     strobe(bus, STROBE_SPWD);
 
     // Restore the SD-safe de-asserted chip-select (matches the mount-time state).
-    releaseChipSelect(pins::CC1101_CS);
+    releaseChipSelect(pins::activeCc1101Cs);
 }
 
 #else  // !TARGET_CARDPUTER
