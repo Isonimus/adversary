@@ -142,9 +142,7 @@ Requires a supported top-header radio cap (the CC1101+NRF24 multi-radio cap, or 
 - All uploads go over a certificate-validated TLS connection (Mozilla root-CA bundle, no `setInsecure()`), heap-paced to avoid OOM on large uploads.
 
 ### Server / Dashboard Mode
-- Serves a web dashboard from the SD card for browser-based review of captures and status. The device's access point is WPA2-protected with an auto-generated per-device key (shown on the Server screen, overridable in Settings), and the dashboard itself adds path-traversal protection and HTTP auth enabled by default.
-
-> **One-time dashboard setup.** The dashboard web assets are served off the SD card at `/adversary/dashboard/` and are **not** included in the firmware image: a fresh M5Burner or web-flasher install leaves that folder empty and the dashboard renders as a blank page until the files are on the card. To fix it, grab `dashboard-vX.Y.Z-alpha.zip` from the matching [GitHub Release](https://github.com/Isonimus/adversary/releases) and extract it onto the SD root so the layout ends up at `/<SD>/adversary/dashboard/index.html`. Re-insert the card and the dashboard will load. Contributors building from source have [scripts/deploy_dashboard.sh](scripts/deploy_dashboard.sh) instead (see [Deploying the dashboard](#deploying-the-dashboard)).
+- Serves a web dashboard, baked into the firmware image, for browser-based review of captures and status. The device's access point is WPA2-protected with an auto-generated per-device key (shown on the Server screen, overridable in Settings), and the dashboard gates access with a form-based session login (enabled by default; set a password on-device under Settings &rarr; Dashboard before first use).
 
 <p align="center">
   <a href="docs/screenshots/dashboard-1.png"><img src="docs/screenshots/dashboard-1.png" alt="Web dashboard — system configuration" width="240"></a>
@@ -401,7 +399,7 @@ Main Carousel
 │   ├── BadUSB (HID)       - USB keystroke injection (Cardputer only)
 │   └── Mouse Jiggler      - Anti-idle-lock mouse movement (Cardputer only)
 ├── Radio                  - Sub-GHz OOK capture/replay + 2.4 GHz analyzer (requires multi-radio cap)
-├── Server                 - Web dashboard (served from SD card)
+├── Server                 - Web dashboard (served from firmware flash)
 ├── Settings               - Configuration options
 └── About
 ```
@@ -515,9 +513,6 @@ capture, per service) shows as colored dots in the Captures screen.
 │   │   └── *.pcap                - Raw packet captures
 │   └── credentials/
 │       └── *.json                - Evil Twin credentials
-├── dashboard/
-│   └── index.html, ...           - Web dashboard (Server mode); deploy with
-│                                    scripts/deploy_dashboard.sh (see Development)
 ├── screenshots/
 │   └── shot_NNN.bmp              - Screen captures (Fn + S)
 └── logs/
@@ -634,21 +629,13 @@ pio test -e native -f test_handshake_capture
 pio test -e native --verbose
 ```
 
-### Deploying the dashboard
+### Iterating on the dashboard
 
-The web dashboard is served directly off the SD card from `/adversary/dashboard/`.
-Its source lives in `dashboard_dev/`, and nothing syncs the two automatically —
-editing `dashboard_dev/` has no effect on the device until the files are copied
-onto the card. Pop the SD into a card reader and run:
-
-```bash
-# <sd_mount_path> is where the card is mounted, e.g. /media/$USER/CARDPUTER
-scripts/deploy_dashboard.sh <sd_mount_path>
-```
-
-The script copies every asset, verifies each file's size on the card matches the
-source (a truncated or 0-byte write renders as a blank dashboard), and flushes
-the card before reporting success.
+The web dashboard source lives in `dashboard_dev/` and is baked into the
+firmware image at build time (`board_build.embed_files` in `platformio.ini`),
+served straight from flash by the device (ADR-0168). Editing the files has no
+effect on the device until the firmware is rebuilt and reflashed; there is no
+SD-side copy to sync.
 
 ### Code Standards
 
