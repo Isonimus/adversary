@@ -4,86 +4,192 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Adversary - Authentication Required</title>
+    <title>Adversary - Sign In</title>
+    <!--
+      Inline CSS by design (ADR-0170): the login page is the only pre-auth
+      surface, so it cannot depend on /index.css. Tokens mirror the dashboard
+      shell palette so the two read as one product.
+    -->
     <style>
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
+        :root {
+            --bg-color: #0c0c0c;
+            --bg-secondary: #181818;
+            --card-bg: rgba(26, 26, 26, 0.9);
+            --border-color: #2a2a2a;
+            --accent: #ff3e3e;
+            --accent-light: #ff6666;
+            --accent-dark: #800000;
+            --text-primary: #e0e0e0;
+            --text-secondary: #888;
+            --error: #ff3e3e;
+            --font-main: 'Outfit', 'Inter', -apple-system, sans-serif;
         }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
 
         body {
-            background: #0c0c0c;
-            color: #e0e0e0;
-            font-family: 'Outfit', 'Inter', -apple-system, sans-serif;
+            background: var(--bg-color);
+            color: var(--text-primary);
+            font-family: var(--font-main);
             min-height: 100vh;
             display: flex;
-            flex-direction: column;
             align-items: center;
             justify-content: center;
-            padding: 2rem;
+            padding: 1.5rem;
         }
 
-        .container {
-            background: rgba(26, 26, 26, 0.9);
-            border: 1px solid #2a2a2a;
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
             border-radius: 16px;
-            padding: 3rem;
-            text-align: center;
-            max-width: 400px;
+            padding: 2.5rem 2rem;
             width: 100%;
+            max-width: 380px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
         }
 
         .logo {
-            font-size: 2rem;
+            font-size: 1.75rem;
             font-weight: 700;
             letter-spacing: 3px;
-            color: #ff3e3e;
-            margin-bottom: 1.5rem;
+            color: var(--accent);
+            text-align: center;
+            margin-bottom: 0.25rem;
         }
 
-        h1 {
-            font-size: 1.3rem;
-            margin-bottom: 1rem;
-            color: #fff;
-        }
-
-        p {
-            color: #888;
+        .subtitle {
+            color: var(--text-secondary);
+            text-align: center;
+            font-size: 0.85rem;
             margin-bottom: 2rem;
-            line-height: 1.6;
+            letter-spacing: 1px;
         }
+
+        .field { display: block; margin-bottom: 1rem; }
+
+        .field label {
+            display: block;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 0.4rem;
+        }
+
+        .field input {
+            width: 100%;
+            padding: 0.75rem 0.9rem;
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            font-family: inherit;
+            font-size: 1rem;
+            transition: border-color 0.2s;
+        }
+
+        .field input:focus { outline: none; border-color: var(--accent); }
 
         .btn {
-            display: inline-block;
-            background: #ff3e3e;
-            color: white;
-            padding: 0.9rem 2rem;
+            display: block;
+            width: 100%;
+            margin-top: 0.75rem;
+            padding: 0.85rem;
+            background: var(--accent);
+            color: #fff;
+            border: none;
             border-radius: 8px;
-            text-decoration: none;
+            font-family: inherit;
+            font-size: 1rem;
             font-weight: 600;
-            transition: opacity 0.3s;
+            letter-spacing: 1px;
+            cursor: pointer;
+            transition: background 0.2s;
         }
 
-        .btn:hover {
-            opacity: 0.8;
-        }
+        .btn:hover:not(:disabled) { background: var(--accent-light); }
+        .btn:disabled { opacity: 0.6; cursor: not-allowed; }
 
-        .icon {
-            font-size: 3rem;
+        .error {
+            display: none;
             margin-bottom: 1rem;
+            padding: 0.6rem 0.8rem;
+            border: 1px solid var(--error);
+            border-radius: 6px;
+            color: var(--error);
+            background: rgba(255, 62, 62, 0.08);
+            font-size: 0.9rem;
+            text-align: center;
         }
+
+        .error.visible { display: block; }
     </style>
 </head>
 
 <body>
-    <div class="container">
-        <div class="icon">🔐</div>
+    <form class="card" id="login-form" autocomplete="on">
         <div class="logo">ADVERSARY</div>
-        <h1>Authentication Required</h1>
-        <p>This dashboard is protected. Please authenticate to continue.</p>
-        <a href="/" class="btn">Sign In</a>
-    </div>
+        <div class="subtitle">DASHBOARD SIGN IN</div>
+
+        <div class="error" id="error-msg" role="alert">Invalid username or password.</div>
+
+        <div class="field">
+            <label for="username">Username</label>
+            <input type="text" id="username" name="username" autocomplete="username"
+                   required autofocus>
+        </div>
+        <div class="field">
+            <label for="password">Password</label>
+            <input type="password" id="password" name="password"
+                   autocomplete="current-password" required>
+        </div>
+
+        <button type="submit" class="btn" id="submit-btn">Sign In</button>
+    </form>
+
+    <script>
+        (function () {
+            const form = document.getElementById('login-form');
+            const errorEl = document.getElementById('error-msg');
+            const submitBtn = document.getElementById('submit-btn');
+
+            form.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                errorEl.classList.remove('visible');
+                submitBtn.disabled = true;
+                submitBtn.textContent = 'Signing in...';
+
+                const body = new URLSearchParams();
+                body.append('username', form.username.value);
+                body.append('password', form.password.value);
+
+                try {
+                    const res = await fetch('/api/login', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: body.toString(),
+                        credentials: 'same-origin'
+                    });
+                    if (res.ok) {
+                        window.location = '/';
+                        return;
+                    }
+                    errorEl.textContent = (res.status === 401)
+                        ? 'Invalid username or password.'
+                        : 'Sign-in failed (' + res.status + ').';
+                    errorEl.classList.add('visible');
+                } catch (err) {
+                    errorEl.textContent = 'Network error. Please try again.';
+                    errorEl.classList.add('visible');
+                } finally {
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'Sign In';
+                    form.password.value = '';
+                    form.password.focus();
+                }
+            });
+        })();
+    </script>
 </body>
 
 </html>

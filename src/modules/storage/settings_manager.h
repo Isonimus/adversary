@@ -91,7 +91,7 @@ struct SystemSettings {
     bool showHeapLargestBlock = false;
 
     // Dashboard Server Settings
-    bool dashboardAuthEnabled = true;       // Enable HTTP basic auth (secure default)
+    bool dashboardAuthEnabled = true;       // Enable the dashboard login gate (secure default)
     char dashboardUsername[33] = "admin";   // Auth username (if enabled)
     char dashboardPassword[33] = "";        // Auth password (if enabled)
     // WPA2 key for the dashboard SoftAP link (slice-0036). Empty = auto-generate a

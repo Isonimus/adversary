@@ -242,6 +242,18 @@ bool ServerManager::setupWebServer() {
     server_->on("/success.txt", [this]() { server_->send(200, "text/plain", "success"); }); // Android (Some versions need direct response)
     server_->on("/ncsi.txt", [this]() { server_->send(200, "text/plain", "Microsoft NCSI"); }); // Windows
 
+    // The arduino-esp32 WebServer drops request headers that were not asked
+    // for; without this, the Cookie header never reaches the handlers and
+    // session auth would always see "no cookie" (ADR-0170).
+    const char* kTrackedHeaders[] = {"Cookie"};
+    server_->collectHeaders(kTrackedHeaders, 1);
+
+    // Form-based session login (ADR-0170, slice-0171). These three routes are
+    // the public surface — they must NOT go through checkAuth(), or we loop
+    // the operator back to the login page.
+    server_->on("/api/login",  HTTP_POST, [this]() { handleLogin(); });
+    server_->on("/api/logout", HTTP_POST, [this]() { handleLogout(); });
+
     // API Routes
     server_->on("/api/info", HTTP_GET, [this]() { handleApiInfo(); });
     server_->on("/api/settings", HTTP_GET, [this]() { handleApiSettings(); });
@@ -326,7 +338,11 @@ void ServerManager::handleNotFound() {
     const DashboardAsset* asset =
         resolveDashboardAsset(kDashboardAssets, kDashboardAssetCount, server_->uri().c_str());
     if (asset != nullptr) {
-        if (!checkAuth()) return;
+        // Public surface: /login.html must be reachable without a session so
+        // the redirect target from checkAuth() does not loop (ADR-0170). The
+        // other three shell files stay gated.
+        bool isPublic = (strcmp(asset->requestPath, "/login.html") == 0);
+        if (!isPublic && !checkAuth()) return;
         sendDashboardAsset(*asset);
         return;
     }
@@ -736,15 +752,150 @@ bool ServerManager::checkAuth() {
     auto& settings = SettingsManager::getInstance().get();
     if (!settings.system.dashboardAuthEnabled) return true;
 
-    if (!server_->authenticate(settings.system.dashboardUsername, settings.system.dashboardPassword)) {
-        server_->requestAuthentication(BASIC_AUTH, "Adversary Dashboard");
-        return false;
+    // Form-based session auth (ADR-0170). Pull the Cookie header (registered
+    // via collectHeaders in setupWebServer; without that the arduino-esp32
+    // WebServer drops it), parse out adv_session, and validate against the
+    // in-RAM session table. Idle + absolute TTLs both apply.
+    char token[33] = {};
+    bool haveToken = false;
+    if (server_->hasHeader("Cookie")) {
+        haveToken = extractSessionToken(server_->header("Cookie").c_str(),
+                                        token, sizeof(token));
     }
-    return true;
+    if (haveToken &&
+        validateSession(sessions_, kMaxSessions, token, millis(), kIdleTtlMs, kAbsTtlMs)) {
+        return true;
+    }
+
+    // No session. For an API request, hand back a JSON 401 so dashboard.js can
+    // detect expiry and redirect; for a page request, 302 to the login form.
+    String uri = server_->uri();
+    if (uri.startsWith("/api/")) {
+        server_->sendHeader("Connection", "close");
+        server_->send(401, "application/json", "{\"error\":\"unauthorized\"}");
+    } else {
+        server_->sendHeader("Location", "/login.html", true);
+        server_->send(302, "text/plain", "");
+    }
+    return false;
 #else
     return true;
 #endif
 }
+
+#ifdef ESP32
+void ServerManager::generateSessionToken(char* out) {
+    static const char kHex[] = "0123456789abcdef";
+    // 128 bits = 16 bytes = 32 hex chars. esp_random() is the established
+    // CSPRNG (used for MACs and the AP password).
+    for (int i = 0; i < 4; ++i) {
+        uint32_t r = esp_random();
+        for (int j = 0; j < 8; ++j) {
+            out[i * 8 + j] = kHex[(r >> (j * 4)) & 0x0F];
+        }
+    }
+    out[32] = '\0';
+}
+
+// Constant-time byte-for-byte compare up to the longer of the two NUL-terminated
+// inputs. Avoids a password-length side channel on the login path.
+static bool constantTimeEquals(const char* a, const char* b) {
+    size_t la = strlen(a);
+    size_t lb = strlen(b);
+    size_t n  = (la > lb) ? la : lb;
+    unsigned diff = static_cast<unsigned>(la ^ lb);
+    for (size_t i = 0; i < n; ++i) {
+        unsigned char ca = (i < la) ? static_cast<unsigned char>(a[i]) : 0;
+        unsigned char cb = (i < lb) ? static_cast<unsigned char>(b[i]) : 0;
+        diff |= (ca ^ cb);
+    }
+    return diff == 0;
+}
+
+void ServerManager::handleLogin() {
+    requestCount_++;
+    lastRequestTime_ = millis();
+
+    auto& settings = SettingsManager::getInstance().get();
+
+    // If auth is disabled or no password is set, there is nothing to log into.
+    if (!settings.system.dashboardAuthEnabled ||
+        settings.system.dashboardPassword[0] == '\0') {
+        server_->send(400, "application/json",
+                      "{\"error\":\"login_not_available\"}");
+        return;
+    }
+
+    // Accept both application/x-www-form-urlencoded (WebServer parses args())
+    // and application/json. Form is the primary; JSON is a convenience for
+    // scripted clients.
+    String user;
+    String pass;
+    if (server_->hasArg("username") && server_->hasArg("password")) {
+        user = server_->arg("username");
+        pass = server_->arg("password");
+    } else if (server_->hasArg("plain")) {
+        JsonDocument doc;
+        if (deserializeJson(doc, server_->arg("plain"))) {
+            server_->send(400, "application/json", "{\"error\":\"bad_body\"}");
+            return;
+        }
+        user = (const char*)(doc["username"] | "");
+        pass = (const char*)(doc["password"] | "");
+    } else {
+        server_->send(400, "application/json", "{\"error\":\"missing_credentials\"}");
+        return;
+    }
+
+    bool ok = constantTimeEquals(user.c_str(), settings.system.dashboardUsername) &&
+              constantTimeEquals(pass.c_str(), settings.system.dashboardPassword);
+    if (!ok) {
+        // Fixed delay regardless of failure mode; a tiny brake on brute force
+        // without a stateful rate limiter (out of scope per ADR-0170).
+        delay(250);
+        server_->sendHeader("Connection", "close");
+        server_->send(401, "application/json", "{\"error\":\"invalid_credentials\"}");
+        return;
+    }
+
+    char token[33];
+    generateSessionToken(token);
+    if (!createSession(sessions_, kMaxSessions, token, millis())) {
+        server_->send(500, "application/json", "{\"error\":\"session_store_failed\"}");
+        return;
+    }
+
+    // adv_session: HttpOnly blocks document.cookie; SameSite=Strict blocks
+    // cross-site POSTs so we get CSRF protection for free; Path=/ scopes to
+    // every dashboard route. No Secure attribute: the dashboard is served
+    // over HTTP on the device AP, where confidentiality rests on WPA2
+    // (ADR-0170).
+    char cookie[128];
+    snprintf(cookie, sizeof(cookie),
+             "adv_session=%s; HttpOnly; SameSite=Strict; Path=/; Max-Age=%u",
+             token, static_cast<unsigned>(kAbsTtlMs / 1000u));
+    server_->sendHeader("Set-Cookie", cookie);
+    server_->sendHeader("Connection", "close");
+    server_->send(200, "application/json", "{\"ok\":true}");
+}
+
+void ServerManager::handleLogout() {
+    requestCount_++;
+    lastRequestTime_ = millis();
+
+    char token[33] = {};
+    if (server_->hasHeader("Cookie") &&
+        extractSessionToken(server_->header("Cookie").c_str(), token, sizeof(token))) {
+        clearSession(sessions_, kMaxSessions, token);
+    }
+    // Expire the cookie regardless of whether we found a matching session, so
+    // a stale cookie on the client is cleared.
+    server_->sendHeader("Set-Cookie",
+                        "adv_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0");
+    server_->sendHeader("Connection", "close");
+    server_->send(200, "application/json", "{\"ok\":true}");
+}
+#endif
 
 int ServerManager::getConnectedStations() const {
 #ifdef ESP32

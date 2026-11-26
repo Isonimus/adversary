@@ -50,7 +50,13 @@ class Dashboard {
         // Navigation Events
         this.nav.addEventListener('click', (e) => {
             const li = e.target.closest('li');
-            if (li) {
+            if (!li) return;
+            // Logout is a nav item but not a view — route it separately.
+            if (li.dataset.action === 'logout') {
+                this.logout();
+                return;
+            }
+            if (li.dataset.view) {
                 this.switchView(li.dataset.view);
                 // Close sidebar on mobile after selection
                 if (window.innerWidth <= 768) {
@@ -121,6 +127,13 @@ class Dashboard {
     async fetchData(endpoint, options = {}) {
         try {
             const response = await fetch(`${this.apiBase}${endpoint}`, options);
+            // Form-based session auth (ADR-0170): a 401 means the cookie is
+            // missing or expired. Bounce to the styled login page so the
+            // operator can re-authenticate instead of staring at a disconnect.
+            if (response.status === 401) {
+                window.location = '/login.html';
+                return null;
+            }
             if (!response.ok) throw new Error('Network error');
             return await response.json();
         } catch (err) {
@@ -129,6 +142,18 @@ class Dashboard {
             document.getElementById('connection-status').style.color = 'var(--accent)';
             return null;
         }
+    }
+
+    async logout() {
+        try {
+            await fetch('/api/logout', { method: 'POST', credentials: 'same-origin' });
+        } catch (err) {
+            // Even if the POST fails (e.g. AP flake), the server-side session
+            // will expire on its own; clearing the client cookie is the only
+            // locally meaningful step and the server owns that. Fall through.
+            console.warn('[Dashboard] logout POST failed:', err);
+        }
+        window.location = '/login.html';
     }
 
     /* --- Theme Support --- */
@@ -245,6 +270,7 @@ class Dashboard {
 
         try {
             const response = await fetch(`${this.apiBase}/files/wardriving/${encodeURIComponent(name)}`);
+            if (response.status === 401) { window.location = '/login.html'; return; }
             if (!response.ok) throw new Error('Failed to fetch CSV');
             const csvText = await response.text();
 

@@ -11,6 +11,7 @@
 #include <memory>
 
 #include "dashboard_assets.h"
+#include "session_store.h"
 
 #ifdef ESP32
 #include <WebServer.h>
@@ -102,7 +103,9 @@ private:
     // Route handlers
     void handleRoot();
     void handleNotFound();
-    
+    void handleLogin();
+    void handleLogout();
+
     // API handlers
     void handleApiInfo();
     void handleApiSettings();
@@ -121,6 +124,19 @@ private:
 
     // Send an embedded dashboard shell asset straight from flash (slice-0169).
     void sendDashboardAsset(const DashboardAsset& asset);
+
+    // Form-based session auth (ADR-0170, slice-0171).
+    // Four concurrent logins is enough for an operator and a spare browser
+    // tab; the LRU evicts beyond that. Both TTLs apply: idle bounds a stale
+    // open tab, absolute bounds a long-lived cookie.
+    static constexpr size_t   kMaxSessions = 4;
+    static constexpr uint32_t kIdleTtlMs   = 30u * 60u * 1000u;   // 30 minutes
+    static constexpr uint32_t kAbsTtlMs    = 12u * 60u * 60u * 1000u;  // 12 hours
+    Session sessions_[kMaxSessions] = {};
+
+    // Generate a 32-hex-char token (128 bits from esp_random) into @p out
+    // (NUL-terminated; out must be at least 33 bytes).
+    void generateSessionToken(char* out);
 
     bool running_;
     uint32_t startTime_;
