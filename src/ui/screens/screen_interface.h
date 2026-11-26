@@ -52,6 +52,7 @@ enum class ScreenId : uint8_t {
     HID_MOUSE_JIGGLER,
     RADIO,
     MODULES,
+    STORAGE,
     WHATS_NEW
 };
 

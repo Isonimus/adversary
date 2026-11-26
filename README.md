@@ -47,8 +47,8 @@ Adversary is for **educational and research purposes only.** Unauthorized access
 
 The main menu is a carousel: **Wireless**, **BLE**, **Infrared**, **RFID**, **HID**,
 and **Radio** (Sub-GHz / 2.4 GHz, shown when a supported radio cap is attached), plus
-**Modules** (live peripheral inventory + hot-swap re-scan), **Server** (dashboard),
-**Settings**, and **About**.
+**Storage** (read-only SD overview), **Modules** (live peripheral inventory + hot-swap
+re-scan), **Server** (dashboard), **Settings**, and **About**.
 
 <table>
   <tr>
@@ -128,6 +128,9 @@ Requires a supported top-header radio cap (the CC1101+NRF24 multi-radio cap, or 
 - **RFID Audit** - MFRC522-based (13.56 MHz, I2C) NFC/RFID tag reading and dumping.
 - **RFID Write / Clone** - Restore a saved `.nfc` dump onto a MIFARE Classic 1K card: all data blocks with the recovered keys, plus optional UID cloning on magic cards (Gen2/CUID direct-write and Gen1a backdoor). Reports the detected card type and every block outcome.
 - **Magic card detection** - Flags UID-rewritable (Gen1a) cards via a backdoor probe.
+
+### Storage
+- **SD Storage view** - A read-only overview answering "where is my stuff on the card?": SD capacity plus a per-folder breakdown (file count + size) for handshakes, credentials, packets, wardriving, SubGHz, IR codes, BadUSB scripts, the dashboard, logs and coredumps. No file management (the per-type screens own that) — just a one-glance confirmation that a capture or script landed and how full the card is. The tile greys out when no card is mounted.
 
 ### Modules
 - **Module inventory & hot-swap re-scan** - A live view of which peripherals are attached right now (Sub-GHz/2.4 GHz cap, RFID reader, GPS) with a **Re-scan** action, so a module seated after boot is detected without a reboot — its greyed-out menu tile un-greys as soon as the re-scan finds it. Also surfaces the cap-detection override. Seat the module while the radio bus is idle, then Re-scan.

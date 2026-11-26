@@ -156,6 +156,15 @@ std::vector<CarouselItem> buildCarouselItems() {
                              []{ return adversary::hal::resolvedExpansionCap() !=
                                         adversary::hal::ExpansionCap::None; }});
 
+    // SD Storage view — read-only overview of the `/adversary/` tree + card
+    // capacity. Placed before MODULES because more operators will reach for SD
+    // than for external modules (slice-0167). Tile always visible, greyed when
+    // the card is not mounted. Labelled "STORAGE" (not "SD") since the icon
+    // already carries the "SD" glyph — the word would be redundant.
+    carouselItems.push_back({"STORAGE", adversary::assets::ICON_SD, ACTION_STORAGE,
+                             false, "SD not mounted",
+                             []{ return SDManager::getInstance().isReady(); }});
+
     // Modules entry — live peripheral inventory + hot-swap Re-scan (slice-0018).
     carouselItems.push_back({"MODULES", adversary::assets::ICON_MODULES, ACTION_MODULES,
                              true, "", nullptr});

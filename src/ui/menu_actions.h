@@ -51,5 +51,8 @@ enum MenuActionId {
     ACTION_RADIO = 700,
 
     // Module inventory / hot-swap re-detection (slice-0018)
-    ACTION_MODULES = 701
+    ACTION_MODULES = 701,
+
+    // SD Storage view (slice-0167)
+    ACTION_STORAGE = 702
 };

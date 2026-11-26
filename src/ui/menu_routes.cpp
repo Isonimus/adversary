@@ -47,6 +47,7 @@ constexpr MenuRoute MENU_ROUTES[] = {
     // Cap / modules / rfid / server
     {ACTION_RADIO,             ScreenId::RADIO,            false, AppState::IDLE},
     {ACTION_MODULES,           ScreenId::MODULES,          false, AppState::IDLE},
+    {ACTION_STORAGE,           ScreenId::STORAGE,          false, AppState::IDLE},
     {ACTION_RFID_DASHBOARD,    ScreenId::RFID,             false, AppState::IDLE},
     {ACTION_RFID_WRITE,        ScreenId::RFID,             false, AppState::IDLE},
     {ACTION_SERVER,            ScreenId::SERVER_MENU,      false, AppState::IDLE},
