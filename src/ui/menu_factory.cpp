@@ -169,17 +169,14 @@ std::vector<CarouselItem> buildCarouselItems() {
     carouselItems.push_back({"MODULES", adversary::assets::ICON_MODULES, ACTION_MODULES,
                              true, "", nullptr});
 
-    // Server entry - serves the dashboard straight off SD, so it needs both a
-    // mounted card and the dashboard files. Distinguish the two so the greyed-tile
-    // reason is honest instead of always blaming a missing index (slice-0021). The
-    // fileExists() check stays build-time (SD I/O must not run per-frame in the
-    // carousel's live enabledFn); a menu rebuild on Retry SD Mount refreshes it.
-    const bool sdReadyForServer = sdManager.isReady();
-    const bool serverEnabled = sdReadyForServer &&
-        sdManager.fileExists("/adversary/dashboard/index.html");
-    const char* serverDisabledReason = sdReadyForServer ? "Dashboard index missing"
-                                                        : "No SD card";
-    carouselItems.push_back({"SERVER", adversary::assets::ICON_SERVER, ACTION_SERVER, serverEnabled, serverDisabledReason, nullptr});
+    // Server entry - the dashboard shell is embedded in the firmware (ADR-0168,
+    // slice-0169), so it is always present; the server only needs a mounted card
+    // for the capture data the /api/* endpoints read live. Gate on SD-ready alone,
+    // so the sole greyed reason is "No SD card" (the former "Dashboard index
+    // missing" state can no longer occur). isReady() is a cached bool, safe to read
+    // per build; a menu rebuild on Retry SD Mount refreshes it.
+    carouselItems.push_back({"SERVER", adversary::assets::ICON_SERVER, ACTION_SERVER,
+                             sdManager.isReady(), "No SD card", nullptr});
 
     carouselItems.push_back({"SETTINGS", adversary::assets::ICON_SETTINGS, ACTION_SETTINGS, true, "", nullptr});
     carouselItems.push_back({"ABOUT", adversary::assets::ICON_ABOUT, ACTION_ABOUT, true, "", nullptr});

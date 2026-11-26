@@ -19,7 +19,7 @@
 #endif
 
 #include "../../config/config.h"
-#include "../../utils/path_security.h"
+#include "dashboard_assets.h"
 #include "../../utils/wifi_password.h"
 
 #ifdef ESP32
@@ -27,6 +27,31 @@
 #endif
 
 namespace adversary {
+
+#ifdef ESP32
+// Dashboard shell embedded into the image via board_build.embed_files (ADR-0168,
+// slice-0169). The _binary_<path>_start/_end symbols are linker-emitted and bound
+// each file's bytes in flash .rodata; same idiom as the CA bundle in tls_upload.cpp.
+// Symbol names derive from the embed path (dashboard_dev/<file>, non-alnum -> '_').
+extern const uint8_t dashboard_index_start[] asm("_binary_dashboard_dev_index_html_start");
+extern const uint8_t dashboard_index_end[]   asm("_binary_dashboard_dev_index_html_end");
+extern const uint8_t dashboard_js_start[]     asm("_binary_dashboard_dev_dashboard_js_start");
+extern const uint8_t dashboard_js_end[]       asm("_binary_dashboard_dev_dashboard_js_end");
+extern const uint8_t dashboard_css_start[]    asm("_binary_dashboard_dev_index_css_start");
+extern const uint8_t dashboard_css_end[]      asm("_binary_dashboard_dev_index_css_end");
+extern const uint8_t dashboard_login_start[]  asm("_binary_dashboard_dev_login_html_start");
+extern const uint8_t dashboard_login_end[]    asm("_binary_dashboard_dev_login_html_end");
+
+namespace {
+const DashboardAsset kDashboardAssets[] = {
+    {"/index.html",   dashboard_index_start, dashboard_index_end, "text/html"},
+    {"/dashboard.js", dashboard_js_start,    dashboard_js_end,    "application/javascript"},
+    {"/index.css",    dashboard_css_start,   dashboard_css_end,   "text/css"},
+    {"/login.html",   dashboard_login_start, dashboard_login_end, "text/html"},
+};
+constexpr size_t kDashboardAssetCount = sizeof(kDashboardAssets) / sizeof(kDashboardAssets[0]);
+}  // namespace
+#endif
 
 ServerManager::ServerManager() 
     : running_(false)
@@ -272,64 +297,40 @@ void ServerManager::handleRoot() {
     if (!checkAuth()) return;
 
 #ifdef ESP32
-    // Check if index.html exists on SD
-    static const char* index_path = "/adversary/dashboard/index.html";
-    if (SDManager::getInstance().fileExists(index_path)) {
-        File file = SD.open(index_path, "r");
-        if (file) {
-            server_->streamFile(file, "text/html");
-            file.close();
-        } else {
-             server_->send(500, "text/plain", "Failed to open index.html");
-        }
-    } else {
-        server_->send(200, "text/html", 
-            "<h1>Adversary Dashboard</h1>"
-            "<p>Dashboard files missing on SD card.</p>"
-            "<p>Please create <code>/adversary/dashboard/index.html</code></p>");
-    }
+    // The dashboard index is embedded in flash (ADR-0168, slice-0169), so it is
+    // always present; no SD read and no "files missing" fallback.
+    const DashboardAsset* index =
+        resolveDashboardAsset(kDashboardAssets, kDashboardAssetCount, "/index.html");
+    sendDashboardAsset(*index);
 #endif
 }
+
+#ifdef ESP32
+void ServerManager::sendDashboardAsset(const DashboardAsset& asset) {
+    // send_P with an explicit length: embed_files bytes are not null-terminated,
+    // so a C-string overload would overrun. The bytes are flash-mapped .rodata.
+    server_->send_P(200, asset.contentType,
+                    reinterpret_cast<const char*>(asset.start),
+                    dashboardAssetLen(asset));
+}
+#endif
 
 void ServerManager::handleNotFound() {
     requestCount_++;
     lastRequestTime_ = millis();
 #ifdef ESP32
-    // Try to serve file from SD
-    String path = urlDecode(server_->uri());
-    if (path == "/") path = "/index.html";
-
-    // Reject path traversal before joining to the dashboard base dir, otherwise
-    // "/../config/settings.json" etc. would escape and read arbitrary SD files.
-    if (!path_security::isSafeWebPath(path.c_str())) {
-        LOG_W("SERVER", "Rejected unsafe path: %s", path.c_str());
-        server_->send(400, "text/plain", "Bad Request");
+    // Dashboard shell: served from embedded flash assets (ADR-0168, slice-0169).
+    // Exact-match resolution means an unknown or traversal path simply does not
+    // match and falls through to the API/captive handling below, so there is no
+    // filesystem path to escape and no separate traversal guard is needed.
+    const DashboardAsset* asset =
+        resolveDashboardAsset(kDashboardAssets, kDashboardAssetCount, server_->uri().c_str());
+    if (asset != nullptr) {
+        if (!checkAuth()) return;
+        sendDashboardAsset(*asset);
         return;
     }
 
-    String fullPath = "/adversary/dashboard" + path;
-
-    // Check if it's a dashboard file request
-    if (SDManager::getInstance().fileExists(fullPath.c_str())) {
-        // Require auth for dashboard files
-        if (!checkAuth()) return;
-        
-        String contentType = "text/plain";
-        if (path.endsWith(".html")) contentType = "text/html";
-        else if (path.endsWith(".css")) contentType = "text/css";
-        else if (path.endsWith(".js")) contentType = "application/javascript";
-        else if (path.endsWith(".png")) contentType = "image/png";
-        else if (path.endsWith(".jpg")) contentType = "image/jpeg";
-        else if (path.endsWith(".ico")) contentType = "image/x-icon";
-        
-        File file = SD.open(fullPath.c_str(), "r");
-        if (file) {
-            server_->streamFile(file, contentType);
-            file.close();
-            return;
-        }
-    }
-    
     String uri = server_->uri();
     
     // If it's an API request, require auth and return JSON 404
@@ -358,21 +359,11 @@ void ServerManager::handleNotFound() {
     LOG_D("SERVER", "Captive portal: %s (Host: %s)", uri.c_str(), host.c_str());
     
     if (settings.system.dashboardAuthEnabled) {
-        // Serve login landing page
-        if (SDManager::getInstance().fileExists("/adversary/dashboard/login.html")) {
-            File file = SD.open("/adversary/dashboard/login.html", "r");
-            if (file) {
-                server_->streamFile(file, "text/html");
-                file.close();
-                return;
-            }
-        }
-        // Fallback if login.html doesn't exist
-        server_->send(200, "text/html",
-            "<html><body style='background:#0c0c0c;color:#fff;font-family:sans-serif;text-align:center;padding:3rem;'>"
-            "<h1 style='color:#ff3e3e'>ADVERSARY</h1>"
-            "<p>Authentication required. <a href='/' style='color:#ff3e3e'>Sign In</a></p>"
-            "</body></html>");
+        // Serve the embedded login landing page (ADR-0168, slice-0169); always
+        // present in flash, so no SD read and no missing-file fallback.
+        const DashboardAsset* login =
+            resolveDashboardAsset(kDashboardAssets, kDashboardAssetCount, "/login.html");
+        sendDashboardAsset(*login);
         return;
     }
     

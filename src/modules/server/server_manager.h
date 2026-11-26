@@ -10,6 +10,8 @@
 #include <string>
 #include <memory>
 
+#include "dashboard_assets.h"
+
 #ifdef ESP32
 #include <WebServer.h>
 #include <ESPmDNS.h>
@@ -116,6 +118,9 @@ private:
     void serveFiles(const char* path, const char* category, bool minimal = false, const char* extension = nullptr);
     String urlDecode(String str);
     bool checkAuth();
+
+    // Send an embedded dashboard shell asset straight from flash (slice-0169).
+    void sendDashboardAsset(const DashboardAsset& asset);
 
     bool running_;
     uint32_t startTime_;
