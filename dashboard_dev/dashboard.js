@@ -41,7 +41,7 @@ class Dashboard {
         this.nav = document.getElementById('main-nav');
         this.views = document.querySelectorAll('.view');
         this.infoInterval = null;
-        this.themeNames = ['red-team', 'matrix', 't800', 'fallout', 'cyberpunk', 'm5stick'];
+        this.themeNames = ['red-team', 'matrix', 't800', 'fallout', 'cyberpunk', 'm5stick', 'tron'];
 
         this.init();
     }

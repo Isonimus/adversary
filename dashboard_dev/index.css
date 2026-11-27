@@ -87,6 +87,18 @@ body.theme-m5stick {
     --border-color: #402800;
 }
 
+/* Theme: Tron (electric cyan on black; only blue-identity preset) */
+body.theme-tron {
+    --bg-color: #000000;
+    --bg-secondary: #001a1a;
+    --accent: #00f0ff;
+    --accent-light: #80ffff;
+    --accent-dark: #008080;
+    --text-primary: #00f0ff;
+    --text-secondary: #009090;
+    --border-color: #003030;
+}
+
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap');
 
 * {
