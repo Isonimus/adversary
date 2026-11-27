@@ -84,19 +84,21 @@
                 <div class="card">
                     <h3>Captured Handshakes</h3>
                     <p class="stat-desc">Select a handshake to view location and metadata.</p>
-                    <table class="file-list">
-                        <thead>
-                            <tr>
-                                <th>Name</th>
-                                <th>Size</th>
-                                <th>Status</th>
-                                <th>GPS</th>
-                            </tr>
-                        </thead>
-                        <tbody id="handshake-list">
-                            <!-- Populated by JS -->
-                        </tbody>
-                    </table>
+                    <div class="table-wrap">
+                        <table class="file-list">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Size</th>
+                                    <th>Status</th>
+                                    <th>GPS</th>
+                                </tr>
+                            </thead>
+                            <tbody id="handshake-list">
+                                <!-- Populated by JS -->
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </section>
 
@@ -104,18 +106,20 @@
             <section id="captures" class="view">
                 <div class="card">
                     <h3>Session Captures</h3>
-                    <table class="file-list">
-                        <thead>
-                            <tr>
-                                <th>Name</th>
-                                <th>Size</th>
-                                <th>Type</th>
-                            </tr>
-                        </thead>
-                        <tbody id="capture-list">
-                            <!-- Populated by JS -->
-                        </tbody>
-                    </table>
+                    <div class="table-wrap">
+                        <table class="file-list">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Size</th>
+                                    <th>Type</th>
+                                </tr>
+                            </thead>
+                            <tbody id="capture-list">
+                                <!-- Populated by JS -->
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </section>
 
@@ -124,17 +128,19 @@
                 <div class="card">
                     <h3>Wardriving Sessions</h3>
                     <p class="stat-desc">Select a session to view captured networks.</p>
-                    <table class="file-list">
-                        <thead>
-                            <tr>
-                                <th>Session</th>
-                                <th>Size</th>
-                            </tr>
-                        </thead>
-                        <tbody id="wardriving-list">
-                            <!-- Populated by JS -->
-                        </tbody>
-                    </table>
+                    <div class="table-wrap">
+                        <table class="file-list">
+                            <thead>
+                                <tr>
+                                    <th>Session</th>
+                                    <th>Size</th>
+                                </tr>
+                            </thead>
+                            <tbody id="wardriving-list">
+                                <!-- Populated by JS -->
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </section>
 
@@ -157,7 +163,7 @@
                         </div>
                         <div class="form-group" style="display: flex; align-items: center; gap: 10px;">
                             <input type="checkbox" name="dashboardAuthEnabled" id="auth-enabled">
-                            <label for="auth-enabled" style="margin: 0;">Enable HTTP Basic Auth</label>
+                            <label for="auth-enabled" style="margin: 0;">Enable dashboard login</label>
                         </div>
                         <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 2rem 0;">
                         <div class="form-group">
