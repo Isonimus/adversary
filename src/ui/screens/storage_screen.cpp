@@ -313,7 +313,7 @@ void StorageScreen::drawRows(Canvas& canvas, int16_t top) {
             c.setCursor(4, rowY);
             c.print(p.label);
 
-            char rhs[28];
+            char rhs[40];
             uint16_t rhsColor;
             if (!row.ok) {
                 snprintf(rhs, sizeof rhs, "--");
