@@ -19,6 +19,7 @@
 #include "ui/components/toast_manager.h"
 #include "ui/screen_manager.h"
 #include "utils/handshake_utils.h"
+#include "utils/handshake_quality.h"
 #include "utils/handshake_save.h"
 #include "utils/btm_frame.h"
 #include "utils/btm_tx.h"
@@ -2093,12 +2094,12 @@ void HandshakeScreen::drawHandshakeList(Canvas& canvas) {
             ssid[16] = '\0';
             c.print(ssid);
 
-            // Quality indicator (estimated). A PMKID is fully crackable on its own, so it is
-            // 100%, not the 50% the message-count heuristic would give a lone-M1 entry.
+            // Quality indicator: crackability-based tier from the shared helper
+            // (slice-0173). The save path writes the same value into the manifest,
+            // so stored == displayed by construction.
             c.setCursor(c.width() - 30, y + theme::LIST_ROW_TEXT_DY);
-            int quality = hs.isPmkid ? 100
-                        : (hs.hasMsg1 && hs.hasMsg2 && hs.hasMsg3) ? 90
-                        : (hs.hasMsg2 ? 70 : 50);
+            const int quality = utils::computeHandshakeQuality(utils::HandshakeQualityFlags{
+                hs.hasMsg1, hs.hasMsg2, hs.hasMsg3, hs.hasMsg4, hs.isPmkid || hs.hadPmkid});
             c.print(quality);
             c.print("%");
         });

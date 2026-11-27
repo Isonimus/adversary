@@ -24,6 +24,7 @@
 #include "../modules/system/time_manager.h"
 #include "../config/config.h"
 #include "handshake_utils.h"
+#include "handshake_quality.h"
 #include "error_logger.h"
 #include "filename_utils.h"
 #include "hc22000_format.h"
@@ -263,11 +264,11 @@ inline SaveResult saveHandshakeToPcap(HandshakeCapture& capture,
     metadata.hasMsg3 = hs.hasMsg3;
     metadata.hasMsg4 = hs.hasMsg4;
     metadata.hasPMKID = capture.hasPMKID();
-    
-    // Quality: 25% per EAPOL message
-    int msgCount = (hs.hasMsg1 ? 1 : 0) + (hs.hasMsg2 ? 1 : 0) + 
-                   (hs.hasMsg3 ? 1 : 0) + (hs.hasMsg4 ? 1 : 0);
-    metadata.quality = msgCount * 25;
+
+    // Crackability-based tier shared with the list render (slice-0173): the stored
+    // byte and the displayed percent come from the same helper, so they can't drift.
+    metadata.quality = utils::computeHandshakeQuality(utils::HandshakeQualityFlags{
+        hs.hasMsg1, hs.hasMsg2, hs.hasMsg3, hs.hasMsg4, metadata.hasPMKID});
     metadata.signalStrength = hs.signalStrength;  // Use captured signal strength
     metadata.wpaSecStatus = hs.isWpaSecValid() ? WpaSecStatus::NOT_UPLOADED : WpaSecStatus::INCOMPLETE;
     
@@ -397,7 +398,8 @@ inline SaveResult savePMKIDToFile(const CapturedPMKID& pmkid, bool showToast = t
     strncpy(metadata.type, "PMKID", sizeof(metadata.type) - 1);
     metadata.hasPMKID = true;
     metadata.has22000 = true;  // the WPA*01 PMKID line was just written above
-    metadata.quality = 100;    // a PMKID is fully crackable on its own
+    metadata.quality = utils::computeHandshakeQuality(utils::HandshakeQualityFlags{
+        false, false, false, false, true});    // PMKID-only path: helper returns 100
     // PMKID-only has no beacon+M1+M2 pcap, so it is not WPA-SEC (pcap) uploadable; it is
     // pwncrack-uploadable via the .22000. Mark WPA-SEC INCOMPLETE, matching the 4-way path's
     // treatment of a capture that is not WPA-SEC valid.
