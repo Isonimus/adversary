@@ -12,7 +12,7 @@
   <a href="https://github.com/Isonimus/adversary/actions/workflows/ci.yml"><img src="https://github.com/Isonimus/adversary/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/Isonimus/adversary/actions/workflows/codeql.yml"><img src="https://github.com/Isonimus/adversary/actions/workflows/codeql.yml/badge.svg" alt="CodeQL"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
-  <img src="https://img.shields.io/badge/status-alpha-orange" alt="Status: alpha">
+  <img src="https://img.shields.io/badge/status-field--tested-brightgreen" alt="Status: field-tested">
 </p>
 
 <p align="center">
@@ -29,8 +29,8 @@
   <img src="docs/screenshots/menu-carousel.png" alt="The Adversary main menu running on an M5Stack Cardputer" width="480">
 </p>
 
-> [!WARNING]
-> **Adversary is currently in ALPHA** — actively developed and built for stability, but still incomplete. Expect missing or unfinished features and occasional breaking changes between releases (backward compatibility is kept where possible). Use at your own risk.
+> [!NOTE]
+> **The Adversary is pre-1.0 but field-tested.** Actively developed, feature-complete across the stable set listed below, and running on real hardware. Expect occasional breaking changes between releases while the project settles toward 1.0 (backward compatibility is kept where possible). Use at your own risk.
 
 ---
 
@@ -158,20 +158,21 @@ Requires a supported top-header radio cap (the CC1101+NRF24 multi-radio cap, or 
 
 ### Feature maturity
 
-The Adversary is in alpha. Everything builds and runs, but features differ in how much
-**on-hardware** mileage they have. This split is a guide, not a guarantee:
+The Adversary is pre-1.0 but field-tested. Everything builds and runs, and most features
+carry real **on-hardware** mileage; a short list still wants more field time. This split is
+a guide, not a guarantee:
 
 **Stable — field-tested**
 Scanner · Packet Sniffer · Handshake Capture (4-way / PMKID / EAPOL) + Auto Hunt · Deauth ·
 Evil Twin + captive portal + Traffic Proxy · Karma · Beacon Spam / Probe Flood · Wardriving +
-WiGLE · Captures Browser · Cloud sync (WPA-SEC / pwncrack) · Web Dashboard · BadUSB · Mouse
-Jiggler · IR TV-B-Gone · IR Record & Replay · BLE Scanner · Apple/BLE Spam · RFID Audit ·
-RFID Write / Clone · AP / BLE Proximity Trackers · Evil Twin client deauth / block.
+WiGLE · Captures Browser · Cloud sync (WPA-SEC / pwncrack) · Web Dashboard · BadUSB · BadBLE
+(HID keyboard / mouse / gamepad + DuckyScript) · BLE Identity Spoof · Mouse Jiggler · IR
+TV-B-Gone · IR Record & Replay · BLE Scanner · Apple/BLE Spam · RFID Audit · RFID Write /
+Clone · AP / BLE Proximity Trackers · Evil Twin client deauth / block.
 
 **Experimental — works, but hardware verification is still in progress**
 Sub-GHz OOK replay (transmit) · Sub-GHz FSK capture/replay · Sub-GHz Jamming · 2.4 GHz Spectrum
-Analyzer · BadBLE (reflash re-pair loop fixed via fresh per-session identity, pending on-device
-confirmation) · BLE Identity Spoof.
+Analyzer.
 
 ---
 
@@ -195,8 +196,9 @@ honesty, and Cardputer-native polish**.
 **Reasons to look elsewhere**
 - **No 5 GHz.** Like every ESP32-S3 firmware, The Adversary is 2.4 GHz only. If you need 5 GHz
   scanning/deauth, use dual-band hardware (RTL8720DN/BW16, or an ESP32-C5 board) instead.
-- **It's alpha, and young.** The incumbents have larger communities, more device coverage, and
-  years of field mileage. If you need battle-tested stability today, start there.
+- **Young project.** The incumbents have larger communities, more device coverage, and
+  years of field mileage. The Adversary is pre-1.0 and field-tested, but if you need the
+  largest ecosystem today, start there.
 
 ---
 

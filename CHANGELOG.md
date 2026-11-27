@@ -7,6 +7,20 @@ releases, this can be replaced by a git-tag-generated changelog.
 ---
 
 
+## 2026-11-27 (v0.12.0)
+
+Codename: **DISCOVERABILITY / SETUP**. Smoothing the install experience for first-time testers: the dashboard now ships inside the firmware image, the SD file tree is legible on the device, the dashboard login is form-based, and a batch of polish closes paper-cuts a tester notices in the first ten minutes.
+
+- **Dashboard baked into the firmware image.** A stock M5Burner or web-flasher install now serves a real dashboard without the operator having to clone the repo or unzip a release asset. SD overlay still wins when present, so hot-patching the dashboard in the field keeps working for operators who want that. (slice-0169; ADR-0168)
+- **Read-only SD "Storage" view on the device.** The on-device file tree is browsable from the menu with sizes and basic metadata, closing the "where are my handshakes" discoverability gap that external testers reported against v0.10.0. No write surface; this is a legibility tool, not an editor. (slice-0167; ADR-0166)
+- **Dashboard login is a real form, not Basic auth.** Replaced the browser Basic-auth popup with a session login page, so the dashboard looks and behaves like a normal web app instead of a dev tool. (slice-0171; ADR-0170)
+- **Dashboard reads cleanly on phones.** Horizontal overflow on the handshake list below ~400 px viewport is fixed by scope-containing the tables, so a tester opening the dashboard from their phone sees the data instead of a horizontal scroll bar. (slice-0172)
+- **Handshake quality tier is stored == displayed.** A single crackability-based helper decides the quality number both at save time and at render time, replacing a save-path formula (`msgCount * 25`) and a list-render heuristic (`M2 ? 70 : 50`) that disagreed with each other on the same capture. A full 4-way no longer renders as 90% while being stored as 100, and a lone M2 fragment stops reading as 70% when it is not crackable. (slice-0173)
+- **Tron theme carries over to the dashboard.** The `ThemePreset::TRON` device palette was missing from the dashboard CSS and theme-name list, so a Tron-themed device silently served a red-accented dashboard. The dashboard now ships the Tron palette and lists it in Settings. (slice-0175)
+
+Internal: `arduino_captive`'s credential-get path stopped copying the fixed credentials array into a fresh `std::vector` on every Evil Twin / Karma UI tick; converters now iterate the array directly and reserve the static destination (slice-0174, closing the last Boyscout from the RAM-reclaim audit). Native suite moved 1162 to 1214 over the cycle: +12 for the handshake-quality helper's regression battery, the remainder across the storage-view and dashboard-embed work plus incidental coverage.
+
+
 ## 2026-11-21 (v0.11.0-alpha)
 
 Codename: **TARGETED HUNT**. v0.10.0 taught the hunt to pick *which attack* per target (PMF-aware). This release teaches it to pick *which targets*: a live per-target score orders selection, an exponential backoff retires AP's that keep not yielding, and a rolling status line finally says what the engine is doing.
