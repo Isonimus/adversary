@@ -301,6 +301,7 @@ const ArduinoCapturedCredential* ArduinoCaptivePortal::getCredentialsArray() con
 
 std::vector<ArduinoCapturedCredential> ArduinoCaptivePortal::getCredentials() const {
     std::vector<ArduinoCapturedCredential> result;
+    result.reserve(credentialCount_);
     for (size_t i = 0; i < credentialCount_; i++) {
         result.push_back(credentialsArray_[i]);
     }

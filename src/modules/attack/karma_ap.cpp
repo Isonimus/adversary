@@ -716,14 +716,17 @@ const std::vector<ap::CapturedCredential>& KarmaAP::getCredentials() const {
     static std::vector<ap::CapturedCredential> convertedCreds;
     convertedCreds.clear();
     
-    const auto& arduinoCreds = arduinoPortal_.getCredentials();
-    
+    const ap::ArduinoCapturedCredential* arduinoCreds = arduinoPortal_.getCredentialsArray();
+    const size_t count = arduinoPortal_.getCredentialCount();
+    convertedCreds.reserve(count);
+
 #ifndef UNIT_TEST
     LOG_D("KARMA", "getCredentials: arduinoPortal_=%p, has %zu creds, stats says %lu",
-          (void*)&arduinoPortal_, arduinoCreds.size(), stats_.credentialsCaptured);
+          (void*)&arduinoPortal_, count, stats_.credentialsCaptured);
 #endif
-    
-    for (const auto& cred : arduinoCreds) {
+
+    for (size_t i = 0; i < count; ++i) {
+        const auto& cred = arduinoCreds[i];
         ap::CapturedCredential converted;
         strncpy(converted.username, cred.username, sizeof(converted.username) - 1);
         strncpy(converted.password, cred.password, sizeof(converted.password) - 1);
